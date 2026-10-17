@@ -1,0 +1,37 @@
+# Verify all pushes and pull requests; superseded CI runs may be cancelled.
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    uses: ./.github/workflows/build.yml
+  container:
+    name: Development container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build shared development image
+        # Plain docker run has no devcontainer client to remap ownership. Match
+        # the runner's UID so the nonroot image user can write the source mount.
+        run: >-
+          docker build --file .devcontainer/Dockerfile
+          --build-arg USER_UID="$(id -u)" --tag clutch-dev:ci .devcontainer
+      - name: Verify mounted workspace
+        run: >-
+          docker run --rm
+          --mount "type=bind,source=${{ github.workspace }},target=/home/clutch-dev/workspace"
+          clutch-dev:ci bash .devcontainer/post-create.sh

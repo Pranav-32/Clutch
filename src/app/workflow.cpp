@@ -15,6 +15,7 @@
 
 #include "core/build_directory.hpp"
 #include "core/options.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/terminal.hpp"
 
@@ -46,7 +47,7 @@ namespace clutch
             throw std::runtime_error("project name must contain only letters, digits, "
                 "'_' or '-'; use --name");
 
-        if (fs::exists(root / "clutch.toml"))
+        if (fs::exists(root / layout::manifest))
             throw std::runtime_error("clutch.toml already exists");
 
         // Preserve existing code. Scaffold an entry only for an empty source
@@ -70,16 +71,20 @@ namespace clutch
 
         // Every scaffold uses separate profile directories and an explicit standard.
         write_if_changed(
-            root / "clutch.toml",
+            root / layout::manifest,
             "[project]\nname = \"" + name + "\"\nversion = \"0.1.0\"\n" +
             (c
                  ? "language = \"c\"\nstd = 11\n"
                  : "language = \"cpp\"\nstd = 17\n") +
             "\n[build]\ngenerator = \"ninja\"\n"
-            "\n[profile.debug]\nbuild_dir = \"Clutch-build-debug\"\n"
-            "\n[profile.release]\nbuild_dir = \"Clutch-build-release\"\n");
+            "\n[profile.debug]\nbuild_dir = \"" +
+            layout::default_build_directory(false) +
+            "\"\n\n[profile.release]\nbuild_dir = \"" +
+            layout::default_build_directory(true) + "\"\n");
+
         if (!fs::exists(root / ".gitignore"))
-            write_if_changed(root / ".gitignore", "/.clutch/\n/Clutch-build-*/\n");
+            write_if_changed(root / ".gitignore", std::string("/") +
+                layout::environment + "/\n/" + layout::build_prefix + "*/\n");
 
         status("Created", name + " at " + root.string());
     }
@@ -88,7 +93,7 @@ namespace clutch
     void clean_project(const Options& options)
     {
         const auto root = fs::canonical(options.root);
-        if (!fs::is_regular_file(root / "clutch.toml"))
+        if (!fs::is_regular_file(root / layout::manifest))
             throw std::runtime_error("clean requires a project containing clutch.toml");
 
         // Resolve the path directly from TOML so clean can remove stale

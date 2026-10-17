@@ -15,6 +15,7 @@
 
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 
 #include <map>
@@ -96,6 +97,6 @@ void write_graph_visualization(const Graph &graph) {
   }
 
   dot << "}\n";
-  write_if_changed(graph.project.build / "build-graph.dot", dot.str());
+  write_if_changed(graph.project.build / layout::build_graph, dot.str());
 }
 } // namespace clutch

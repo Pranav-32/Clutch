@@ -15,6 +15,7 @@
 
 #include "core/options.hpp"
 #include "core/project.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include <toml.hpp>
 
@@ -40,7 +41,7 @@ fs::path resolve_build_directory(const Options &options,
   }
 
   if (configured.empty())
-    configured = std::string("Clutch-build-") + profile;
+    configured = layout::default_build_directory(options.release);
 
   auto directory = fs::absolute(root / configured).lexically_normal();
   if (directory != directory.root_path() && directory.filename().empty())
@@ -63,7 +64,7 @@ bool contains(const fs::path &parent, const fs::path &child) {
 /// discovery.
 fs::path build_directory(const Options &options) {
   const auto root = fs::canonical(options.root);
-  const auto doc = toml::parse_file((root / "clutch.toml").string());
+  const auto doc = toml::parse_file((root / layout::manifest).string());
   return resolve_build_directory(options, root, doc);
 }
 
@@ -75,7 +76,7 @@ void validate_build_directory(const fs::path &root,
     throw std::runtime_error(
         "build directory cannot be the project root or its ancestor");
 
-  for (const auto *reserved : {"src", "include", ".git", ".idea", ".clutch"})
+  for (const auto *reserved : {"src", "include", ".git", ".idea", layout::environment})
     if (contains(root / reserved, directory))
       throw std::runtime_error("build directory cannot be inside " +
                                std::string(reserved));
@@ -92,7 +93,7 @@ void validate_build_directory(const fs::path &root,
   }
 
   // The marker binds this output directory to the physical source root.
-  const auto marker = directory / ".clutch-build-owner";
+  const auto marker = directory / layout::owner_marker;
   if (fs::is_symlink(fs::symlink_status(marker)))
     throw std::runtime_error("refusing redirected build ownership marker");
 
@@ -133,7 +134,7 @@ void prepare_build_directory(const Project &project) {
           "build directory contains an include directory: " + include.string());
 
   fs::create_directories(project.build);
-  write_if_changed(project.build / ".clutch-build-owner",
+  write_if_changed(project.build / layout::owner_marker,
                    project.root.generic_string() + "\n");
 }
 } // namespace clutch

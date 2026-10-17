@@ -230,9 +230,27 @@ compilation database alone cannot describe a complete target/link model.
 
 ## Setup and verification inventory
 
+Shared project paths live in `src/core/project_layout.hpp`: manifest, profile
+directory prefix, ownership marker, persisted state and generated metadata.
+Configuration, scaffolding and generators use these names together. Compiler
+flags and generator format tokens stay with their respective drivers.
+
+The root VERSION is the release identity source. `cmake/ClutchVersion.cmake`
+validates it and combines it with Git provenance; `cmake/GenerateVersion.cmake`
+is the build-time entry point. `src/core/version.hpp.in` becomes a private
+generated header in the build tree. The installed native CLI embeds that string
+and never requires Git at runtime. See [versions and releases](releases.md).
+
 | File | Purpose and maintenance |
 | --- | --- |
 | [`CMakeLists.txt`](../CMakeLists.txt) | C++17 development target, private/vendor include roots, warnings, static MSVC runtime, executable/license installation, and CTest registration. Synchronize its source list with new modules. |
+| [`VERSION`](../VERSION), [`cmake/ClutchVersion.cmake`](../cmake/ClutchVersion.cmake), [`cmake/GenerateVersion.cmake`](../cmake/GenerateVersion.cmake), [`src/core/version.hpp.in`](../src/core/version.hpp.in) | Canonical release version, Git/source-archive identity, changed-content generation and CLI header template. |
+| [`src/core/project_layout.hpp`](../src/core/project_layout.hpp) | Shared layout contract and default profile-directory policy. |
+| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`build.yml`](../.github/workflows/build.yml) | Push/PR checks, reusable native matrix, container verification and downloadable packages. |
+| [`.github/workflows/release.yml`](../.github/workflows/release.yml) | Tagged-commit validation, full native verification, checksums and draft-first release publication. |
+| [`.github/workflows/version.yml`](../.github/workflows/version.yml), [`release-please-config.json`](../.github/release-please-config.json), [`release-please-manifest.json`](../.github/release-please-manifest.json) | Conventional Commit version/changelog proposals and automation state; no automatic merge or publication. |
+| [`.github/scripts/ci.py`](../.github/scripts/ci.py), [`release.py`](../.github/scripts/release.py) | Native build/test/install driver and release validation, archives, license checks, streaming checksums and publication gates. Python is CI tooling only. |
+| [`tests/test_release.py`](../tests/test_release.py), [`test_versioning.py`](../tests/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
 | [`examples/single-file/clutch.toml`](../examples/single-file/clutch.toml), [`main.cpp`](../examples/single-file/main.cpp) | C++17 single-file entry source and separate debug/release profiles. |
 | [`examples/multi-file/clutch.toml`](../examples/multi-file/clutch.toml), [`src/main.cpp`](../examples/multi-file/src/main.cpp), [`greeting.hpp`](../examples/multi-file/src/greeting.hpp), [`greeting.cpp`](../examples/multi-file/src/greeting.cpp), [`tests/greeting_test.cpp`](../examples/multi-file/tests/greeting_test.cpp) | Explicit application/test sources, colocated headers, shared implementation and runtime arguments. |
 | [`examples/c-project/clutch.toml`](../examples/c-project/clutch.toml), [`main.c`](../examples/c-project/main.c) | C11 executable built with a C compiler. |
@@ -251,6 +269,7 @@ compilation database alone cannot describe a complete target/link model.
 | [`.clang-format-ignore`](../.clang-format-ignore) | Excludes generated trees, fixtures and vendored code from formatting. |
 | [`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json) | Shared development image, source mount, nonroot user, IDE settings, and initialization. |
 | [`.devcontainer/Dockerfile`](../.devcontainer/Dockerfile) | Consistent Ubuntu development environment across host machines, including compiler/build/debug/LLVM tools and CLion backend dependencies. |
+| [`.devcontainer/packages.txt`](../.devcontainer/packages.txt), [`install-packages.sh`](../.devcontainer/install-packages.sh), [`create-user.sh`](../.devcontainer/create-user.sh) | Commented distribution package inventory, verified LLVM installation and reusable nonroot account setup. |
 | [`.devcontainer/post-create.sh`](../.devcontainer/post-create.sh) | Trusts only the mounted Git checkout inside Docker, then delegates to the shared verification runner with Clang, `build-container`, and IDE compilation-database export enabled. |
 | [`.devcontainer/.dockerignore`](../.devcontainer/.dockerignore) | Admits only image build metadata from the tools-only `.devcontainer/` build context; project sources are mounted at runtime. |
 | [`.gitattributes`](../.gitattributes) | Text normalization, LF for Linux setup files, and binary artifact rules. |
@@ -268,9 +287,11 @@ compilation database alone cannot describe a complete target/link model.
 | [`docs/static-analysis.md`](static-analysis.md) | clang-tidy policy, compatibility checks, databases, and reviewed fixes. |
 | [`docs/manifest.md`](manifest.md) | Complete implemented manifest schema, defaults, validation, compiler mappings, examples and migration rules. |
 | [`docs/development-container.md`](development-container.md) | Docker prerequisites, CLion/VS Code setup, direct Docker commands, maintenance, and validation status. |
+| [`docs/releases.md`](releases.md), [`docs/CHANGELOG.md`](CHANGELOG.md) | Version policy, automation setup, native support matrix, release procedure and generated release history. |
 
 The root `.clang-format` is already documented and omitted from this inventory.
 The Docker image and Linux post-create workflow passed verification on 2026-10-18
-with Clang 22: all four CTest checks passed, including the POSIX integration suite
-and Graphviz rendering. Manifest examples and isolated script checks also passed.
-IDE attachment and native macOS/Xcode execution remain separate validation work.
+with Clang 22, including POSIX integration and Graphviz. GCC 15 and Windows MSVC
+also passed native verification, examples and packaging. Git version and release
+tooling have separate regression checks. IDE attachment, hosted workflow runs
+and native macOS/Xcode execution remain separate validation work.

@@ -1,5 +1,8 @@
 # The image installs tools; project sources and setup scripts are mounted later.
-# Only build metadata is needed in the .devcontainer/ image build context.
+# Admit only image metadata and installation inputs from this build context.
 *
 !Dockerfile
 !.dockerignore
+!install-packages.sh
+!create-user.sh
+!packages.txt

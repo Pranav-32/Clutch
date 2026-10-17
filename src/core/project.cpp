@@ -15,6 +15,7 @@
 
 #include "core/build_directory.hpp"
 #include "core/options.hpp"
+#include "core/project_layout.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
@@ -102,7 +103,7 @@ Project load_project(const Options &options) {
   // checks.
   Project p;
   p.root = fs::canonical(options.root);
-  const auto doc = toml::parse_file((p.root / "clutch.toml").string());
+  const auto doc = toml::parse_file((p.root / layout::manifest).string());
   if (doc.contains("package"))
     throw std::runtime_error("rename [package] to [project] in clutch.toml");
 

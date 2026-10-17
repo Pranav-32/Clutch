@@ -1,7 +1,7 @@
 {
   // JSON with Comments is supported by the Dev Container specification.
   // See docs/development-container.md for setup and lifecycle commands.
-  "name": "Clutch",
+  "name": "Clutch Development Container",
   "build": {
     // Keep the tools-only image context here so .dockerignore applies directly.
     "dockerfile": "Dockerfile",
@@ -39,7 +39,7 @@
       "settings": {
         // Keep container binaries and IDE metadata separate from native builds.
         "cmake.buildDirectory": "${workspaceFolder}/build-container",
-        "clangd.path": "/usr/bin/clangd-22",
+        "clangd.path": "/usr/local/bin/clangd",
         "clangd.arguments": [
           "--compile-commands-dir=build-container"
         ],

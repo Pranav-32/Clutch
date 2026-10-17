@@ -1,0 +1,26 @@
+# Distribution packages for building, testing and debugging Clutch.
+# One package per line; comments and empty lines are ignored by the installer.
+ca-certificates
+cmake
+curl
+fontconfig
+g++
+gcc
+gdb
+gh
+git
+gnupg
+graphviz
+# Libraries needed by CLion's remote IDE backend.
+libfreetype6
+libxi6
+libxext6
+libxrender1
+libxtst6
+make
+ninja-build
+procps
+python3
+sudo
+unzip
+xz-utils

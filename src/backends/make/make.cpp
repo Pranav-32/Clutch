@@ -15,6 +15,7 @@
 
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
@@ -158,8 +159,8 @@ std::set<fs::path> collect_headers(const Graph &graph) {
       if (entry.is_directory()) {
         if (const auto name = entry.path().filename().string();
           entry.is_symlink() || entry.path() == graph.project.build ||
-          name == ".git" || name == ".clutch" ||
-          name.rfind("Clutch-build-", 0) == 0)
+          name == ".git" || name == layout::environment ||
+          name.rfind(layout::build_prefix, 0) == 0)
           iterator.disable_recursion_pending();
 
         continue;
@@ -316,7 +317,7 @@ void generate_make(const Graph &graph,
     // GNU Make remakes an out-of-date loaded Makefile and reparses its new
     // rules.
     make << "Makefile: "
-        << make_path(graph.project.root / "clutch.toml", build, gnu) << ' '
+        << make_path(graph.project.root / layout::manifest, build, gnu) << ' '
         << make_path(clutch_executable, build, gnu) << "\n\t"
         << recipe(regenerate_command(graph, options, clutch_executable))
         << "\n";

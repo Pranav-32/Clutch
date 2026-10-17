@@ -20,6 +20,7 @@
 
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
@@ -265,7 +266,7 @@ void generate_ninja(const Graph &graph,
       << ninja_value(command_line(regenerate))
       << "\n  generator = 1\n  restat = 1\n  description = Configuring "
       << p.name << "\n";
-  ninja << "build build.ninja: regenerate " << path(p.root / "clutch.toml")
+  ninja << "build build.ninja: regenerate " << path(p.root / layout::manifest)
       << "\n";
   ninja << "default " << path(p.output) << "\n";
 

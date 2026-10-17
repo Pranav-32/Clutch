@@ -15,6 +15,7 @@
 
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 
 #include <sstream>
@@ -75,7 +76,7 @@ void write_compilation_database(const Graph &graph) {
   }
 
   database << "\n]\n";
-  write_if_changed(graph.project.build / "compile_commands.json",
+  write_if_changed(graph.project.build / layout::compilation_database,
                    database.str());
 }
 } // namespace clutch

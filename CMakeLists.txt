@@ -1,7 +1,25 @@
 # Bootstrap and develop Clutch with CMake; generated Clutch projects use their
 # selected backend directly and do not depend on this bootstrap project.
 cmake_minimum_required(VERSION 3.20)
-project(Clutch VERSION 0.1.0 LANGUAGES CXX)
+
+# Numeric project metadata and Git-aware CLI identity share the root VERSION.
+include(cmake/ClutchVersion.cmake)
+clutch_read_version("${CMAKE_CURRENT_SOURCE_DIR}" CLUTCH_VERSION)
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" CLUTCH_VERSION_CORE "${CLUTCH_VERSION}")
+project(Clutch VERSION "${CLUTCH_VERSION_CORE}" LANGUAGES CXX)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+clutch_generate_version("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+
+# A commit, new tag or dirty edit must update --version without a manual
+# reconfiguration. Changed-content writes keep unchanged builds incremental.
+add_custom_target(clutch_version
+  COMMAND "${CMAKE_COMMAND}"
+    "-DCLUTCH_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+    "-DCLUTCH_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateVersion.cmake"
+  BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/generated/core/version.hpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/version.txt"
+  VERBATIM)
 
 # Build one native CLI executable. Vendored dependencies are header-only.
 add_executable(clutch
@@ -25,22 +43,28 @@ add_executable(clutch
   src/platform/terminal.cpp
   src/toolchains/toolchain.cpp
 )
+add_dependencies(clutch clutch_version)
 
-# C++17 is the implementation baseline, independent of a user's project standard.
-target_compile_features(clutch PRIVATE cxx_std_17)
+# Keep executable policies consistent as more test/tool targets are introduced.
+# C++17 is Clutch's baseline, independent of a user's project standard.
+function(clutch_target_defaults target)
+  target_compile_features(${target} PRIVATE cxx_std_17)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+  # Static MSVC CRT permits distribution without a VC redistributable install.
+  if(MSVC)
+    set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endfunction()
+
+clutch_target_defaults(clutch)
 # Internal module headers are co-located with their sources; src/ anchors
 # cross-module includes. Treat unchanged upstream headers as system dependencies.
-target_include_directories(clutch PRIVATE src)
+target_include_directories(clutch PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(clutch SYSTEM PRIVATE third_party)
-
-# Use a static MSVC runtime so distributed executables need no VC redistributable.
-# Keep strict compiler diagnostics local to this target rather than global flags.
-if(MSVC)
-  set_property(TARGET clutch PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-  target_compile_options(clutch PRIVATE /W4 /permissive- /utf-8)
-else()
-  target_compile_options(clutch PRIVATE -Wall -Wextra -Wpedantic)
-endif()
 
 # Standard installation places the executable under the selected prefix's bin/.
 install(TARGETS clutch RUNTIME DESTINATION bin)
@@ -57,6 +81,8 @@ include(CTest)
 if(BUILD_TESTING)
   add_test(NAME clutch.help COMMAND clutch --help)
   add_test(NAME clutch.version COMMAND clutch --version)
+  set_tests_properties(clutch.version PROPERTIES
+    PASS_REGULAR_EXPRESSION "clutch ${CLUTCH_VERSION}")
 
   # Verify that static MSVC builds start without compiler DLL search paths.
   if(WIN32 AND MSVC)
@@ -78,14 +104,7 @@ if(BUILD_TESTING)
     src/core/graph_visualization.cpp
     src/platform/files.cpp
     src/platform/process.cpp)
-  target_include_directories(clutch_graph_tests PRIVATE src)
-  target_compile_features(clutch_graph_tests PRIVATE cxx_std_17)
-  if(MSVC)
-    set_property(TARGET clutch_graph_tests PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    target_compile_options(clutch_graph_tests PRIVATE /W4 /permissive- /utf-8)
-  else()
-    target_compile_options(clutch_graph_tests PRIVATE -Wall -Wextra -Wpedantic)
-  endif()
+  clutch_target_defaults(clutch_graph_tests)
   find_program(CLUTCH_GRAPHVIZ NAMES dot)
   if(CLUTCH_GRAPHVIZ)
     add_test(NAME clutch.graph

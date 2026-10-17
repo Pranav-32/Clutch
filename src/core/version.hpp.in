@@ -1,0 +1,13 @@
+/*
+ * Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+/** @file
+ * @brief Generated release/Git identity; edit VERSION or create a release tag.
+ */
+#pragma once
+
+namespace clutch {
+inline constexpr auto version = "@CLUTCH_VERSION@";
+}  // namespace clutch

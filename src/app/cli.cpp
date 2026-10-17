@@ -18,6 +18,7 @@
 #include "core/configuration_store.hpp"
 #include "core/configure.hpp"
 #include "core/options.hpp"
+#include "core/version.hpp"
 #include "platform/process.hpp"
 #include "platform/terminal.hpp"
 #include <CLI11.hpp>
@@ -32,7 +33,7 @@ int run_cli(const int argc, char *const *const argv) {
   // Positional configuration options live on the root command; execution-only
   // subcommands consume the saved profile instead of overriding its tools.
   CLI::App app{"Clutch: a small native C and C++ build system"};
-  app.set_version_flag("--version", "clutch 0.1.0");
+  app.set_version_flag("--version", "clutch " + std::string(version));
   app.require_subcommand(0, 1);
   Options options;
   std::string source_directory;

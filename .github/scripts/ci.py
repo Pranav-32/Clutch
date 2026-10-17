@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+"""Build, test, install and package one native CI target using argument arrays."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import tempfile
+import tomllib
+
+from release import ROOT, TARGETS, package
+
+# Allow slow hosted runners five minutes for each compiler-backed CTest suite.
+TEST_TIMEOUT_SECONDS = 300
+
+
+def run(*command, cwd=ROOT):
+    """Log exact argument boundaries and retain native failure exit status."""
+    print(f'Running: {command!r}', flush=True)
+    subprocess.run([str(argument) for argument in command], cwd=cwd, check=True)
+
+
+def require_tool(name):
+    """Resolve a single executable name/path, never a shell expression."""
+    if resolved := shutil.which(name):
+        return str(Path(resolved).resolve())
+    raise RuntimeError(f'required tool not found: {name}')
+
+
+def test_examples(binary, cc, cxx, generator):
+    """Exercise shipped projects in both profiles without polluting examples/."""
+    with tempfile.TemporaryDirectory(prefix='clutch examples ') as temporary:
+        # Resolve macOS /var aliases before Clutch's build ownership checks.
+        work = Path(temporary).resolve()
+        for manifest in sorted((ROOT / 'examples').glob('*/clutch.toml')):
+            project = work / manifest.parent.name
+            settings = tomllib.loads(manifest.read_text(encoding='utf-8'))
+            shutil.copytree(manifest.parent, project,
+                            ignore=shutil.ignore_patterns('Clutch-build-*', '.clutch'))
+            for profile in ((), ('--release',)):
+                run(binary, '.', '--generator', generator, '--cc', cc, '--cxx', cxx,
+                    *profile, cwd=project)
+                run(binary, 'build', *profile, cwd=project)
+                run(binary, 'run', *profile, cwd=project)
+                if settings.get('test'):
+                    run(binary, 'test', *profile, cwd=project)
+                if manifest.parent.name == 'multi-file':
+                    run(binary, 'run', *profile, '--', 'Clutch contributor', cwd=project)
+
+
+def build(target, build_dir, output):
+    """Require host-specific integration suites before producing a release asset."""
+    windows = target.startswith('windows-')
+    expected_system = 'Windows' if windows else ('Darwin' if target.startswith('macos-') else 'Linux')
+    expected_machine = 'arm64' if '-arm64-' in target else 'x86_64'
+    machine = platform.machine().lower().replace('amd64', 'x86_64').replace('aarch64', 'arm64')
+    if platform.system() != expected_system or machine != expected_machine:
+        raise ValueError(f'{target} does not match host {platform.system()}/{machine}')
+    cc = require_tool(os.environ.get('CC', 'cl' if windows else 'cc'))
+    cxx = require_tool(os.environ.get('CXX', 'cl' if windows else 'c++'))
+    ninja = require_tool('ninja')
+    command = ['cmake', '-S', ROOT, '-B', build_dir, '-G', 'Ninja',
+               '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=ON',
+               f'-DCMAKE_CXX_COMPILER={cxx}', f'-DCMAKE_MAKE_PROGRAM={ninja}']
+    required = {'clutch.help', 'clutch.version', 'clutch.graph'}
+    if windows:
+        command.append(f'-DCLUTCH_TEST_NINJA={ninja}')
+        required.update(('clutch.standalone', 'clutch.integration'))
+    else:
+        command.extend((f'-DCLUTCH_TEST_CC={cc}', f'-DCLUTCH_TEST_MAKE={require_tool("gmake" if platform.system() == "Darwin" else "make")}'))
+        required.add('clutch.posix-integration')
+    run(*command)
+    run('cmake', '--build', build_dir, '--parallel', os.environ.get('CLUTCH_BUILD_JOBS', '2'))
+    registered = json.loads(subprocess.check_output(
+        ['ctest', '--test-dir', str(build_dir), '--show-only=json-v1'], text=True
+    ))
+    missing = required - {test['name'] for test in registered['tests']}
+    if missing:
+        raise RuntimeError(f'required CTest suites were not registered: {missing}')
+    run('ctest', '--test-dir', build_dir, '--output-on-failure', '--timeout', str(TEST_TIMEOUT_SECONDS))
+    binary = build_dir / ('clutch.exe' if windows else 'clutch')
+    if windows:
+        run('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            ROOT / 'tests/native-generators.ps1', '-Clutch', binary)
+    test_examples(binary, cc, cxx, 'ninja')
+    if platform.system() == 'Darwin':
+        test_examples(binary, cc, cxx, 'xcode')
+    # A temporary install tree prevents stale files from entering an archive.
+    with tempfile.TemporaryDirectory(prefix='clutch install ') as temporary:
+        stage = Path(temporary).resolve()
+        run('cmake', '--install', build_dir, '--prefix', stage)
+        version = (build_dir / 'generated/version.txt').read_text(encoding='utf-8').strip()
+        package(stage, output, target, version)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--target', required=True, choices=TARGETS)
+    parser.add_argument('--build-dir', type=Path, default=ROOT / 'build-ci')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist')
+    args = parser.parse_args()
+    build(args.target, args.build_dir.resolve(), args.output.resolve())

@@ -21,6 +21,7 @@
 #include "backends/backend.hpp"
 #include "core/options.hpp"
 #include "core/project.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 #include <toml.hpp>
@@ -68,7 +69,7 @@ std::string choose(const std::string &explicit_name,
 /// Resolve only languages present in the application or tests, then check
 /// drivers.
 Toolchain resolve_toolchain(const Options &options, const Project &project) {
-  const auto cache_path = project.build / "toolchain.toml";
+  const auto cache_path = project.build / layout::toolchain_cache;
   toml::table cache;
   if (fs::exists(cache_path))
     cache = toml::parse_file(cache_path.string());
@@ -147,6 +148,6 @@ void save_toolchain(const Toolchain &tools, const Project &project) {
   const toml::table cache{{"cc", tools.cc}, {"cxx", tools.cxx}};
   std::ostringstream text;
   text << cache << '\n';
-  write_if_changed(project.build / "toolchain.toml", text.str());
+  write_if_changed(project.build / layout::toolchain_cache, text.str());
 }
 } // namespace clutch

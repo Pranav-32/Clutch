@@ -1,6 +1,8 @@
 # Local CMake output trees (terminal and IDE configurations).
 /build/
 /build-*/
+/dist/
+__pycache__/
 /cmake-build-*/
 
 # Clutch dependency sandbox and default per-profile output directories.

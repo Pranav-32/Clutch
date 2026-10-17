@@ -34,6 +34,11 @@ LICENSE text eol=lf
 # Build systems and configurations
 CMakeLists.txt text eol=lf
 *.cmake text eol=lf
+*.in text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+VERSION text eol=lf
 *.json text eol=lf
 *.txt text eol=lf
 .gitignore text eol=lf

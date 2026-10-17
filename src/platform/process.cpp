@@ -230,6 +230,12 @@ namespace clutch
         CloseHandle(pi.hProcess);
         return static_cast<int>(code);
 #else
+        // Preserve conventional shell statuses for child setup/exec failures and
+        // signal termination, so callers receive familiar process exit codes.
+        constexpr auto child_directory_failure = 126;
+        constexpr auto child_execution_failure = 127;
+        constexpr auto signal_exit_status_base = 128;
+
         const auto pid = fork();
         if (pid < 0)
             throw std::runtime_error("fork failed");
@@ -240,7 +246,7 @@ namespace clutch
         if (pid == 0)
         {
             if (chdir(directory.c_str()) != 0)
-                _exit(126);
+                _exit(child_directory_failure);
 
             std::vector<char*> argv;
             for (const auto& arg : args)
@@ -248,7 +254,7 @@ namespace clutch
 
             argv.push_back(nullptr);
             execvp(argv.front(), argv.data());
-            _exit(127);
+            _exit(child_execution_failure);
         }
 
         // Interrupted waits are retried; signal termination uses the shell
@@ -258,7 +264,8 @@ namespace clutch
             if (errno != EINTR)
                 throw std::runtime_error("waitpid failed");
 
-        return WIFEXITED(code) ? WEXITSTATUS(code) : 128 + WTERMSIG(code);
+        return WIFEXITED(code) ? WEXITSTATUS(code)
+                               : signal_exit_status_base + WTERMSIG(code);
 #endif
     }
 } // namespace clutch

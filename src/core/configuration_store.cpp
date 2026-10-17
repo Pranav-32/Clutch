@@ -16,6 +16,7 @@
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include <toml.hpp>
 
@@ -40,7 +41,7 @@ constexpr auto hash64_hex_digits =
 /// Hash manifest bytes so even timestamp-preserving edits invalidate saved
 /// state.
 std::string manifest_signature(const fs::path &root) {
-  if (std::ifstream input(root / "clutch.toml", std::ios::binary); input) {
+  if (std::ifstream input(root / layout::manifest, std::ios::binary); input) {
     // This is a change detector, not a security checksum.
     auto hash = hashing::fnv1a64_offset_basis;
     for (auto current = std::istreambuf_iterator(input);
@@ -177,7 +178,7 @@ void save_configuration(const Graph &graph, const Options &options) {
   data.insert("targets", std::move(targets));
   std::ostringstream text;
   text << data << '\n';
-  write_if_changed(project.build / "configuration.toml", text.str());
+  write_if_changed(project.build / layout::configuration, text.str());
 }
 
 /// Restore only current, owned, location-matching configuration and revalidate
@@ -187,7 +188,7 @@ Graph load_configuration(const Options &options) {
   const auto directory = build_directory(options);
   validate_build_directory(root, directory, true);
 
-  const auto path = directory / "configuration.toml";
+  const auto path = directory / layout::configuration;
   const auto configure_hint = "run clutch \"" + root.string() + "\"" +
                               (options.release ? " --release" : "");
   if (!fs::is_regular_file(path))

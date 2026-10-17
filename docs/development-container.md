@@ -14,7 +14,7 @@ workflow; Windows and macOS generators also need their respective native tools.
 
 ## Image, container and workspace
 
-The IDE display name is **Clutch**. Its Docker name is
+The IDE display name is **Clutch Development Container**. Its Docker name is
 `clutch-development-container`; Docker container names cannot contain spaces.
 `devcontainer.json` supplies that name through `runArgs`. The fixed Docker name
 allows one such container per Docker engine; use a different name when working
@@ -27,6 +27,34 @@ changes the same files on the host. A bare Dockerfile run from an IDE does not
 apply `devcontainer.json`, its workspace mount or its initialization command.
 An empty `/home/clutch-dev/workspace` therefore indicates a missing mount, not an absent
 compiler installation.
+
+## Maintain the image
+
+The setup follows the useful separation in
+[CMake's development container](https://github.com/Kitware/CMake/tree/master/.devcontainer):
+the Dockerfile describes image layers, a package list describes installed tools,
+and focused scripts handle installation and nonroot user creation. Clutch keeps
+its own build engine, tests and GitHub workflow. Project sources remain mounted.
+
+- `packages.txt` lists distribution packages, one per line, with comments.
+- `install-packages.sh` installs that list, checks LLVM's signing fingerprint,
+  adds the scoped repository and creates stable command links.
+- `create-user.sh` reuses or creates the requested nonroot UID and source mount.
+- `post-create.sh` verifies the mounted checkout through the shared test runner.
+
+`LLVM_VERSION` is the single LLVM major-version setting in the Dockerfile;
+the editor uses the stable `/usr/local/bin/clangd` link. Keep the version aligned
+with `.clang-format`. `LLVM_SIGNING_FINGERPRINT` names the public repository-key
+identity to review when LLVM rotates its signing key. `BASE_IMAGE`, `USERNAME`
+and `USER_UID` are image build arguments. Changing USERNAME also requires matching
+the account and mount paths in devcontainer.json; normal users retain defaults.
+IDE clients may adjust the UID to match Linux host ownership.
+
+The `.devcontainer/` build context and `.dockerignore` admit only image metadata,
+the installers and the package list. BuildKit mounts installer inputs read-only
+during image creation; it does not copy the source tree into image layers.
+Rebuild the image after changing these files. Docker Engine with BuildKit is
+required, as provided by current Docker Desktop and normal modern Docker setups.
 
 In CLion use **Create Dev Container and Mount Sources...** from
 `.devcontainer/devcontainer.json`, rather than the Dockerfile's Run action.

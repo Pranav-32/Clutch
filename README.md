@@ -99,6 +99,7 @@ generators and `clutch --help` for commands.
 | [Runnable examples](docs/examples.md) | Try single-file, multi-file, C and mixed-language projects |
 | [Using Clutch](docs/usage.md) | Configuration, compilers, generators, IDE setup and project tests |
 | [Manifest reference](docs/manifest.md) | Every supported field, default and example |
+| [Versions and releases](docs/releases.md) | Git version identity, automated checks and release downloads |
 
 ## Contribute
 

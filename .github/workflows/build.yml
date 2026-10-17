@@ -1,0 +1,76 @@
+# Reusable native verification and packaging pipeline, shared by CI and releases.
+name: Native build
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit to verify (defaults to the calling event)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-22.04, target: linux-x86_64-gcc, cc: gcc, cxx: g++}
+          - {os: ubuntu-22.04, target: linux-x86_64-clang, cc: clang, cxx: clang++}
+          - {os: windows-2022, target: windows-x86_64-msvc, cc: cl, cxx: cl}
+          - {os: macos-14, target: macos-arm64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++}
+          - {os: macos-15-intel, target: macos-x86_64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      CLUTCH_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build make graphviz clang g++
+      - name: macOS prerequisites
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja make graphviz
+          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
+      - name: MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+      - name: Windows prerequisites
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Test release tooling
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Build, test, install and package
+        # Use the platform's default shell: Git Bash would shadow MSVC link.exe.
+        run: python .github/scripts/ci.py --target ${{ matrix.target }}
+      - name: Preserve verified native package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

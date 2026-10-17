@@ -1,0 +1,29 @@
+# Conventional Commits update a reviewable version/changelog PR on main.
+# Release publication remains in release.yml after an explicit version tag.
+name: Version proposal
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: version-proposal
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          # A scoped bot/App token enables normal CI events on generated PRs.
+          # Without one, see docs/releases.md for manually running their CI.
+          token: ${{ secrets.RELEASE_PR_TOKEN || github.token }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+          skip-github-release: true

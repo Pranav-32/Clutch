@@ -25,6 +25,7 @@
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
 #include "core/project.hpp"
+#include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 #include <toml.hpp>
@@ -219,7 +220,7 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
     requested.empty() && value)
     requested = value;
 
-  if (const auto cache_path = project.build / "backend.toml";
+  if (const auto cache_path = project.build / layout::backend_cache;
     requested.empty() && fs::exists(cache_path)) {
     if (const auto cache = toml::parse_file(cache_path.string());
       cache["name"].value_or(std::string{}) == driver.name)
@@ -256,7 +257,7 @@ void save_backend(const BuildBackend &backend, const Project &project) {
                           {"executable", backend.executable}};
   std::ostringstream text;
   text << cache << '\n';
-  write_if_changed(project.build / "backend.toml", text.str());
+  write_if_changed(project.build / layout::backend_cache, text.str());
 }
 
 /// Dispatch serialization; driver generation must not compile the main project.

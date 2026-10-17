@@ -86,14 +86,21 @@ fresh workspace folders automatically on their next run.
 
 ## Scope and validation status
 
+GitHub CI and release jobs share a native verification/packaging runner. Python
+tooling tests cover version identities with real temporary Git repositories,
+archive notices and checksums, and failed-publication behavior. See
+[versions and releases](releases.md) for the platform matrix and commands.
+
 The graph supports one application executable and explicit executable tests.
 Git dependencies, CMake/Make/Blaze dependency adapters, library targets, arbitrary
 custom commands, cross-compilation settings, PCH, project installation rules, automatic updates,
 and complete CMake capability coverage remain future work. Foreign adapters will
 configure external libraries while Clutch keeps its own configuration engine.
 
-The Docker image and Linux initialization workflow have been validated with
-Clang 22 on `linux/amd64`: all four CTest checks passed, including Graphviz and
-the Ninja/GNU Make integration suite. The manifest guide's examples also built
-successfully. IDE attachment and native Xcode execution still require validation
-with their respective clients and host tools.
+Local validation covers the rebuilt Ubuntu 26.04 image with Clang 22 and GCC 15,
+including all four CTest checks, Graphviz, Ninja/GNU Make integration and examples.
+Windows MSVC validation covers all five CTest checks, NMake/MSBuild, examples and
+installed archives. Tooling tests cover Git versioning and release packaging;
+workflow syntax is checked with actionlint. The hosted-runner matrix and native
+Xcode execution still require an actual GitHub run. IDE attachment requires
+validation with the respective client.

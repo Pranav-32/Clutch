@@ -133,6 +133,10 @@ rejection, DOT escaping, and rendering when Graphviz is available.
 
 ## Submit a change
 
+Use Conventional Commit titles such as `fix: ...` or `feat: ...` so automated
+version proposals can classify changes. See [versions and releases](releases.md)
+for the version policy, CI matrix, tag workflow and release PR setup.
+
 Contributions to Clutch's own code and documentation are accepted under
 [BSD 3-Clause](../LICENSE). Submit only material you have the right to contribute,
 and preserve existing copyright and third-party notices. See the
