@@ -26,9 +26,11 @@ def run(*command, cwd=ROOT):
 
 
 def require_tool(name):
-    """Resolve a single executable name/path, never a shell expression."""
+    """Locate an executable while preserving its language-selecting driver name."""
     if resolved := shutil.which(name):
-        return str(Path(resolved).resolve())
+        # clang++ and clang-cl may be symlinks to clang. Dereferencing them changes
+        # argv[0] and can disable C++ runtime linking or Microsoft-style options.
+        return os.path.abspath(resolved)
     raise RuntimeError(f'required tool not found: {name}')
 
 

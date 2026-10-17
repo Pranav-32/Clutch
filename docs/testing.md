@@ -102,5 +102,9 @@ including all four CTest checks, Graphviz, Ninja/GNU Make integration and exampl
 Windows MSVC validation covers all five CTest checks, NMake/MSBuild, examples and
 installed archives. Tooling tests cover Git versioning and release packaging;
 workflow syntax is checked with actionlint. The hosted-runner matrix and native
-Xcode execution still require an actual GitHub run. IDE attachment requires
+Xcode builds have also run on GitHub: GCC, Windows MSVC and both macOS
+architectures passed the initial CI run. Linux Clang exposed a CI discovery bug
+that dereferenced clang++ to clang and omitted C++ runtime linking. Executable
+discovery now preserves driver symlink names, with a dedicated regression test.
+Rerun the Linux Clang job after pushing that fix. IDE attachment requires
 validation with the respective client.

@@ -251,6 +251,7 @@ and never requires Git at runtime. See [versions and releases](releases.md).
 | [`.github/workflows/version.yml`](../.github/workflows/version.yml), [`release-please-config.json`](../.github/release-please-config.json), [`release-please-manifest.json`](../.github/release-please-manifest.json) | Conventional Commit version/changelog proposals and automation state; no automatic merge or publication. |
 | [`.github/scripts/ci.py`](../.github/scripts/ci.py), [`release.py`](../.github/scripts/release.py) | Native build/test/install driver and release validation, archives, license checks, streaming checksums and publication gates. Python is CI tooling only. |
 | [`tests/test_release.py`](../tests/test_release.py), [`test_versioning.py`](../tests/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
+| [`tests/test_ci.py`](../tests/test_ci.py) | Executable-discovery regressions, including preservation of language-selecting compiler symlinks such as clang++. |
 | [`examples/single-file/clutch.toml`](../examples/single-file/clutch.toml), [`main.cpp`](../examples/single-file/main.cpp) | C++17 single-file entry source and separate debug/release profiles. |
 | [`examples/multi-file/clutch.toml`](../examples/multi-file/clutch.toml), [`src/main.cpp`](../examples/multi-file/src/main.cpp), [`greeting.hpp`](../examples/multi-file/src/greeting.hpp), [`greeting.cpp`](../examples/multi-file/src/greeting.cpp), [`tests/greeting_test.cpp`](../examples/multi-file/tests/greeting_test.cpp) | Explicit application/test sources, colocated headers, shared implementation and runtime arguments. |
 | [`examples/c-project/clutch.toml`](../examples/c-project/clutch.toml), [`main.c`](../examples/c-project/main.c) | C11 executable built with a C compiler. |
@@ -293,5 +294,6 @@ The root `.clang-format` is already documented and omitted from this inventory.
 The Docker image and Linux post-create workflow passed verification on 2026-10-18
 with Clang 22, including POSIX integration and Graphviz. GCC 15 and Windows MSVC
 also passed native verification, examples and packaging. Git version and release
-tooling have separate regression checks. IDE attachment, hosted workflow runs
-and native macOS/Xcode execution remain separate validation work.
+tooling have separate regression checks. GitHub's initial native jobs passed on
+GCC, Windows and both macOS/Xcode architectures. Linux Clang requires a rerun
+with the compiler-driver symlink fix; IDE attachment remains separate work.
