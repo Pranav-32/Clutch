@@ -1,0 +1,19 @@
+# Local CMake output trees (terminal and IDE configurations).
+/build/
+/build-*/
+/cmake-build-*/
+
+# Clutch dependency sandbox and default per-profile output directories.
+/.clutch/
+/Clutch-build-*/
+# Runnable examples keep the same profile directory names inside each project.
+/examples/**/Clutch-build-*/
+
+# Generated IDE metadata must remain in a build directory, not source control.
+/compile_commands.json
+
+# Integration fixtures and isolated verification/analysis builds.
+/tests/work/
+
+# Machine-local IDE settings.
+/.idea/

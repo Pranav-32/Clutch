@@ -1,0 +1,47 @@
+# Static analysis for Clutch-owned C++17 code. See docs/static-analysis.md.
+# Keep findings advisory while the baseline is adopted; do not apply fixes blindly.
+---
+InheritParentConfig: false
+Checks: >-
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  -portability-avoid-pragma-once,
+  -portability-restrict-system-includes,
+  misc-const-correctness,
+  modernize-use-auto,
+  modernize-use-ctad,
+  modernize-redundant-void-arg,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  readability-redundant-control-flow,
+  readability-qualified-auto,
+  readability-avoid-const-params-in-decls,
+  readability-redundant-declaration
+WarningsAsErrors: ''
+
+# Main source files are always diagnosed. Restrict additional header diagnostics
+# to src/; vendor headers and generated build-tree files are outside that tree.
+HeaderFilterRegex: '(^|[/\\])src[/\\]'
+SystemHeaders: false
+
+# Explicitly requested fixes use the existing formatting rules. This setting
+# alone does not modify files and does not enable automatic fixes.
+FormatStyle: file
+
+# Check both the pointee and the pointer binding when a local pointer can be const.
+CheckOptions:
+  misc-const-correctness.WarnPointersAsValues: true
+  misc-const-correctness.TransformPointersAsValues: true
+...

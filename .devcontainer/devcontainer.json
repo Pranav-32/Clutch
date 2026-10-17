@@ -1,0 +1,53 @@
+{
+  // JSON with Comments is supported by the Dev Container specification.
+  // See docs/development-container.md for setup and lifecycle commands.
+  "name": "Clutch",
+  "build": {
+    // Keep the tools-only image context here so .dockerignore applies directly.
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  // Share host source edits; the image itself contains development tools.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/home/clutch-dev/workspace,type=bind",
+  "workspaceFolder": "/home/clutch-dev/workspace",
+  // Stable Docker identity for terminal attachment with docker exec.
+  "runArgs": [
+    "--name",
+    "clutch-development-container"
+  ],
+  // Match host UID ownership on Linux while retaining a nonroot development user.
+  "remoteUser": "clutch-dev",
+  "updateRemoteUserUID": true,
+  // Default compiler pair; individual configuration commands can override it.
+  "containerEnv": {
+    "CC": "clang",
+    "CXX": "clang++"
+  },
+  // Run in the mounted container path, not the host's workspace path.
+  "postCreateCommand": [
+    "bash",
+    "${containerWorkspaceFolder}/.devcontainer/post-create.sh"
+  ],
+  // VS Code settings are isolated from other clients such as CLion.
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools",
+        "ms-vscode.cpptools"
+      ],
+      "settings": {
+        // Keep container binaries and IDE metadata separate from native builds.
+        "cmake.buildDirectory": "${workspaceFolder}/build-container",
+        "clangd.path": "/usr/bin/clangd-22",
+        "clangd.arguments": [
+          "--compile-commands-dir=build-container"
+        ],
+        // clangd owns completion and diagnostics; avoid competing C++ engines.
+        "C_Cpp.intelliSenseEngine": "disabled",
+        "C_Cpp.errorSquiggles": "disabled",
+        "files.eol": "\n"
+      }
+    }
+  }
+}

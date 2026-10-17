@@ -1,0 +1,22 @@
+# Minimal C++ executable with its entry point outside a src/ directory.
+[project]
+name = "hello_cpp"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "main.cpp"
+
+# Select native build files; compiler executables are configuration CLI options.
+[build]
+generator = "ninja"
+
+# Each profile owns its configuration, IDE database and compiled outputs.
+[profile.debug]
+build_dir = "Clutch-build-debug"
+optimize = "none"
+warnings = "extra"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"

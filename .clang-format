@@ -1,0 +1,62 @@
+# Function declarations and calls
+BinPackArguments: false
+BinPackParameters: "false"
+AlwaysBreakTemplateDeclarations: Yes
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# Constructor formatting
+BreakConstructorInitializers: BeforeColon
+ConstructorInitializerIndentWidth: 4
+PackConstructorInitializers: Never
+
+# Expressions and operators
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+AlignOperands: Align
+AlignTrailingComments: true
+
+# Alignment
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: None
+AlignEscapedNewlines: Right
+
+# Spacing
+SpaceBeforeParens: ControlStatements
+SpaceBeforeAssignmentOperators: true
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: Never
+SpacesBeforeTrailingComments: 2
+SpaceAfterCStyleCast: false
+
+# Indentation
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+IndentAccessModifiers: false
+IndentGotoLabels: false
+IndentPPDirectives: None
+IndentWrappedFunctionNames: false
+
+# Empty lines
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+SeparateDefinitionBlocks: Always
+
+# Lambdas and short statements
+AllowShortLambdasOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: false
+
+# Braced initialization
+Cpp11BracedListStyle: "true"
+SpaceBeforeCpp11BracedList: false
+
+# Include formatting
+IncludeIsMainRegex: '([-_](test|unittest))?$'
+
+# Miscellaneous
+ReflowComments: "Always"
+FixNamespaceComments: true
+CompactNamespaces: false

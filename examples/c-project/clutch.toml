@@ -1,0 +1,20 @@
+# A C11 application uses the C compiler and linker driver.
+[project]
+name = "hello_c"
+version = "0.1.0"
+language = "c"
+std = 11
+
+[build]
+generator = "ninja"
+sources = ["main.c"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+optimize = "none"
+warnings = "extra"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"

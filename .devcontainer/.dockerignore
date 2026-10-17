@@ -1,0 +1,5 @@
+# The image installs tools; project sources and setup scripts are mounted later.
+# Only build metadata is needed in the .devcontainer/ image build context.
+*
+!Dockerfile
+!.dockerignore

@@ -1,0 +1,11 @@
+# Keep formatting limited to owned sources; generated and upstream files retain
+# their original contents. Patterns are relative to the repository root.
+build/**
+build-tidy/**
+cmake-build-*/**
+.clutch/**
+Clutch-build-*/**
+examples/**/Clutch-build-*/**
+third_party/**
+# Integration scripts generate fixture sources rather than maintained modules.
+tests/work/**

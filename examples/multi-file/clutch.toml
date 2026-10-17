@@ -1,0 +1,27 @@
+# Compile several C++ sources and share one implementation with an executable test.
+[project]
+name = "greeting_app"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[build]
+generator = "ninja"
+sources = ["src/main.cpp", "src/greeting.cpp"]
+# Headers remain beside implementations; tests use the same search path.
+include_dirs = ["src"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+optimize = "none"
+warnings = "extra"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"
+
+# Tests provide their own main; list shared implementation files explicitly.
+[[test]]
+name = "greeting"
+sources = ["tests/greeting_test.cpp", "src/greeting.cpp"]

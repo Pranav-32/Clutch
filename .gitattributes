@@ -1,0 +1,44 @@
+# Normalize text in Git; executable setup scripts must remain Linux-compatible
+# even when contributors check out the repository with Windows autocrlf enabled.
+* text=auto
+
+# Linux / Docker Environment Files (Must always stay LF)
+*.sh text eol=lf
+.devcontainer/Dockerfile text eol=lf
+.devcontainer/devcontainer.json text eol=lf
+.devcontainer/.dockerignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows Native Scripts (Must stay CRLF to prevent execution errors on Windows)
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# C and C++ Source and Header files
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+
+# Documentation and Licenses
+*.md text eol=lf
+*.LICENSE text eol=lf
+LICENSE text eol=lf
+*.toml text eol=lf
+
+# Language configurations
+.clang-format text eol=lf
+.clang-format-ignore text eol=lf
+.clang-tidy text eol=lf
+
+# Build systems and configurations
+CMakeLists.txt text eol=lf
+*.cmake text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+.gitignore text eol=lf
+
+# Keep native executable and archive contents byte-for-byte intact if tracked.
+*.exe binary
+*.png binary
+*.zip binary
