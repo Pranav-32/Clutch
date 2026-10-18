@@ -8,10 +8,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 # Fixture policy: each side of the diamond returns the base value.
@@ -155,6 +157,29 @@ links = ["shared"]
             if path.is_file():
                 os.utime(path, ns=(stamp, stamp))
 
+    def coarse_clock_compiler(self, compiler, name):
+        """Wrap a real POSIX compiler and emulate a clock shared with old archives."""
+        wrapper = self.root / name
+        # This test-only shim preserves the compiler's argv and exit status. Once
+        # enabled, only newly compiled object mtimes are set to the fixture tick;
+        # Make must still rebuild their consuming archives and linked products.
+        wrapper.write_text(f'#!{sys.executable}\n'
+                           'import os, pathlib, shlex, subprocess, sys\n'
+                           f'compiler = {compiler!r}\n'
+                           'result = subprocess.run([compiler, *sys.argv[1:]])\n'
+                           'if result.returncode: sys.exit(result.returncode)\n'
+                           'arguments = []\n'
+                           'for argument in sys.argv[1:]:\n'
+                           '    arguments.extend(shlex.split(pathlib.Path(argument[1:]).read_text())\n'
+                           '                     if argument.startswith("@") else [argument])\n'
+                           f'clock = pathlib.Path({str(self.root / "coarse-clock")!r})\n'
+                           'if clock.exists() and "-c" in arguments and "-o" in arguments:\n'
+                           '    stamp = int(clock.read_text())\n'
+                           '    output = arguments[arguments.index("-o") + 1]\n'
+                           '    os.utime(output, ns=(stamp, stamp))\n', encoding='utf-8')
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        return str(wrapper)
+
     def generators(self):
         result = ['ninja']
         if os.name == 'nt':
@@ -259,6 +284,19 @@ links = ["shared"]
         """New compiler definitions take effect even when response mtimes tie."""
         if not (shutil.which('make') or shutil.which('gmake')):
             self.skipTest('GNU Make is not installed')
+        cc = self.coarse_clock_compiler(OPTIONS.cc, 'coarse-c-compiler')
+        cxx = self.coarse_clock_compiler(OPTIONS.cxx, 'coarse-cxx-compiler')
+        with mock.patch.object(OPTIONS, 'cc', cc), mock.patch.object(OPTIONS, 'cxx', cxx):
+            self.check_make_changed_flags_with_equal_timestamps()
+
+    def check_make_changed_flags_with_equal_timestamps(self):
+        """Exercise a static diamond where rebuilt objects retain the old tick."""
+        # Only the provider's private command changes. Consumers keep identical
+        # commands, so their refreshed outputs require dependency invalidation.
+        self.targets = self.targets.replace('defines = ["BASE_PRIVATE"]',
+                          f'defines = ["BASE_PRIVATE", "BASE_PRIVATE_VALUE={BASE_API_VALUE}"]')
+        self.write('base/base.cpp', (self.root / 'base/base.cpp').read_text().replace(
+                   '{BASE_API}', '{BASE_PRIVATE_VALUE}'))
         self.write('apps/main.c', '#include "api.h"\n#include <stdio.h>\n'
                    'int main(void) { printf("%d\\n", answer()); return 0; }\n')
         self.manifest('make')
@@ -267,12 +305,18 @@ links = ["shared"]
         original_stamp = self.build_path('app').stat().st_mtime_ns
         changed_base = BASE_API_VALUE + 1
         changed_shared = changed_base * DIAMOND_BRANCH_COUNT
-        targets = self.targets.replace(f'BASE_API={BASE_API_VALUE}', f'BASE_API={changed_base}')
-        targets = targets.replace(f'SHARED_API={SHARED_API_VALUE}', f'SHARED_API={changed_shared}')
+        targets = self.targets.replace(f'BASE_PRIVATE_VALUE={BASE_API_VALUE}',
+                                       f'BASE_PRIVATE_VALUE={changed_base}')
         self.manifest('make', targets)
         self.configure('make')
+        self.write('coarse-clock', str(original_stamp))
         self.tie_make_timestamps(original_stamp)
         self.assertIn(str(changed_shared), self.cli('run', '-t', 'app').stdout.splitlines())
+        stamp = self.build_path('app').stat().st_mtime_ns
+        self.configure('make')
+        self.assertIn(str(changed_shared), self.cli('run', '-t', 'app').stdout.splitlines())
+        self.assertEqual(stamp, self.build_path('app').stat().st_mtime_ns,
+                         'unchanged configuration relinked a consumer')
 
     def test_file_api_and_saved_targets(self):
         """Public metadata exposes concrete kinds, requirements and dependency IDs."""

@@ -146,6 +146,13 @@ subtest cannot leave optional targets or archives behind for the next generator.
 POSIX Make regressions force equal timestamps across response files and build
 products to verify archive-member removal and changed definitions. They also
 check that unchanged configuration preserves a static archive.
+The changed-definition case wraps real compilers with a test-only clock shim that
+gives newly compiled objects the previous timestamp. Only the provider's private
+definition changes; consumer commands remain identical. This verifies invalidation
+through a static-library diamond and its shared/executable consumers even when
+Make cannot distinguish old and new object timestamps. An unchanged reconfiguration
+must keep the linked consumer's timestamp. Python powers this test shim only;
+generated user builds continue to use native Clutch actions.
 Ninja and GNU Make run on Linux; Ninja, NMake and Visual Studio run with MSVC on
 Windows. macOS additionally exercises Xcode when installed. Python is used by
 the test harness, not by Clutch or any generated build action.

@@ -23,18 +23,31 @@
 
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 
 namespace clutch {
 namespace {
+/// Removing a generated result is safe only at its physical, owned location.
+void invalidate_output(const fs::path &output) {
+  if (fs::is_symlink(fs::symlink_status(output)) ||
+      fs::weakly_canonical(output.parent_path()) != output.parent_path())
+    throw std::runtime_error("refusing redirected Make output: " +
+                             output.string());
+
+  fs::remove(output);
+}
+
 /// Invalidate stale results before publishing a changed command. Timestamp-only
 /// dependencies can miss edits within one clock tick on older Make versions.
 void write_response(const fs::path &path,
                     const std::string &content,
-                    const fs::path &output) {
+                    const fs::path &output,
+                    const std::function<void()> &invalidate_dependents) {
   if (std::ifstream input(path, std::ios::binary); input) {
     const std::string previous((std::istreambuf_iterator(input)), {});
     if (input.bad())
@@ -45,14 +58,10 @@ void write_response(const fs::path &path,
       return;
   }
 
-  // Only remove this generated artifact, never a redirected destination. Do
-  // this before writing metadata so interrupted configuration can be retried.
-  if (fs::is_symlink(fs::symlink_status(output)) ||
-      fs::canonical(output.parent_path()) != output.parent_path())
-    throw std::runtime_error("refusing redirected Make output: " +
-                             output.string());
-
-  fs::remove(output);
+  // Invalidate the full chain before writing metadata. A rebuilt object's mtime
+  // can still equal an older archive's mtime on a coarse clock.
+  invalidate_output(output);
+  invalidate_dependents();
   write_if_changed(path, content);
 }
 
@@ -239,6 +248,34 @@ void generate_make(const Graph &graph,
                    const fs::path &clutch_executable) {
   const bool gnu = graph.backend.name == "make";
   const auto &build = graph.project.build;
+  // Reverse edges let an altered compile/archive/link command invalidate every
+  // consuming output, independent of graph order and timestamp precision.
+  std::vector<std::vector<size_t>> consumers(graph.targets.size());
+  for (size_t index = 0; index < graph.targets.size(); ++index)
+    for (const auto provider : graph.targets[index].dependencies)
+      consumers.at(provider).push_back(index);
+
+  std::vector<bool> invalidated(graph.targets.size(), false);
+  const auto invalidate_target = [&](const size_t first) {
+    std::queue<size_t> pending;
+    pending.push(first);
+    while (!pending.empty()) {
+      const auto index = pending.front();
+      pending.pop();
+      if (invalidated[index])
+        continue;
+
+      invalidate_output(graph.targets[index].output);
+      for (const auto &[library, destination] : runtime_copies(graph, index)) {
+        (void)library;
+        invalidate_output(destination);
+      }
+      invalidated[index] = true;
+      for (const auto consumer : consumers[index])
+        pending.push(consumer);
+    }
+  };
+
   // GNU drivers provide depfiles; MSVC needs conservative explicit header
   // edges.
   const auto headers = gnu && !graph.toolchain.msvc ? std::set<fs::path>{}
@@ -348,7 +385,10 @@ void generate_make(const Graph &graph,
       // objects when the command changes, even within one timestamp tick.
       write_response(response_path,
                      response(arguments, graph.toolchain.msvc),
-                     unit.object);
+                     unit.object,
+                     [&] {
+                       invalidate_target(index);
+                     });
       make << make_path(unit.object, build, gnu) << ": "
            << make_path(unit.source, build, gnu) << ' '
            << make_path(response_path, build, gnu);
@@ -367,7 +407,12 @@ void generate_make(const Graph &graph,
       throw std::runtime_error("Make target has no linker command");
 
     const auto response_path = fs::path(output.string() + ".make.rsp");
-    write_response(response_path, response(link, graph.toolchain.msvc), output);
+    write_response(response_path,
+                   response(link, graph.toolchain.msvc),
+                   output,
+                   [&] {
+                     invalidate_target(index);
+                   });
     make << make_path(output, build, gnu) << ": "
          << make_path(response_path, build, gnu);
 

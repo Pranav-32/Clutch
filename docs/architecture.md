@@ -215,11 +215,14 @@ configuration-variable cache or shared compiler-result cache. Cache performance
 depends on the project, compiler and backend; no performance advantage over CMake
 has been established by comparative benchmarks.
 
-Make response-file content changes invalidate the associated object or linked
-output before new metadata is written. This includes removed archive members and
-changed flags, without depending on subsecond timestamp support. Unchanged
-commands preserve their outputs. Invalidation removes only the generated artifact
-and rejects redirected destinations.
+Make response-file content changes invalidate the associated object, its target
+and all consuming target outputs before new metadata is written. Reverse dependency
+edges propagate invalidation through static libraries, shared libraries and
+executables; affected Windows runtime DLL copies are invalidated too. This covers
+removed archive members and changed flags without depending on subsecond timestamp
+support, including when newly compiled objects retain the previous clock tick.
+Unchanged commands preserve their outputs. Invalidation removes only generated
+artifacts and rejects redirected destinations.
 
 ## Invariants and limits
 
