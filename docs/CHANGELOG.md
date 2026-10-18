@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Pranav-32/Clutch/compare/v0.3.0...v0.3.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **ci:** reduce redundant builds and streamline contributor documentation ([#5](https://github.com/Pranav-32/Clutch/issues/5)) ([b48acb9](https://github.com/Pranav-32/Clutch/commit/b48acb969dfabb57b0c11fac3eef2a1cf9f07239))
+
 ## [0.3.0](https://github.com/Pranav-32/Clutch/compare/v0.2.0...v0.3.0) (2026-10-18)
 
 
