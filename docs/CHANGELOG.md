@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Pranav-32/Clutch/compare/v0.2.0...v0.3.0) (2026-10-18)
+
+
+### Features
+
+* add native file API, library targets, workspaces and local locks ([ce85341](https://github.com/Pranav-32/Clutch/commit/ce85341acb2486640082ef72b4f37e3b9fda8cac))
+
 ## [0.2.0](https://github.com/Pranav-32/Clutch/compare/v0.1.0...v0.2.0) (2026-10-17)
 
 
