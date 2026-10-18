@@ -10,6 +10,9 @@ __pycache__/
 /Clutch-build-*/
 # Runnable examples keep the same profile directory names inside each project.
 /examples/**/Clutch-build-*/
+/examples/**/.clutch/
+# clutch.lock is portable resolution metadata and intentionally stays tracked.
+clutch.lock.write-lock/
 
 # Generated IDE metadata must remain in a build directory, not source control.
 /compile_commands.json

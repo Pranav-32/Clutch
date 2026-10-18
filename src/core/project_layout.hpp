@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-/** @file
+/**
+ * @file
  * @brief Shared on-disk names used by configuration, generators and workflows.
  */
 #pragma once
@@ -23,6 +24,11 @@ inline constexpr auto backend_cache = "backend.toml";
 inline constexpr auto toolchain_cache = "toolchain.toml";
 inline constexpr auto compilation_database = "compile_commands.json";
 inline constexpr auto build_graph = "build-graph.dot";
+// Portable dependency resolution belongs in source control, unlike backend
+// caches.
+inline constexpr auto lock_file = "clutch.lock";
+// Transient, profile-independent mutex beside the portable resolution file.
+inline constexpr auto lock_writer = "clutch.lock.write-lock";
 
 /// Keep scaffolded profiles and implicit profile paths under the same policy.
 inline std::string default_build_directory(const bool release) {

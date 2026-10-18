@@ -13,9 +13,11 @@
 
 #include "build_directory.hpp"
 
+#include "core/file_api/paths.hpp"
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
+#include "core/workspace/workspace.hpp"
 #include "platform/files.hpp"
 #include <toml.hpp>
 
@@ -58,7 +60,7 @@ bool contains(const fs::path &parent, const fs::path &child) {
   (void)right;
   return left == parent.end();
 }
-} // namespace
+}  // namespace
 
 /// Read the profile path separately so clean/load do not require source
 /// discovery.
@@ -76,7 +78,8 @@ void validate_build_directory(const fs::path &root,
     throw std::runtime_error(
         "build directory cannot be the project root or its ancestor");
 
-  for (const auto *reserved : {"src", "include", ".git", ".idea", layout::environment})
+  for (const auto *reserved :
+       {"src", "include", ".git", ".idea", layout::environment})
     if (contains(root / reserved, directory))
       throw std::runtime_error("build directory cannot be inside " +
                                std::string(reserved));
@@ -100,12 +103,13 @@ void validate_build_directory(const fs::path &root,
   if (fs::exists(marker)) {
     std::ifstream input(marker, std::ios::binary);
     if (const std::string owner((std::istreambuf_iterator(input)), {});
-      !input || owner != root.generic_string() + "\n")
+        !input || owner != root.generic_string() + "\n")
       throw std::runtime_error(
           "build directory belongs to a different project: " +
           directory.string());
   } else if (fs::exists(directory) &&
-             (require_owner || !fs::is_empty(directory))) {
+             (require_owner || (!fs::is_empty(directory) &&
+                                !file_api::query_only_directory(directory)))) {
     throw std::runtime_error("refusing unowned nonempty build directory: " +
                              directory.string());
   }
@@ -116,25 +120,54 @@ void validate_build_directory(const fs::path &root,
 void prepare_build_directory(const Project &project) {
   validate_build_directory(project.root, project.build, false);
 
+  for (const auto &[path, signature] : project.inputs) {
+    (void)signature;
+    if (contains(project.build, path))
+      throw std::runtime_error(
+          "build directory contains a workspace manifest: " + path.string());
+  }
+
+  for (const auto &member : project.projects)
+    for (const auto *reserved :
+         {"src", "include", ".git", ".idea", layout::environment})
+      if (contains(member.root / reserved, project.build))
+        throw std::runtime_error(
+            "build directory cannot be inside a member's reserved directory");
+
   // A custom profile directory must never swallow a source or include tree.
   for (const auto &source : project.sources)
     if (contains(project.build, source))
       throw std::runtime_error("build directory contains a project source: " +
                                source.string());
 
-  for (const auto &[name, sources] : project.tests)
-    for (const auto &source : sources)
+  for (const auto &test : project.tests)
+    for (const auto &source : test.sources)
       if (contains(project.build, source))
         throw std::runtime_error("build directory contains test source for " +
-                                 name);
+                                 test.name);
 
   for (const auto &include : project.includes)
     if (contains(project.build, include))
       throw std::runtime_error(
           "build directory contains an include directory: " + include.string());
 
+  for (const auto *specs : {&project.targets, &project.tests}) {
+    for (const auto &target : *specs) {
+      const auto validate_includes =
+          [&](const std::vector<fs::path> &includes) {
+            for (const auto &include : includes)
+              if (contains(project.build, include))
+                throw std::runtime_error(
+                    "build directory contains target include directory: " +
+                    include.string());
+          };
+      validate_includes(target.includes);
+      validate_includes(target.public_includes);
+    }
+  }
+
   fs::create_directories(project.build);
   write_if_changed(project.build / layout::owner_marker,
                    project.root.generic_string() + "\n");
 }
-} // namespace clutch
+}  // namespace clutch

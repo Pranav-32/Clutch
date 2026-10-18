@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+"""Build real target DAGs with native generators; Python is a test dependency only."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+
+# Fixture policy: each side of the diamond returns the base value.
+BASE_API_VALUE = 7
+DIAMOND_BRANCH_COUNT = 2
+SHARED_API_VALUE = BASE_API_VALUE * DIAMOND_BRANCH_COUNT
+# Keep the sentinel shared by fixture creation and archive freshness assertions.
+REMOVED_SYMBOL = 'CLUTCH_REMOVED_SYMBOL_UNIQUE'
+
+
+class TargetTests(unittest.TestCase):
+    """Exercise selection, link interfaces, runtime artifacts and archive freshness."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.create_fixture()
+
+    def create_fixture(self):
+        """Initialize independent source trees so failed subtests cannot leak state."""
+        for folder in ('base', 'shared', 'apps', 'checks'):
+            (self.root / folder).mkdir()
+        self.write('base/base.h', '#pragma once\n#ifdef __cplusplus\nextern "C" {\n#endif\n'
+                   'int base(void);\n#ifdef __cplusplus\n}\n#endif\n')
+        self.write('base/base.cpp', '#include "base.h"\n#include <vector>\n'
+                   '#ifndef BASE_PRIVATE\n#error missing private definition\n#endif\n'
+                   'int base(void) { return std::vector<int>{BASE_API}.front(); }\n')
+        self.write('base/stale.cpp', f'int {REMOVED_SYMBOL}() {{ return 0; }}\n')
+        for name in ('left', 'right'):
+            self.write(f'base/{name}.cpp', '#include "base.h"\n'
+                       '#ifdef BASE_PRIVATE\n#error private definition escaped\n#endif\n'
+                       f'int {name}() {{ return base(); }}\n')
+        self.write('shared/api.h', '#pragma once\n#ifdef _WIN32\n'
+                   '#ifdef SHARED_BUILD\n#define API __declspec(dllexport)\n#else\n'
+                   '#define API __declspec(dllimport)\n#endif\n#else\n#define API\n#endif\n'
+                   '#ifdef __cplusplus\nextern "C" {\n#endif\nAPI int answer(void);\n'
+                   '#ifdef __cplusplus\n}\n#endif\n')
+        self.write('shared/api.cpp', '#include "api.h"\nint left(); int right();\n'
+                   '#ifndef BASE_API\n#error missing transitive public definition\n#endif\n'
+                   'int answer(void) { return left() + right(); }\n')
+        main = '#include "api.h"\n#ifdef BASE_API\n#error private link interface escaped\n#endif\n'
+        main += 'int main(void) { return answer() == SHARED_API ? 0 : 1; }\n'
+        self.write('apps/main.c', main)
+        self.write('checks/check.cpp', main)
+        self.write('apps/optional.cpp', 'int main() { return 0; }\n')
+        self.targets = f'''
+[[target]]
+name = "base"
+type = "static"
+sources = ["base/base.cpp", "base/stale.cpp"]
+public_include_dirs = ["base"]
+public_defines = ["BASE_API={BASE_API_VALUE}"]
+defines = ["BASE_PRIVATE"]
+[[target]]
+name = "left"
+type = "static"
+sources = ["base/left.cpp"]
+public_links = ["base"]
+[[target]]
+name = "right"
+type = "static"
+sources = ["base/right.cpp"]
+links = ["base"]
+[[target]]
+name = "shared"
+type = "shared"
+sources = ["shared/api.cpp"]
+links = ["left", "right"]
+public_include_dirs = ["shared"]
+public_defines = ["SHARED_API={SHARED_API_VALUE}"]
+defines = ["SHARED_BUILD"]
+[[target]]
+name = "app"
+sources = ["apps/main.c"]
+links = ["shared"]
+[[target]]
+name = "optional"
+sources = ["apps/optional.cpp"]
+default = false
+[[test]]
+name = "check"
+sources = ["checks/check.cpp"]
+links = ["shared"]
+'''
+
+    def write(self, relative, text):
+        """Write portable UTF-8 fixture inputs with deterministic newlines."""
+        (self.root / relative).write_text(text, encoding='utf-8')
+
+    def manifest(self, generator='ninja', targets=None, build_dir='target build'):
+        """Choose a fixture profile path; readers discover it through locate."""
+        self.write('clutch.toml', '[project]\nname="target_probe"\nversion="0.1.0"\n'
+                   'language="mixed"\nstd={c=11,cpp=17}\n'
+                   f'[build]\ngenerator="{generator}"\n'
+                   f'[profile.debug]\nbuild_dir={json.dumps(build_dir)}\n' +
+                   (self.targets if targets is None else targets))
+
+    def cli(self, *arguments, success=True):
+        result = subprocess.run([OPTIONS.clutch, *arguments], cwd=self.root,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        return result
+
+    def configure(self, generator='ninja'):
+        """Request target artifacts without guessing directories or file names."""
+        location = json.loads(self.cli('locate').stdout)
+        query = Path(location['paths']['query']) / 'codemodel-v1'
+        query.parent.mkdir(parents=True, exist_ok=True)
+        query.touch()
+        args = ['.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx]
+        if generator == 'ninja':
+            args += ['--build-tool', OPTIONS.ninja]
+        result = self.cli(*args)
+        reply = Path(location['paths']['reply'])
+        index = json.loads(sorted(reply.glob('index-*.json'))[-1].read_text(encoding='utf-8'))
+        reference = next(item for item in index['objects'] if item['kind'] == 'codemodel')
+        model = json.loads((reply / reference['jsonFile']).read_text(encoding='utf-8'))
+        self.configured_targets = {
+            ref['name']: json.loads((reply / ref['jsonFile']).read_text(encoding='utf-8'))
+            for ref in model['targets']}
+        return result
+
+    def build_path(self, name):
+        """The published run action identifies an executable on any platform."""
+        return Path(self.configured_targets[name]['actions']['run']['arguments'][0])
+
+    def artifacts(self, name):
+        """Follow the artifact contract, including compiler-specific import names."""
+        return [Path(item['path']) for item in self.configured_targets[name]['artifacts']]
+
+    def tie_make_timestamps(self, stamp):
+        """Simulate one clock tick for response metadata, objects and final outputs."""
+        paths = set()
+        for target in self.configured_targets.values():
+            paths.update(Path(item['path']) for item in target['artifacts'])
+            paths.update(Path(source['object']) for source in target['sources'])
+        location = json.loads(self.cli('locate').stdout)
+        paths.update(Path(location['paths']['build']).rglob('*.make.rsp'))
+        for path in paths:
+            if path.is_file():
+                os.utime(path, ns=(stamp, stamp))
+
+    def coarse_clock_compiler(self, compiler, name):
+        """Wrap a real POSIX compiler and emulate a clock shared with old archives."""
+        wrapper = self.root / name
+        # This test-only shim preserves the compiler's argv and exit status. Once
+        # enabled, only newly compiled object mtimes are set to the fixture tick;
+        # Make must still rebuild their consuming archives and linked products.
+        wrapper.write_text(f'#!{sys.executable}\n'
+                           'import os, pathlib, shlex, subprocess, sys\n'
+                           f'compiler = {compiler!r}\n'
+                           'result = subprocess.run([compiler, *sys.argv[1:]])\n'
+                           'if result.returncode: sys.exit(result.returncode)\n'
+                           'arguments = []\n'
+                           'for argument in sys.argv[1:]:\n'
+                           '    arguments.extend(shlex.split(pathlib.Path(argument[1:]).read_text())\n'
+                           '                     if argument.startswith("@") else [argument])\n'
+                           f'clock = pathlib.Path({str(self.root / "coarse-clock")!r})\n'
+                           'if clock.exists() and "-c" in arguments and "-o" in arguments:\n'
+                           '    stamp = int(clock.read_text())\n'
+                           '    output = arguments[arguments.index("-o") + 1]\n'
+                           '    os.utime(output, ns=(stamp, stamp))\n', encoding='utf-8')
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        return str(wrapper)
+
+    def generators(self):
+        result = ['ninja']
+        if os.name == 'nt':
+            result.extend(name for name, tool in [('nmake', 'nmake')]
+                          if shutil.which(tool))
+            # Native Visual Studio projects require cl, while NMake also accepts
+            # clang-cl. Do not equate the two compiler families here.
+            if all(Path(compiler).stem.lower() == 'cl' for compiler in (OPTIONS.cc, OPTIONS.cxx)):
+                result.append('visual-studio')
+        else:
+            if shutil.which('gmake') or shutil.which('make'):
+                result.append('make')
+            if sys.platform == 'darwin' and shutil.which('xcodebuild'):
+                result.append('xcode')
+        return result
+
+    def test_native_generators(self):
+        """The same DAG builds, runs, stages DLLs and stays incremental everywhere."""
+        fixture_root = self.root
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.root = fixture_root / generator
+                self.root.mkdir()
+                self.create_fixture()
+                self.manifest(generator)
+                self.configure(generator)
+                self.cli('build', '--target', 'app')
+                self.assertFalse(self.build_path('optional').exists())
+                self.cli('run', '--target', 'app')
+                self.cli('test', '--target', 'check')
+                app = self.build_path('app')
+                stamp = app.stat().st_mtime_ns
+                self.cli('build', '--target', 'app')
+                self.assertEqual(stamp, app.stat().st_mtime_ns, 'no-op build relinked')
+                self.cli('build')
+                self.assertFalse(self.build_path('optional').exists())
+                self.cli('build', '-t', 'optional')
+                self.assertTrue(self.build_path('optional').exists())
+                self.cli('run', '-t', 'base', success=False)
+                self.cli('build', '-t', 'missing', success=False)
+                self.cli('test', '-t', 'app', success=False)
+
+                # A changed DLL must refresh the staged copy even if its test exe
+                # is already linked. POSIX consumers exercise relative rpaths.
+                self.write('shared/api.cpp', (self.root / 'shared/api.cpp').read_text() + '\n// changed\n')
+                self.cli('test')
+                if os.name == 'nt':
+                    shared_artifacts = self.artifacts('shared')
+                    source = next(path for path in shared_artifacts if path.suffix.lower() == '.dll')
+                    staged = self.build_path('check').parent / source.name
+                    self.assertEqual(source.read_bytes(), staged.read_bytes())
+                    imports = [path for path in shared_artifacts if path != source]
+                    self.assertEqual(len(imports), 1, shared_artifacts)
+                    import_library, = imports
+                    import_library.unlink()
+                    self.cli('run', '--target', 'app')
+                    self.assertTrue(import_library.exists())
+
+                # Recreating an archive drops members for removed source files.
+                archives = self.artifacts('base')
+                self.assertEqual(len(archives), 1, archives)
+                archive, = archives
+                sentinel = REMOVED_SYMBOL.encode('ascii')
+                self.assertTrue(sentinel in archive.read_bytes(),
+                                'initial archive is missing the fixture sentinel')
+                self.manifest(generator, self.targets.replace(', "base/stale.cpp"', ''))
+                self.configure(generator)
+                self.cli('build', '-t', 'base')
+                self.assertFalse(sentinel in archive.read_bytes(),
+                                 f'{generator} retained a removed archive member')
+                self.cli('clean')
+
+    @unittest.skipIf(os.name == 'nt', 'GNU Make timestamp regression runs on POSIX')
+    def test_make_archive_membership_with_equal_timestamps(self):
+        """Removing a member rebuilds the archive even when metadata mtimes tie."""
+        if not (shutil.which('make') or shutil.which('gmake')):
+            self.skipTest('GNU Make is not installed')
+        self.manifest('make')
+        self.configure('make')
+        self.cli('build', '-t', 'base')
+        archive, = self.artifacts('base')
+        sentinel = REMOVED_SYMBOL.encode('ascii')
+        self.assertTrue(sentinel in archive.read_bytes())
+        original_stamp = archive.stat().st_mtime_ns
+
+        self.manifest('make', self.targets.replace(', "base/stale.cpp"', ''))
+        self.configure('make')
+        # Reproduce a coarse clock deterministically instead of sleeping until
+        # the next second. A timestamp-only dependency check skips this change.
+        self.tie_make_timestamps(original_stamp)
+        self.cli('build', '-t', 'base')
+        self.assertFalse(sentinel in archive.read_bytes(),
+                         'equal timestamps hid the removed archive member')
+        stamp = archive.stat().st_mtime_ns
+        self.configure('make')
+        self.cli('build', '-t', 'base')
+        self.assertEqual(stamp, archive.stat().st_mtime_ns,
+                         'unchanged configuration rebuilt the archive')
+
+    @unittest.skipIf(os.name == 'nt', 'GNU Make timestamp regression runs on POSIX')
+    def test_make_changed_flags_with_equal_timestamps(self):
+        """New compiler definitions take effect even when response mtimes tie."""
+        if not (shutil.which('make') or shutil.which('gmake')):
+            self.skipTest('GNU Make is not installed')
+        cc = self.coarse_clock_compiler(OPTIONS.cc, 'coarse-c-compiler')
+        cxx = self.coarse_clock_compiler(OPTIONS.cxx, 'coarse-cxx-compiler')
+        with mock.patch.object(OPTIONS, 'cc', cc), mock.patch.object(OPTIONS, 'cxx', cxx):
+            self.check_make_changed_flags_with_equal_timestamps()
+
+    def check_make_changed_flags_with_equal_timestamps(self):
+        """Exercise a static diamond where rebuilt objects retain the old tick."""
+        # Only the provider's private command changes. Consumers keep identical
+        # commands, so their refreshed outputs require dependency invalidation.
+        self.targets = self.targets.replace('defines = ["BASE_PRIVATE"]',
+                          f'defines = ["BASE_PRIVATE", "BASE_PRIVATE_VALUE={BASE_API_VALUE}"]')
+        self.write('base/base.cpp', (self.root / 'base/base.cpp').read_text().replace(
+                   '{BASE_API}', '{BASE_PRIVATE_VALUE}'))
+        self.write('apps/main.c', '#include "api.h"\n#include <stdio.h>\n'
+                   'int main(void) { printf("%d\\n", answer()); return 0; }\n')
+        self.manifest('make')
+        self.configure('make')
+        self.assertIn(str(SHARED_API_VALUE), self.cli('run', '-t', 'app').stdout.splitlines())
+        original_stamp = self.build_path('app').stat().st_mtime_ns
+        changed_base = BASE_API_VALUE + 1
+        changed_shared = changed_base * DIAMOND_BRANCH_COUNT
+        targets = self.targets.replace(f'BASE_PRIVATE_VALUE={BASE_API_VALUE}',
+                                       f'BASE_PRIVATE_VALUE={changed_base}')
+        self.manifest('make', targets)
+        self.configure('make')
+        self.write('coarse-clock', str(original_stamp))
+        self.tie_make_timestamps(original_stamp)
+        self.assertIn(str(changed_shared), self.cli('run', '-t', 'app').stdout.splitlines())
+        stamp = self.build_path('app').stat().st_mtime_ns
+        self.configure('make')
+        self.assertIn(str(changed_shared), self.cli('run', '-t', 'app').stdout.splitlines())
+        self.assertEqual(stamp, self.build_path('app').stat().st_mtime_ns,
+                         'unchanged configuration relinked a consumer')
+
+    def test_file_api_and_saved_targets(self):
+        """Public metadata exposes concrete kinds, requirements and dependency IDs."""
+        self.manifest()
+        self.configure()
+        targets = self.configured_targets
+        self.assertEqual(targets['base']['type'], 'STATIC_LIBRARY')
+        self.assertEqual(targets['shared']['type'], 'SHARED_LIBRARY')
+        self.assertEqual(targets['app']['type'], 'EXECUTABLE')
+        self.assertNotIn('run', targets['base']['actions'])
+        self.assertTrue(targets['check']['isTest'])
+        self.assertFalse(targets['optional']['buildByDefault'])
+        self.assertEqual(targets['app']['dependencies'],
+                         [targets['shared']['id']])
+        listing = self.cli('targets').stdout
+        self.assertIn('base  static', listing)
+        self.assertIn('check  executable (test)', listing)
+        self.cli('test')  # Restores schema-4 configuration in a separate process.
+
+    def test_external_profile_directory(self):
+        """Target checks also work when the configured output is outside sources."""
+        with tempfile.TemporaryDirectory(prefix='clutch target outputs ') as temporary:
+            output = Path(temporary).resolve() / 'external debug'
+            self.manifest(build_dir=output.as_posix())
+            self.configure()
+            self.cli('run', '--target', 'app')
+            self.cli('test', '--target', 'check')
+            self.assertTrue(self.build_path('app').is_relative_to(output))
+            self.assertTrue(self.build_path('check').is_relative_to(output))
+            self.cli('clean')
+            self.assertFalse(output.exists())
+
+    def test_invalid_graphs(self):
+        """Reject unknown targets, executable links, cycles and ambiguous source modes."""
+        invalid = [self.targets.replace('links = ["shared"]', 'links = ["missing"]'),
+                   self.targets.replace('links = ["shared"]', 'links = ["optional"]'),
+                   self.targets.replace('defines = ["BASE_PRIVATE"]', 'links = ["left"]'),
+                   self.targets.replace('name = "optional"', 'name = "app"'),
+                   self.targets.replace('type = "static"', 'type = "unknown"'),
+                   self.targets.replace('default = false', 'default = "false"')]
+        for targets in invalid:
+            self.manifest(targets=targets)
+            self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                     '--build-tool', OPTIONS.ninja, success=False)
+        for name in (('NUL', 'COM1') if os.name == 'nt' else ('obj', 'Makefile')):
+            self.manifest(targets=self.targets.replace('name = "optional"', f'name = "{name}"'))
+            self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                     '--build-tool', OPTIONS.ninja, success=False)
+
+    def test_library_only_and_multiple_applications(self):
+        """Library-only projects need no main; ambiguous run requires selection."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library)
+        self.configure()
+        self.cli('build')
+        self.cli('run', success=False)
+        self.cli('clean')
+        apps = '''[[target]]
+name="first"
+sources=["apps/optional.cpp"]
+[[target]]
+name="second"
+sources=["apps/optional.cpp"]
+'''
+        self.manifest(targets=apps)
+        self.configure()
+        self.cli('build')
+        self.assertTrue(self.build_path('first').exists())
+        self.assertTrue(self.build_path('second').exists())
+        self.cli('run', success=False)
+        self.cli('run', '-t', 'second')
+
+    def test_c_executable_with_cpp_archive(self):
+        """A C consumer inherits headers/macros and gets a C++ runtime at final link."""
+        self.write('apps/direct.c', '#include "base.h"\n'
+                   'int main(void) { return base() == BASE_API ? 0 : 1; }\n')
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library + '''
+[[target]]
+name="direct"
+sources=["apps/direct.c"]
+links=["base"]
+''')
+        self.configure()
+        self.cli('run', '-t', 'direct')
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    for option in ('clutch', 'cc', 'cxx', 'ninja'):
+        parser.add_argument('--' + option, required=True)
+    OPTIONS, arguments = parser.parse_known_args()
+    unittest.main(argv=[sys.argv[0], *arguments])

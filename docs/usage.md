@@ -31,6 +31,12 @@ Changes to `clutch.toml` require another explicit `clutch .` invocation; adding
 or removing discovered sources also requires reconfiguration. Editing an
 existing source or header only requires a build.
 
+Configuration creates or updates `clutch.lock` at the source/workspace root.
+Commit it with the manifests. Use `clutch . --locked` (or add `--release`) to
+require an existing matching lock without rewriting resolution. This flag is
+configuration-only. Changes to any root/member manifest or the lock invalidate
+saved builds; see [lock files](lock-files.md) for its current local-only scope.
+
 Choose compilers and the generator during configuration:
 
 ```sh
@@ -59,6 +65,13 @@ forwards program arguments, and `test --filter text` selects tests.
 
 ## A project
 
+For several manifest directories, add root `[workspace].members` and configure
+the workspace root. Use qualified target names such as
+`clutch run --target hello::hello`. Root profiles/generator coordinate all members;
+each member keeps its own source paths and standards. Programs/tests run from
+their owning member directory. See [workspaces](workspaces.md) for layout and
+member restrictions. Commands do not automatically search upward for a workspace.
+
 The [complete `clutch.toml` reference](manifest.md) lists every supported
 field, type, default, accepted value and compiler-flag mapping, with complete
 examples for standards, profiles, sources and tests.
@@ -66,9 +79,11 @@ examples for standards, profiles, sources and tests.
 | Table | Supported fields |
 | --- | --- |
 | `[project]` | `name`, `version`, `language`, `std`, `entry` |
+| `[workspace]` | `members` |
 | `[build]` | `generator`, `sources`, `include_dirs`, `defines` |
 | `[profile.debug]`, `[profile.release]` | `build_dir`, `optimize`, `warnings` |
-| `[[test]]` | `name`, `sources` |
+| `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default` |
+| `[[test]]` | Target fields except `default`; executable only |
 
 ```toml
 [project]
@@ -100,8 +115,9 @@ A comprehensive cross-compilation toolchain schema remains future work.
 
 Paths resolve relative to the manifest. Headers can live beside source files;
 an `include/` directory is optional and added automatically when present.
-`project.entry` can add an entry source. All application sources currently form
-one executable, and `version` is metadata.
+`project.entry` can add an entry source. Without explicit targets, application
+sources form one executable. `version` is metadata. Use `[[target]]` for multiple
+executables and static/shared libraries; see the [target reference](manifest.md#target).
 
 `warnings = "none"` suppresses compiler warnings with `-w` on GCC/Clang or
 `/W0` on MSVC-style drivers. Errors remain errors. `default` enables `-Wall`
@@ -134,6 +150,12 @@ The project metadata table is `[project]`. Older `[package]` manifests receive
 a rename instruction. After changing a manifest or upgrading from an older
 saved configuration, run `clutch .` again to regenerate the build files and
 `compile_commands.json` with the current standard and profile settings.
+
+Direct Ninja and GNU Make invocations can regenerate their configuration when a
+root or member manifest is newer than the generated build file. These tools use
+file timestamps: edits that preserve timestamps, or land within the same clock
+tick, require an explicit `clutch .`. Clutch checks input contents when loading
+saved configuration and rejects stale inputs even when their timestamps match.
 
 ## Generators
 
@@ -171,7 +193,21 @@ NMake executes serially; `--jobs` controls parallelism where supported.
 Make-based MSVC builds conservatively track project headers instead of precise
 per-unit compiler dependency files.
 
+When a Make compile/link command changes during configuration, Clutch invalidates
+its old object and affected target/consumer outputs before updating the response
+file. Invalidation follows dependencies through libraries and executables, including
+staged Windows DLL copies. This prevents stale flags or archive members when Make
+observes equal file timestamps, even after recompiling an object within the same tick.
+Unchanged commands keep existing outputs for incremental builds. Configuration
+still performs no compilation; the next build recreates invalidated outputs.
+
 ## Build directories and IDEs
+
+Debug builds generate symbols automatically. MSVC-style executable/DLL links
+produce PDBs; GCC/MinGW and Unix Clang normally embed debug information instead.
+Static libraries retain object symbols. Symbol-file paths and sidecar tracking
+are not yet configurable; see [debug symbols](manifest.md#debug-symbols) for
+backend behavior and current limitations.
 
 Set each directory in its profile's `build_dir` field. Defaults are
 `Clutch-build-debug` and `Clutch-build-release`; there is no build-directory CLI
@@ -182,7 +218,35 @@ Configuration writes native build files, `configuration.toml`, tool selections,
 `build-graph.dot`, and `compile_commands.json` inside the selected directory. The database includes
 absolute per-source arguments and build-directory frames for application and
 test units. Point the IDE or language server at that directory. Clutch creates
-no database copy or symlink in the project root.
+no database copy or symlink in the project root and leaves editor settings to
+the editor or its extensions. IDE and developer-tool clients can use the [file API](file-api.md) to
+request the resolved project, target and toolchain model. `clutch capabilities`
+and `clutch locate --project <source> [--release]` provide JSON discovery without
+configuring or compiling a project.
+
+Use the selected profile's compilation database for code completion:
+
+- **clangd:** set `--compile-commands-dir` to the build directory, or select it in
+  your own `.clangd` configuration. See the
+  [clangd configuration reference](https://clangd.llvm.org/config#compilationdatabase).
+- **VS Code Microsoft C/C++:** set `compileCommands` to the generated database in
+  the extension's configuration. See the
+  [C/C++ settings reference](https://code.visualstudio.com/docs/cpp/customize-cpp-settings).
+- **CLion:** open `compile_commands.json` as a project, select the matching
+  toolchain and enable database auto-reload. See the
+  [compilation database guide](https://www.jetbrains.com/help/clion/compilation-database.html).
+- **Visual Studio and Xcode:** open the native solution/project emitted by the
+  selected generator.
+
+A workspace has one database covering all members and their individual standards
+and compile requirements. Select the root profile's database and switch databases
+when changing profiles. Configure and run the language service in the same host
+or container environment: the absolute compiler/source paths must exist there.
+Selecting a container's database on the host does not translate its paths.
+
+Existing IDEs require an adapter to consume Clutch's file API directly; CMake
+extensions cannot consume its schemas unchanged. IDE extension implementations
+are maintained separately from Clutch's native core.
 
 Inspect compile/link dependencies with Graphviz:
 
@@ -233,4 +297,9 @@ independently of the application's declaration. Application sources are not
 automatically linked into tests. Reconfigure after changing declarations.
 `test` builds selected tests, continues after runtime failures, and fails if any
 test fails. An unmatched explicit filter is an error. Ordinary `build` compiles
-only the application. `NO_COLOR` disables status colors.
+ordinary default targets. `NO_COLOR` disables status colors.
+
+Use `clutch targets` to list configured target names and kinds. `build`, `run`
+and `test` accept `--target <name>` (short form `-t`). Repeat it for multiple
+build/test targets. Without selection, `build` uses ordinary targets marked
+`default`, while `test` uses all tests. `run` requires one application executable.

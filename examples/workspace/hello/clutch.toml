@@ -1,0 +1,17 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+[project]
+name = "hello"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[[target]]
+name = "hello"
+sources = ["main.cpp"]
+links = ["greeting::greeting"]
+
+[[test]]
+name = "greeting_test"
+sources = ["greeting_test.cpp"]
+links = ["greeting::greeting"]

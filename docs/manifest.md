@@ -1,6 +1,6 @@
 # clutch.toml reference
 
-`clutch.toml` describes one C/C++ application executable and optional independent
+`clutch.toml` describes C/C++ executable and library targets and optional
 test executables. This reference covers the fields currently implemented by
 Clutch. Configure the directory containing the manifest before building:
 
@@ -16,6 +16,11 @@ native build files, saved configuration, `compile_commands.json` and
 Run `clutch .` again after changing the manifest or adding/removing sources.
 Existing source/header edits only need another build.
 
+Point your IDE at the selected profile's compilation database. See
+[using Clutch](usage.md#build-directories-and-ides) for setup. The [file API](file-api.md)
+uses client query files in the profile directory; no extra manifest fields are
+required.
+
 Try the [runnable examples](examples.md) for complete single-file, multi-file,
 C and mixed-language projects using these fields.
 
@@ -23,10 +28,12 @@ C and mixed-language projects using these fields.
 
 | Table | Required | Purpose |
 | --- | --- | --- |
-| `[project]` | Yes | Project name/version, language, standards and optional entry source |
+| `[project]` | Yes, except a virtual workspace root | Project name/version, language, standards and optional entry source |
 | `[build]` | No | Generator, application sources, include directories and definitions |
 | `[profile.debug]` | No | Debug build directory, optimization and warnings |
 | `[profile.release]` | No | Release build directory, optimization and warnings |
+| `[workspace]` | No | Compose explicit member projects; a virtual root may omit `[project]` |
+| `[[target]]` | No; repeatable | Explicit executable, static or shared library |
 | `[[test]]` | No; repeatable | Independent executable test name and sources |
 
 Unknown keys and unsupported profile names are errors. Values use the types
@@ -44,12 +51,35 @@ Forward slashes work in Windows TOML paths too. For backslashes, use TOML litera
 strings (`'D:\code\headers'`) or escape each backslash in a basic quoted string
 (`"D:\\code\\headers"`).
 
+## [workspace]
+
+| Field | Type | Required/default | Behavior |
+| --- | --- | --- | --- |
+| `members` | Nonempty array of string directory paths | Required when workspace is present | Explicit physical member directories inside the root; each contains its own `clutch.toml` |
+
+Workspace roots coordinate profiles and generator selection. A root with no
+`[project]` is virtual and declares no sources/targets/tests of its own; its
+`[build]` permits only `generator`. A root with `[project]` participates as a real
+project. Members retain their own language/standards and source-relative paths,
+but cannot override `[profile]` or `build.generator`. Unknown workspace fields,
+duplicate directories/project names, escaping/redirected paths and nested
+workspaces are rejected. Globs/exclusions and automatic upward discovery are
+future work. See [workspaces](workspaces.md) for a complete example.
+
+Targets use `<project>::<target>` identities throughout the workspace. Local
+unqualified links resolve within their member; cross-member links and CLI target
+selection use qualified names. Each member's target artifacts live under
+`<profile-build-dir>/members/<project>/`.
+
+Configuration also generates [clutch.lock](lock-files.md). It is separate from
+manifest fields and host-specific `backend.toml`/`configuration.toml` caches.
+
 ## [project]
 
 | Field | Type | Required/default | Behavior |
 | --- | --- | --- | --- |
-| `name` | String | Required | Nonempty name containing letters, digits, `_` or `-`. Names the application executable, with `.exe` appended on Windows. |
-| `version` | String | Required | Nonempty project metadata. Currently not checked as semantic versioning, added as a macro, or used for dependency resolution. |
+| `name` | String | Required | Nonempty name containing letters, digits, `_` or `-`. Names the implicit application when no `[[target]]` is declared, with `.exe` appended on Windows. |
+| `version` | String | Required | Nonempty project metadata, recorded in `clutch.lock`. Not checked as semantic versioning or added as a compiler macro. |
 | `language` | String | `"auto"` | `"c"`, `"cpp"`, `"c++"`, `"mixed"` or `"auto"`; `"c++"` is an alias for `"cpp"`. |
 | `std` | Integer, string or table | C `11`; C++ `17` | Select language standards; see the rules below. |
 | `entry` | String path | Omitted | Add one application source to explicit/discovered sources. This is additive, not a replacement for discovery. |
@@ -132,10 +162,10 @@ Source paths must identify existing regular files. Directories, globs and header
 files are not accepted as compilation units. Clutch sorts and deduplicates the
 combined explicit/discovered sources and optional `project.entry`.
 
-All application sources form one executable, so they must collectively provide
+Without `[[target]]`, all application sources form one executable and must provide
 one entry point. Discovery includes nested source directories; place independent
 test programs outside `src/` or select application sources explicitly. At least
-one application source is required, even when tests are declared.
+one application source is required in this implicit mode, even when tests are declared.
 
 For a single file outside `src/`, either specify `sources = ["main.cpp"]` under
 `[build]` or `entry = "main.cpp"` under `[project]`. `entry` alone still includes
@@ -222,12 +252,112 @@ linker debug settings). Optimization and warning overrides do not change which
 profile is active. Native IDE generators express corresponding settings through
 their project formats while preserving Clutch's selected policies.
 
+### Debug symbols
+
+The debug profile enables symbol generation automatically; there is no separate
+manifest field for choosing a symbol format or output path.
+
+| Compiler/generator | Current debug output |
+| --- | --- |
+| MSVC or clang-cl with an MSVC-style linker | `/Z7` embeds symbols in `.obj` files; `/DEBUG` produces a linker PDB for each executable or DLL. Static libraries retain their objects' symbols without a separate compiler PDB. |
+| GCC/MinGW or Unix Clang | `-g` requests debugging information, normally embedded DWARF in objects and the linked executable/library on these toolchains. A `.pdb` file is not expected from MinGW's usual debug configuration. |
+| Xcode | Debugging symbols are enabled with `DEBUG_INFORMATION_FORMAT = dwarf`; Clutch does not currently request a separate `.dSYM` bundle. |
+
+A PDB is a **Program Database** containing debug information. Clutch leaves its
+name/location to the linker or native project defaults; it does not yet set an
+explicit `/PDB:` path. PDBs and other optional symbol sidecars are not declared
+outputs in Clutch's saved graph or file API. Deleting only a PDB therefore does
+not reliably trigger relinking with every backend; use a clean debug build to
+regenerate missing symbols. Keep an executable or DLL with the PDB from the same
+build when debugging it elsewhere.
+
+Other Clang target/linker combinations follow their toolchain's debug-format
+defaults; selecting a compiler named `clang++` alone does not guarantee PDB output.
+
+See Microsoft's documentation for
+[`/Z7` and `/Zi`](https://learn.microsoft.com/en-us/cpp/build/reference/z7-zi-zi-debug-information-format)
+and [`/PDB`](https://learn.microsoft.com/en-us/cpp/build/reference/pdb-use-program-database),
+and GCC's [debugging options](https://gcc.gnu.org/onlinedocs/gcc/Debugging-Options.html).
+
 Use distinct directories for debug/release and for different host/compiler
 setups. There is no command-line build-directory override. Clutch marks owned
 directories and refuses unrelated nonempty directories, redirected paths,
 reserved source/metadata locations, or a build directory that contains an input
 source file or include directory. `clutch clean` removes only the selected owned profile.
 Reconfigure after cleaning or moving the project.
+
+## Target
+
+Use repeatable `[[target]]` tables for multiple executables or local libraries.
+Explicit targets replace implicit application discovery: omit `build.sources`
+and `project.entry`. The project name remains metadata; it does not create an
+additional executable. All targets inherit project language standards and the
+active profile. Global `build.include_dirs` and `build.defines` apply to all units.
+
+Names must also avoid platform device names and generated metadata locations.
+
+| Field | Type | Default | Behavior |
+| --- | --- | --- | --- |
+| `name` | String | Required | Letters, digits, `_`, `-`; unique across all targets and tests |
+| `type` | String | `"executable"` | `"executable"`, `"static"` or `"shared"` |
+| `sources` | Nonempty array of string paths | Required | Complete source list; no discovery or globs |
+| `include_dirs` | Array of string paths | Empty | Private header search directories |
+| `public_include_dirs` | Array of string paths | Empty | Header directories used here and by consumers |
+| `defines` | Array of strings | Empty | Private preprocessor definitions |
+| `public_defines` | Array of strings | Empty | Definitions used here and by consumers |
+| `links` | Array of target names | Empty | Libraries used privately |
+| `public_links` | Array of target names | Empty | Libraries used here and exposed through this target's public interface |
+| `default` | Boolean | `true` | Include ordinary target in an unqualified build |
+
+```toml
+[[target]]
+name = "math"
+type = "static"
+sources = ["math/math.cpp"]
+public_include_dirs = ["math"]
+public_defines = ["MATH_API_VERSION=1"]
+
+[[target]]
+name = "calculator"
+sources = ["app/main.cpp"]
+links = ["math"]
+
+[[test]]
+name = "math_test"
+sources = ["checks/math_test.cpp"]
+links = ["math"]
+```
+
+`links` receives a provider's public requirements for this target's compilation.
+Only `public_links` forwards those requirements to later consumers. Archives
+contain their own objects; their private library dependencies still follow them
+on the final link line. Shared libraries resolve private dependencies themselves.
+Clutch orders libraries before their providers, including diamond dependencies,
+and selects a C++ linker when a C executable uses C++ libraries. Unknown targets,
+executable links, duplicate outputs and circular dependencies are rejected.
+
+```sh
+clutch targets
+clutch build --target calculator
+clutch run --target calculator
+clutch test --target math_test
+```
+
+Repeat `--target` to build several targets. An unqualified build selects ordinary
+targets with `default = true`; dependencies build as needed regardless of their
+default setting. Tests remain opt-in. `run` requires exactly one selected/default
+application executable; use `--target` when there are multiple applications.
+Libraries do not need `main`, so library-only projects are supported.
+
+Artifacts live in the profile build directory: executables use their target name,
+static libraries use `lib<name>.a` (MSVC: `<name>.lib`), and shared libraries use
+`lib<name>.so`, `lib<name>.dylib` or `<name>.dll`. Windows shared targets also
+produce an import library. Export/import DLL symbols in your own headers using
+`__declspec(dllexport)`/`__declspec(dllimport)` and private build definitions.
+Clutch stages dependent DLLs beside test executables; POSIX targets use relative
+runtime search paths. No system installation or global environment changes occur.
+Header-only interface targets, imported binary targets, custom output naming,
+per-target standards and installation rules are future work.
 
 ## [[test]]
 
@@ -237,6 +367,10 @@ Repeat `[[test]]` once per independent executable test:
 | --- | --- | --- | --- |
 | `name` | String | Required | Nonempty letters/digits/`_`/`-`; must be unique among tests |
 | `sources` | Nonempty array of string paths | Required | Complete set of existing C/C++ compilation units for this test |
+
+Tests also accept the target include/definition/link fields above. `type`, if
+present, must be `"executable"`; `default` is not accepted. Names share the same
+namespace as ordinary targets and the implicit application's name.
 
 ```toml
 [[test]]
@@ -250,10 +384,10 @@ sources = ["tests/c_api.c", "src/api.c"]
 
 Each test provides its own `main` and inherits both language standards, include
 paths, definitions and the active profile's policies. Application sources are
-not linked automatically; list any shared implementation sources explicitly.
+not linked automatically; list shared implementation sources or link a library target.
 Test sources are deduplicated per target and may use either or both languages.
 
-`clutch build` builds only the application. `clutch test` builds and runs all
+`clutch build` builds ordinary default targets. `clutch test` builds and runs all
 declared tests; `clutch test --filter math` selects test names containing `math`
 (a case-sensitive substring). A filter matching nothing is an error. Without a
 filter, a project with no tests reports that none are declared and succeeds.
@@ -326,7 +460,7 @@ Old spellings receive migration diagnostics. Regenerate configuration with
 fail configuration rather than silently enabling a different setting.
 
 Git dependency imports, foreign CMake/Make/Blaze adapters, folder aliases,
-automatic dependency updates, library targets, custom build hooks, PCH, bundled
+automatic dependency updates, custom build hooks, PCH, bundled
 archives and general cross-compilation configuration remain future work. Do not
 add fields for these to an active manifest yet. Clutch's own configuration
 engine and supported generators operate independently of the CMake project used

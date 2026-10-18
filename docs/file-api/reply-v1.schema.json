@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clutch file-API index and reply objects v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/index"
+    },
+    {
+      "$ref": "#/$defs/codemodel"
+    },
+    {
+      "$ref": "#/$defs/target"
+    },
+    {
+      "$ref": "#/$defs/toolchains"
+    },
+    {
+      "$ref": "#/$defs/inputs"
+    }
+  ],
+  "$defs": {
+    "version": {
+      "type": "object",
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "const": 1
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "required": [
+        "kind",
+        "version",
+        "jsonFile"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "codemodel",
+            "toolchains",
+            "inputs"
+          ]
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "jsonFile": {
+          "type": "string",
+          "pattern": "^generation-[0-9]{20}/[a-z0-9-]+\\.json$"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "source",
+        "build"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "build": {
+          "type": "string"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "fnv1a64"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "directory",
+        "arguments"
+      ],
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "index": {
+      "type": "object",
+      "required": [
+        "api",
+        "clutch",
+        "generation",
+        "status",
+        "profile",
+        "paths",
+        "reply",
+        "objects"
+      ],
+      "properties": {
+        "api": {
+          "$ref": "#/$defs/version"
+        },
+        "clutch": {
+          "type": "object",
+          "required": [
+            "version"
+          ],
+          "properties": {
+            "version": {
+              "type": "string"
+            }
+          }
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[0-9]{20}$"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error"
+          ]
+        },
+        "profile": {
+          "enum": [
+            "debug",
+            "release"
+          ]
+        },
+        "paths": {
+          "$ref": "#/$defs/paths"
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "reply": {
+          "type": "object"
+        },
+        "manifest": {
+          "$ref": "#/$defs/signature"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "const": "configure-failed"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "configurationInputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/configurationInput"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "success"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "manifest",
+              "configurationInputs"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "error"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ],
+            "properties": {
+              "objects": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "object": {
+      "type": "object",
+      "required": [
+        "kind",
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        }
+      }
+    },
+    "codemodel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object"
+        },
+        {
+          "required": [
+            "project",
+            "paths",
+            "profile",
+            "generator",
+            "compilationDatabase",
+            "targets",
+            "actions",
+            "workspace",
+            "projects"
+          ],
+          "properties": {
+            "kind": {
+              "const": "codemodel"
+            },
+            "paths": {
+              "$ref": "#/$defs/paths"
+            },
+            "project": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            },
+            "profile": {
+              "enum": [
+                "debug",
+                "release"
+              ]
+            },
+            "generator": {
+              "type": "object",
+              "required": [
+                "name",
+                "executable"
+              ]
+            },
+            "compilationDatabase": {
+              "type": "string"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "jsonFile"
+                ]
+              }
+            },
+            "actions": {
+              "type": "object",
+              "required": [
+                "configure",
+                "build"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/action"
+              }
+            },
+            "workspace": {
+              "type": "boolean"
+            },
+            "projects": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "version",
+                  "source"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "target": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object"
+        },
+        {
+          "required": [
+            "id",
+            "name",
+            "type",
+            "isTest",
+            "artifacts",
+            "dependencies",
+            "directory",
+            "sources",
+            "compileGroups",
+            "link",
+            "actions",
+            "buildByDefault",
+            "project",
+            "localName",
+            "sourceDirectory"
+          ],
+          "properties": {
+            "kind": {
+              "const": "target"
+            },
+            "type": {
+              "enum": [
+                "EXECUTABLE",
+                "STATIC_LIBRARY",
+                "SHARED_LIBRARY"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "isTest": {
+              "type": "boolean"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "artifacts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "path"
+                ]
+              }
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "object",
+                  "compileGroupIndex",
+                  "arguments"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "object": {
+                    "type": "string"
+                  },
+                  "compileGroupIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "arguments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1
+                  }
+                }
+              }
+            },
+            "compileGroups": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "language",
+                  "standard",
+                  "includes",
+                  "defines"
+                ],
+                "properties": {
+                  "language": {
+                    "enum": [
+                      "C",
+                      "CXX"
+                    ]
+                  },
+                  "standard": {
+                    "type": "string"
+                  },
+                  "includes": {
+                    "type": "array"
+                  },
+                  "defines": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "link": {
+              "$ref": "#/$defs/action"
+            },
+            "actions": {
+              "type": "object",
+              "required": [
+                "build"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/action"
+              }
+            },
+            "buildByDefault": {
+              "type": "boolean"
+            },
+            "project": {
+              "type": "string"
+            },
+            "localName": {
+              "type": "string"
+            },
+            "sourceDirectory": {
+              "type": "string"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "EXECUTABLE"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "actions": {
+                    "required": [
+                      "run"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "toolchains": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object"
+        },
+        {
+          "required": [
+            "toolchains"
+          ],
+          "properties": {
+            "kind": {
+              "const": "toolchains"
+            },
+            "toolchains": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "language",
+                  "compiler"
+                ],
+                "properties": {
+                  "language": {
+                    "enum": [
+                      "C",
+                      "CXX"
+                    ]
+                  },
+                  "compiler": {
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "driverStyle"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "driverStyle": {
+                        "enum": [
+                          "gnu",
+                          "msvc"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "inputs": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object"
+        },
+        {
+          "required": [
+            "configurationInputs",
+            "sourceDiscovery"
+          ],
+          "properties": {
+            "kind": {
+              "const": "inputs"
+            },
+            "configurationInputs": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/configurationInput"
+              }
+            },
+            "sourceDiscovery": {
+              "type": "object",
+              "required": [
+                "directory",
+                "recursive",
+                "extensions",
+                "reconfigureOnAddRemove"
+              ]
+            },
+            "sourceDiscoveries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "directory",
+                  "recursive",
+                  "extensions",
+                  "reconfigureOnAddRemove",
+                  "project"
+                ],
+                "properties": {
+                  "project": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "configurationInput": {
+      "type": "object",
+      "required": [
+        "path",
+        "signature"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "signature": {
+          "$ref": "#/$defs/signature"
+        }
+      }
+    }
+  }
+}

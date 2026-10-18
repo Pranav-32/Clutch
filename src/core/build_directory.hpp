@@ -25,7 +25,8 @@ fs::path build_directory(const Options &options);
 void prepare_build_directory(const Project &project);
 /// Reject reserved/redirected paths and mismatched ownership. When
 /// require_owner is true, any existing directory must already carry this
-/// project's marker.
+/// project's marker. Configuration may claim an unowned directory containing
+/// only the public file-API query skeleton; clean/load still require ownership.
 void validate_build_directory(const fs::path &root,
                               const fs::path &directory,
                               bool require_owner);

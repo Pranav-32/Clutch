@@ -16,16 +16,55 @@
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
+#include "core/targets/archive.hpp"
+#include "core/targets/runtime.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <algorithm>
+#include <fstream>
+#include <functional>
+#include <iterator>
+#include <queue>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 
 namespace clutch {
 namespace {
+/// Removing a generated result is safe only at its physical, owned location.
+void invalidate_output(const fs::path &output) {
+  if (fs::is_symlink(fs::symlink_status(output)) ||
+      fs::weakly_canonical(output.parent_path()) != output.parent_path())
+    throw std::runtime_error("refusing redirected Make output: " +
+                             output.string());
+
+  fs::remove(output);
+}
+
+/// Invalidate stale results before publishing a changed command. Timestamp-only
+/// dependencies can miss edits within one clock tick on older Make versions.
+void write_response(const fs::path &path,
+                    const std::string &content,
+                    const fs::path &output,
+                    const std::function<void()> &invalidate_dependents) {
+  if (std::ifstream input(path, std::ios::binary); input) {
+    const std::string previous((std::istreambuf_iterator(input)), {});
+    if (input.bad())
+      throw std::runtime_error("cannot read Make response file: " +
+                               path.string());
+
+    if (previous == content)
+      return;
+  }
+
+  // Invalidate the full chain before writing metadata. A rebuilt object's mtime
+  // can still equal an older archive's mtime on a coarse clock.
+  invalidate_output(output);
+  invalidate_dependents();
+  write_if_changed(path, content);
+}
+
 /// Reject characters that would split a rule/recipe or truncate a native
 /// argument.
 void validate_text(const std::string &value) {
@@ -141,6 +180,7 @@ std::set<fs::path> collect_headers(const Graph &graph) {
   std::set roots(graph.project.includes.begin(), graph.project.includes.end());
 
   for (const auto &target : graph.targets) {
+    roots.insert(target.includes.begin(), target.includes.end());
     for (const auto &unit : target.units)
       roots.insert(unit.source.parent_path());
   }
@@ -158,9 +198,9 @@ std::set<fs::path> collect_headers(const Graph &graph) {
 
       if (entry.is_directory()) {
         if (const auto name = entry.path().filename().string();
-          entry.is_symlink() || entry.path() == graph.project.build ||
-          name == ".git" || name == layout::environment ||
-          name.rfind(layout::build_prefix, 0) == 0)
+            entry.is_symlink() || entry.path() == graph.project.build ||
+            name == ".git" || name == layout::environment ||
+            name.rfind(layout::build_prefix, 0) == 0)
           iterator.disable_recursion_pending();
 
         continue;
@@ -194,10 +234,12 @@ std::vector<std::string> regenerate_command(const Graph &graph,
 
   if (options.release)
     arguments.emplace_back("--release");
+  if (options.locked)
+    arguments.emplace_back("--locked");
 
   return arguments;
 }
-} // namespace
+}  // namespace
 
 /// Emit one native Make dialect while preserving the graph's compile/link
 /// commands.
@@ -206,21 +248,53 @@ void generate_make(const Graph &graph,
                    const fs::path &clutch_executable) {
   const bool gnu = graph.backend.name == "make";
   const auto &build = graph.project.build;
+  // Reverse edges let an altered compile/archive/link command invalidate every
+  // consuming output, independent of graph order and timestamp precision.
+  std::vector<std::vector<size_t>> consumers(graph.targets.size());
+  for (size_t index = 0; index < graph.targets.size(); ++index)
+    for (const auto provider : graph.targets[index].dependencies)
+      consumers.at(provider).push_back(index);
+
+  std::vector<bool> invalidated(graph.targets.size(), false);
+  const auto invalidate_target = [&](const size_t first) {
+    std::queue<size_t> pending;
+    pending.push(first);
+    while (!pending.empty()) {
+      const auto index = pending.front();
+      pending.pop();
+      if (invalidated[index])
+        continue;
+
+      invalidate_output(graph.targets[index].output);
+      for (const auto &[library, destination] : runtime_copies(graph, index)) {
+        (void)library;
+        invalidate_output(destination);
+      }
+      invalidated[index] = true;
+      for (const auto consumer : consumers[index])
+        pending.push(consumer);
+    }
+  };
+
   // GNU drivers provide depfiles; MSVC needs conservative explicit header
   // edges.
-  const auto headers = gnu && !graph.toolchain.msvc
-                         ? std::set<fs::path>{}
-                         : collect_headers(graph);
+  const auto headers = gnu && !graph.toolchain.msvc ? std::set<fs::path>{}
+                                                    : collect_headers(graph);
   std::ostringstream make;
   make << "# Generated by Clutch. Do not edit.\n"
-      "# Reconfigure with clutch <project> after changing project "
-      "settings.\n";
+          "# Reconfigure with clutch <project> after changing project "
+          "settings.\n";
+  // Record metadata-only changes too, so Make's remake/reparse cycle publishes
+  // a new snapshot rather than reconfiguring the same old Makefile every run.
+  for (const auto &[input, signature] : graph.project.inputs)
+    make << "# input " << signature << ' ' << make_path(input, build, gnu)
+         << '\n';
 
   if (gnu) {
     make << ".DEFAULT_GOAL := clutch_all\n"
-        ".DELETE_ON_ERROR:\n"
-        ".SUFFIXES:\n"
-        ".PHONY: clutch_all clutch-tests";
+            ".DELETE_ON_ERROR:\n"
+            ".SUFFIXES:\n"
+            ".PHONY: clutch_all clutch-tests";
 
     for (size_t index = 0; index < graph.targets.size(); ++index)
       make << " clutch_target_" << index;
@@ -229,25 +303,72 @@ void generate_make(const Graph &graph,
   } else {
     make
         << "# NMake/JOM conservatively rebuild units when scanned headers "
-        "change.\n"
-        "# Reconfigure before building after manifest/source-list changes.\n"
-        ".SUFFIXES:\n";
+           "change.\n"
+           "# Reconfigure before building after manifest/source-list changes.\n"
+           ".SUFFIXES:\n";
   }
 
   // Stable synthetic target names avoid exposing platform-specific output
   // paths.
-  make << "\nclutch_all: clutch_target_0\n\nclutch-tests:";
-
-  for (size_t index = 1; index < graph.targets.size(); ++index)
-    make << " clutch_target_" << index;
-
+  make << "\nclutch_all:";
+  for (size_t index = 0; index < graph.targets.size(); ++index)
+    if (graph.targets[index].build_by_default && !graph.targets[index].is_test)
+      make << " clutch_target_" << index;
+  make << "\n\nclutch-tests:";
+  for (size_t index = 0; index < graph.targets.size(); ++index)
+    if (graph.targets[index].is_test)
+      make << " clutch_target_" << index;
   make << "\n\n";
 
+  // Import libraries are secondary linker outputs. NMake treats a recipe as
+  // an update even when it leaves a file unchanged; depend on the DLL normally
+  // and request repair only if the import library is absent at parse time.
   for (size_t index = 0; index < graph.targets.size(); ++index) {
-    const auto &[name, output, units, link] = graph.targets[index];
+    const auto &library = graph.targets[index];
+    if (library.import_library.empty())
+      continue;
+
+    if (gnu)
+      make << "ifeq ($(wildcard "
+           << make_path(library.import_library, build, true) << "),)\n";
+    else
+      make << "!IF !EXIST(" << make_path(library.import_library, build, false)
+           << ")\n";
+    make << "clutch_import_" << index << " = "
+         << make_path(library.import_library, build, gnu) << '\n'
+         << (gnu ? "else\n" : "!ELSE\n") << "clutch_import_" << index << " =\n"
+         << (gnu ? "endif\n\n" : "!ENDIF\n\n");
+  }
+
+  std::set<fs::path> staged;
+  for (size_t index = 0; index < graph.targets.size(); ++index) {
+    const auto &target = graph.targets[index];
+    const auto &name = target.name;
+    const auto &output = target.output;
+    const auto &units = target.units;
+    const auto &link = target.link;
     fs::create_directories(output.parent_path());
-    make << "clutch_target_" << index << ": "
-        << make_path(output, build, gnu) << "\n\n";
+    const auto copies = runtime_copies(graph, index);
+    make << "clutch_target_" << index << ": " << make_path(output, build, gnu);
+    for (const auto &[library, destination] : copies) {
+      (void)library;
+      make << ' ' << make_path(destination, build, gnu);
+    }
+
+    make << "\n\n";
+    for (const auto &[library, destination] : copies) {
+      if (!staged.insert(destination).second)
+        continue;
+
+      make << make_path(destination, build, gnu) << ": "
+           << make_path(graph.targets[library].output, build, gnu) << "\n\t"
+           << recipe(runtime_copy_command(graph,
+                                          options,
+                                          clutch_executable,
+                                          index,
+                                          library))
+           << "\n\n";
+    }
 
     for (const auto &unit : units) {
       if (unit.arguments.empty())
@@ -256,7 +377,7 @@ void generate_make(const Graph &graph,
       fs::create_directories(unit.object.parent_path());
       const auto response_path = fs::path(unit.object.string() + ".make.rsp");
 
-      // Stip away const
+      // Copy only when adding generator-specific dependency flags.
       auto arguments = unit.arguments;
 
       if (gnu && !graph.toolchain.msvc) {
@@ -265,39 +386,70 @@ void generate_make(const Graph &graph,
                          {"-MP", "-MQ", relative_path(unit.object, build)});
       }
 
-      // Response-file timestamps become prerequisites, so flag changes rebuild.
-      write_if_changed(response_path,
-                       response(arguments, graph.toolchain.msvc));
+      // Keep timestamp prerequisites for native builds and invalidate old
+      // objects when the command changes, even within one timestamp tick.
+      write_response(response_path,
+                     response(arguments, graph.toolchain.msvc),
+                     unit.object,
+                     [&] {
+                       invalidate_target(index);
+                     });
       make << make_path(unit.object, build, gnu) << ": "
-          << make_path(unit.source, build, gnu) << ' '
-          << make_path(response_path, build, gnu);
+           << make_path(unit.source, build, gnu) << ' '
+           << make_path(response_path, build, gnu);
 
       for (const auto &header : headers)
         make << " \\\n  " << make_path(header, build, gnu);
 
       make << "\n\t@echo Compiling " << unit.object.filename().string()
-          << "\n\t"
-          << recipe({unit.arguments.front(),
-                     "@" + relative_path(response_path, build)})
-          << "\n\n";
+           << "\n\t"
+           << recipe({unit.arguments.front(),
+                      "@" + relative_path(response_path, build)})
+           << "\n\n";
     }
 
     if (link.empty())
       throw std::runtime_error("Make target has no linker command");
 
     const auto response_path = fs::path(output.string() + ".make.rsp");
-    write_if_changed(response_path,
-                     response(link, graph.toolchain.msvc));
+    write_response(response_path,
+                   response(link, graph.toolchain.msvc),
+                   output,
+                   [&] {
+                     invalidate_target(index);
+                   });
     make << make_path(output, build, gnu) << ": "
-        << make_path(response_path, build, gnu);
+         << make_path(response_path, build, gnu);
 
     for (const auto &unit : units)
       make << " \\\n  " << make_path(unit.object, build, gnu);
 
-    make << "\n\t@echo Linking " << name << "\n\t"
-        << recipe({link.front(),
-                   "@" + relative_path(response_path, build)})
-        << "\n\n";
+    for (const auto dependency : target.type == TargetType::StaticLibrary
+                                     ? target.dependencies
+                                     : target.link_dependencies) {
+      const auto &library = graph.targets.at(dependency);
+      make << " \\\n  " << make_path(library.output, build, gnu);
+      if (!library.import_library.empty())
+        make << " $(clutch_import_" << dependency << ')';
+    }
+    const auto command =
+        target.type == TargetType::StaticLibrary
+            ? archive_command(graph, options, clutch_executable, index)
+            : std::vector<std::string>{link.front(),
+                                       "@" +
+                                           relative_path(response_path, build)};
+    make << "\n\t@echo "
+         << (target.type == TargetType::StaticLibrary ? "Archiving "
+                                                      : "Linking ")
+         << name << "\n\t" << recipe(command) << "\n\n";
+    if (!target.import_library.empty()) {
+      // NMake has no grouped-output rule. The DLL is the sole producer; repair
+      // its import library only when that secondary output has been removed.
+      make << make_path(target.import_library, build, gnu) << ": "
+           << make_path(output, build, gnu) << "\n\t@if not exist "
+           << make_path(target.import_library, build, false) << ' '
+           << recipe(command) << "\n\n";
+    }
   }
 
   if (gnu) {
@@ -307,8 +459,8 @@ void generate_make(const Graph &graph,
       for (const auto &target : graph.targets) {
         for (const auto &unit : target.units)
           make << "-include "
-              << make_path(fs::path(unit.object.string() + ".d"), build, gnu)
-              << "\n";
+               << make_path(fs::path(unit.object.string() + ".d"), build, gnu)
+               << "\n";
       }
 
       make << "\n";
@@ -316,11 +468,14 @@ void generate_make(const Graph &graph,
 
     // GNU Make remakes an out-of-date loaded Makefile and reparses its new
     // rules.
-    make << "Makefile: "
-        << make_path(graph.project.root / layout::manifest, build, gnu) << ' '
-        << make_path(clutch_executable, build, gnu) << "\n\t"
-        << recipe(regenerate_command(graph, options, clutch_executable))
-        << "\n";
+    make << "Makefile:";
+    for (const auto &[input, signature] : graph.project.inputs) {
+      (void)signature;
+      make << ' ' << make_path(input, build, gnu);
+    }
+    make << ' ' << make_path(clutch_executable, build, gnu) << "\n\t"
+         << recipe(regenerate_command(graph, options, clutch_executable))
+         << "\n";
   }
 
   write_if_changed(build / "Makefile", make.str());
@@ -356,4 +511,4 @@ make_build_command(const Graph &graph,
 
   return arguments;
 }
-} // namespace clutch
+}  // namespace clutch

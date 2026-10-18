@@ -22,4 +22,4 @@ export CLUTCH_TEST_BUILD_DIR="$source_dir/build-container"
 export CLUTCH_TEST_EXPORT_DATABASE=ON
 
 # Replace this wrapper so initialization reports the verification runner's status.
-exec bash "$source_dir/tests/verify.sh"
+exec bash "$source_dir/tests/scripts/verify.sh"

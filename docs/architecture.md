@@ -5,6 +5,10 @@ target graph and generates native backend files plus an IDE compilation database
 CMake builds and tests Clutch during development. Foreign dependency adapters
 and self-hosting remain separate future work.
 
+The [file API](file-api.md) exposes a public, versioned query/reply model from
+the resolved graph independently of private saved-configuration
+formats. Editor-specific setup belongs to IDE extensions in separate repositories.
+
 This guide inventories maintained sources, headers, setup files, and generated
 outputs. Fixtures under `tests/work/` are ignored verification products.
 
@@ -20,6 +24,9 @@ src/
   main.cpp
   app/                  CLI and project workflows
   core/                 Manifest, graph, configuration storage, IDE metadata
+    file_api/           Public protocol, queries, code model and snapshot publication
+    targets/            Target declarations, resolution, archives and runtime staging
+    workspace/          Member composition, input snapshots and portable resolution locks
   toolchains/           Compiler discovery and saved compiler settings
   backends/             Generator registry and native build dispatch
     ninja/              Ninja rules
@@ -29,7 +36,13 @@ src/
   platform/             Processes, file output, terminal messages
 third_party/            Vendored headers and upstream licenses
 examples/               Independent projects configured and built with Clutch
-tests/                  Verification scripts and ignored fixtures
+tests/
+  CMakeLists.txt        CTest registration and test-only targets
+  unit/                 Native graph unit checks
+  integration/          Real Clutch workflows, generators and public protocols
+  tooling/              CI, packaging and versioning unit checks
+  scripts/              Verification entry points and fixture cleanup
+  work/                 Ignored generated fixtures
 .devcontainer/          Contributor image and initialization
 docs/                   User guides and contributor documentation
 ```
@@ -59,6 +72,11 @@ C++ conventions and documentation expectations.
 | [`src/core/encoding_constants.hpp`](../src/core/encoding_constants.hpp) | Named unsigned hexadecimal widths/masks and ASCII control boundaries shared by serializers; header-only constants. |
 | [`src/core/project.hpp`](../src/core/project.hpp) | Resolved paths, language standards, generator, profile settings, and test specifications. |
 | [`src/core/project.cpp`](../src/core/project.cpp) | Validates TOML, discovers/deduplicates sources, resolves standards/includes/definitions, and selects profile, generator, and tests. |
+| [`src/core/targets/target.hpp`](../src/core/targets/target.hpp), [`target.cpp`](../src/core/targets/target.cpp) | Target kinds, manifest specifications and stable kind spellings. |
+| [`src/core/targets/manifest.hpp`](../src/core/targets/manifest.hpp), [`manifest.cpp`](../src/core/targets/manifest.cpp) | Strict target/test fields, source validation and private/public requirements. |
+| [`src/core/targets/resolve.hpp`](../src/core/targets/resolve.hpp), [`resolve.cpp`](../src/core/targets/resolve.cpp) | Named DAG validation, usage propagation, topological static link order and CLI target selection. |
+| [`src/core/targets/archive.hpp`](../src/core/targets/archive.hpp), [`archive.cpp`](../src/core/targets/archive.cpp) | Internal native archive action with fresh outputs and tool-specific response files. |
+| [`src/core/targets/runtime.hpp`](../src/core/targets/runtime.hpp), [`runtime.cpp`](../src/core/targets/runtime.cpp) | Resolve reachable Windows DLLs and safely stage them beside test executables. |
 | [`src/core/build_directory.hpp`](../src/core/build_directory.hpp) | Declares profile path resolution, validation, and directory preparation. |
 | [`src/core/build_directory.cpp`](../src/core/build_directory.cpp) | Rejects unsafe/redirected/unrelated output paths and verifies/writes ownership markers. |
 | [`src/core/build_graph.hpp`](../src/core/build_graph.hpp) | Defines units, executable targets, and the graph with compiler/backend selections. |
@@ -113,6 +131,7 @@ Ninja or an IDE generator. Full cross-compilation settings remain future work.
 | [`third_party/CLI11.LICENSE`](../third_party/CLI11.LICENSE) | CLI11 license. |
 | [`third_party/toml.hpp`](../third_party/toml.hpp) | toml++ single-header manifest/configuration parser. |
 | [`third_party/tomlplusplus.LICENSE`](../third_party/tomlplusplus.LICENSE) | toml++ license. |
+| [`third_party/nlohmann/json.hpp`](../third_party/nlohmann/json.hpp), [`nlohmann.LICENSE`](../third_party/nlohmann.LICENSE) | Pinned single-header JSON parser/serializer and its MIT notice. |
 | [`third_party/README.md`](../third_party/README.md) | Pinned versions, licenses, roles, include paths, and update guidance. |
 
 Keep upstream implementations/licenses intact and scope formatting/lint fixes to
@@ -124,11 +143,12 @@ owned code. Building Clutch requires no dependency downloads.
 
 1. Validate the manifest, source set, standards, tests, and profile.
 2. Resolve/validate the directory from `profile.*.build_dir`.
-3. Resolve the generator, its native executor, and compatible compilers.
-4. Construct the backend-independent compile/link graph.
-5. Prepare owned output directories and generate native build files.
+3. Prepare owned output directories and initialize an optional file-API session.
+4. Resolve the generator/tools and construct the backend-independent graph.
+5. Generate native build files.
 6. Write IDE metadata and compiler/backend selection caches.
 7. Save the graph and manifest signature.
+8. Publish requested file-API objects and their success index, or record failure.
 
 Configuration creates files and discovers tools without compiling project sources.
 `--release` selects the release profile. Generator/compiler/executor overrides
@@ -137,11 +157,12 @@ belong to this phase; builds consume saved state.
 | Profile-directory output | Purpose |
 | --- | --- |
 | `.clutch-build-owner` | Canonical project-root ownership marker. |
-| `configuration.toml` | Resolved graph, executables, profile/location, and manifest change detector. |
+| `configuration.toml` | Private schema 4: graph, owning project/standards, workspace projects and manifest/lock fingerprints. Older schemas require reconfiguration. |
 | `compile_commands.json` | Absolute per-source arguments, including tests. |
 | `build-graph.dot` | Source-to-object-to-executable graph for optional Graphviz inspection. |
 | `toolchain.toml` | Compiler choices for subsequent explicit configuration. |
 | `backend.toml` | Saved generator/executor settings. |
+| `.clutch/api/v1/` | Client queries and immutable JSON reply snapshots when requested. |
 | `build.ninja` | Ninja rules when selected. |
 | `Makefile` and response files | GNU Make, NMake, or JOM rules when selected. |
 | `clutch.sln`, `clutch_target_N.vcxproj`, `clutch.proj` | Visual Studio solution, native projects, and explicit CLI target traversal. |
@@ -152,13 +173,16 @@ belong to this phase; builds consume saved state.
 
 Only the selected generator's files are emitted in a configuration pass. IDEs
 read the active build directory; no root database copy/symlink is created.
+Editor settings are managed by users or IDE extensions. See
+[using Clutch](usage.md#build-directories-and-ides) for compilation-database setup
+and the [file API](file-api.md) for the public query/reply interface.
 Visual Studio/Xcode projects contain one active profile. Configure debug/release
 independently to create separate projects.
 
 ## Build and project workflows
 
 - `build` loads the saved graph, validates its profile/location/manifest, and
-  invokes the selected native backend for the application.
+  invokes the selected native backend for selected/default ordinary targets.
 - `run` builds and launches the application from the project root, forwarding
   arguments and returning its exit code.
 - `test` builds selected test executables and aggregates runtime failures.
@@ -178,7 +202,59 @@ direct-backend regeneration differs from `clutch build`, which rejects stale
 saved configuration. Neither workflow automatically discovers source additions
 or removals without configuration.
 
+## Cached configuration and incremental builds
+
+Each profile retains compiler selection in `toolchain.toml`, generator/executor
+selection in `backend.toml`, and resolved target commands plus configuration-input
+fingerprints in `configuration.toml`. Builds load this state and reject stale
+manifests or locks. These private files are separate from the portable
+`clutch.lock` and the public file API.
+
+Saved manifest signatures, workspace input checks and public file-API
+fingerprints use the same `core/workspace/inputs` implementation. Hash constants
+are named in `core/hash_constants.hpp`; hexadecimal width follows the hash type
+and the encoding constants rather than a separately maintained digit count.
+
+The selected native backend tracks source/header dependencies and reuses unchanged
+objects and linked outputs. Clutch currently has no general user-defined
+configuration-variable cache or shared compiler-result cache. Cache performance
+depends on the project, compiler and backend; no performance advantage over CMake
+has been established by comparative benchmarks.
+
+Make response-file content changes invalidate the associated object, its target
+and all consuming target outputs before new metadata is written. Reverse dependency
+edges propagate invalidation through static libraries, shared libraries and
+executables; affected Windows runtime DLL copies are invalidated too. This covers
+removed archive members and changed flags without depending on subsecond timestamp
+support, including when newly compiled objects retain the previous clock tick.
+Unchanged commands preserve their outputs. Invalidation removes only generated
+artifacts and rejects redirected destinations.
+
 ## Invariants and limits
+
+- Workspaces compose explicit member manifests into qualified targets. Member
+  source roots/standards survive resolution, storage, native generators and IDE
+  exports; root profiles and generator remain authoritative.
+- `clutch.lock` is a separate portable schema (version 1), stored at the source
+  root. It records sorted local project identities/versions/relative paths and
+  cross-project links. It contains no host compiler/backend selections.
+- Root/member manifests and the lock are fingerprinted. Builds reject stale
+  inputs and file-API indices expose the entire snapshot. Native Ninja/GNU Make
+  regeneration watches each manifest using the native tool's timestamp rules.
+  Generated Ninja/Make files also record manifest fingerprints, so metadata-only
+  edits update their contents and GNU Make does not repeat configuration on every
+  build. Equal or preserved manifest timestamps require explicit configuration;
+  saved-state content validation still rejects stale inputs.
+- Atomic lock replacement uses a project-local exclusive writer directory,
+  POSIX rename or Windows MoveFileExW, with cleanup limited to owned temporary
+  files. Frozen configuration compares parsed resolution before generator output,
+  preserving matching locks across comments and host line-ending differences.
+
+The public file API occupies `<build>/.clutch/api/v1/` only when queried. The temporary, profile-shared
+lock writer is `clutch.lock.write-lock/` beside the source-root `clutch.lock` and
+is removed after publication. It does not create a persistent source-root folder.
+Normal lock output uses double-quoted TOML basic strings; frozen checks preserve
+existing formatting and compare resolution data.
 
 - Graph/database paths are absolute; manifest paths resolve from the project root.
 - Build paths belong in profiles, defaulting to `Clutch-build-debug` and
@@ -199,11 +275,15 @@ or removals without configuration.
   Visual Studio requires MSVC; Xcode requires macOS, full Xcode, and Apple Clang.
   NMake is serial. Make-based MSVC header tracking is conservative; compiler
   installation changes require a clean build.
-- The graph supports one application and explicit executable tests. Libraries,
+- The graph supports multiple executables, static/shared libraries and tests,
+  with public/private usage requirements and validated local links. Foreign
   dependency adapters, arbitrary custom commands, cross-compilation configuration,
   and full CMake parity remain future work. Unsupported dependencies fail explicitly.
 - Windows runtime checks do not validate macOS generators. Docker/Linux checks
   passed with Clang 22; IDE attachment and native Xcode execution remain unvalidated.
+- Debug profiles enable compiler symbols and MSVC-style linker PDB generation.
+  Symbol sidecars are not yet explicit graph/file-API artifacts; see
+  [debug symbols](manifest.md#debug-symbols) for output and rebuild limitations.
 
 ## Extension points
 
@@ -223,12 +303,16 @@ A backend owns generation, discovery, host restrictions, and invocation through
 the registry. The CLI does not assume Ninja flags. Register only implemented
 generators with executable build behavior.
 
-Future foreign CMake/Make/Blaze adapters should import artifacts, public includes,
-definitions, transitive link requirements, and preparation dependencies while
-preserving foreign build rules. Clutch remains the configuration engine. A
-compilation database alone cannot describe a complete target/link model.
-
 ## Setup and verification inventory
+
+| Workspace module | Responsibility |
+| --- | --- |
+| [`workspace.hpp`](../src/core/workspace/workspace.hpp), [`workspace.cpp`](../src/core/workspace/workspace.cpp) | Validate explicit member roots, load project manifests, qualify links/targets and scope compile requirements. |
+| [`inputs.hpp`](../src/core/workspace/inputs.hpp), [`inputs.cpp`](../src/core/workspace/inputs.cpp) | FNV-1a input fingerprints and stale-configuration checks. |
+| [`lock.hpp`](../src/core/workspace/lock.hpp), [`lock.cpp`](../src/core/workspace/lock.cpp) | Canonical local resolution, frozen checks, schema validation and atomic lock publication. |
+| [`tests/integration/workspace_integration.py`](../tests/integration/workspace_integration.py) | Native workspace builds, IDE metadata, lock portability/failures and member boundary checks. |
+| [`examples/workspace/README.md`](../examples/workspace/README.md) | Root/member manifests and cross-project library consumers. |
+| [`workspaces.md`](workspaces.md), [`lock-files.md`](lock-files.md) | Public membership, output, command and lock contracts. |
 
 Shared project paths live in `src/core/project_layout.hpp`: manifest, profile
 directory prefix, ownership marker, persisted state and generated metadata.
@@ -243,28 +327,40 @@ and never requires Git at runtime. See [versions and releases](releases.md).
 
 | File | Purpose and maintenance |
 | --- | --- |
-| [`CMakeLists.txt`](../CMakeLists.txt) | C++17 development target, private/vendor include roots, warnings, static MSVC runtime, executable/license installation, and CTest registration. Synchronize its source list with new modules. |
+| [`CMakeLists.txt`](../CMakeLists.txt) | C++17 development target, private/vendor include roots, warnings, static MSVC runtime, executable/license installation, and optional test subdirectory. Synchronize its source list with new modules. |
+| [`tests/CMakeLists.txt`](../tests/CMakeLists.txt) | Test-only targets, compiler/tool discovery and stable CTest registration for unit and integration suites. |
 | [`VERSION`](../VERSION), [`cmake/ClutchVersion.cmake`](../cmake/ClutchVersion.cmake), [`cmake/GenerateVersion.cmake`](../cmake/GenerateVersion.cmake), [`src/core/version.hpp.in`](../src/core/version.hpp.in) | Canonical release version, Git/source-archive identity, changed-content generation and CLI header template. |
 | [`src/core/project_layout.hpp`](../src/core/project_layout.hpp) | Shared layout contract and default profile-directory policy. |
+| [`src/platform/json.hpp`](../src/platform/json.hpp), [`json.cpp`](../src/platform/json.cpp) | Shared JSON string escaping for compilation-database arguments and paths. |
+| [`src/core/source_files.hpp`](../src/core/source_files.hpp) | Supported source suffixes shared by source discovery and public file-API metadata. |
+| [`src/core/file_api/file_api.hpp`](../src/core/file_api/file_api.hpp), [`file_api.cpp`](../src/core/file_api/file_api.cpp) | CLI discovery, session lifetime, writer locking, immutable generations and atomic index publication. |
+| [`src/core/file_api/protocol.hpp`](../src/core/file_api/protocol.hpp), [`protocol.cpp`](../src/core/file_api/protocol.cpp) | API/object versions, supported kinds, capability discovery and bounded query limits. |
+| [`src/core/file_api/query.hpp`](../src/core/file_api/query.hpp), [`query.cpp`](../src/core/file_api/query.cpp) | Shared/client query parsing, version negotiation, metadata echo and isolated diagnostics. |
+| [`src/core/file_api/paths.hpp`](../src/core/file_api/paths.hpp), [`paths.cpp`](../src/core/file_api/paths.cpp) | Query-only bootstrap ownership, redirected-path rejection, bounded reads and deterministic enumeration. |
+| [`src/core/file_api/model.hpp`](../src/core/file_api/model.hpp), [`model.cpp`](../src/core/file_api/model.cpp) | Target/source rules, toolchains, workflow argv and configuration-input fingerprints from the native graph. |
+| [`tests/integration/file_api_integration.py`](../tests/integration/file_api_integration.py) | Independent CLI/JSON consumer tests for publication, versions, ownership, actions, concurrent readers and native path redirections. |
+| [`tests/integration/targets_integration.py`](../tests/integration/targets_integration.py) | Real compiler-backed target graphs, library interfaces, runtime staging, archive freshness, named selection and target metadata. |
+| [`examples/targets/README.md`](../examples/targets/README.md), [`clutch.toml`](../examples/targets/clutch.toml) | Local static library with colocated public header/source and separate application/test consumers. |
+| [`examples/file-api/client.py`](../examples/file-api/client.py), [`query.json`](../examples/file-api/query.json), [`README.md`](../examples/file-api/README.md) | Reference consumer, sample query and usage; no Clutch application manifest. |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`build.yml`](../.github/workflows/build.yml) | Push/PR checks, reusable native matrix, container verification and downloadable packages. |
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | Tagged-commit validation, full native verification, checksums and draft-first release publication. |
 | [`.github/workflows/version.yml`](../.github/workflows/version.yml), [`release-please-config.json`](../.github/release-please-config.json), [`release-please-manifest.json`](../.github/release-please-manifest.json) | Conventional Commit version/changelog proposals and automation state; no automatic merge or publication. |
 | [`.github/scripts/ci.py`](../.github/scripts/ci.py), [`release.py`](../.github/scripts/release.py) | Native build/test/install driver and release validation, archives, license checks, streaming checksums and publication gates. Python is CI tooling only. |
-| [`tests/test_release.py`](../tests/test_release.py), [`test_versioning.py`](../tests/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
-| [`tests/test_ci.py`](../tests/test_ci.py) | Executable-discovery regressions, including preservation of language-selecting compiler symlinks such as clang++. |
+| [`tests/tooling/test_release.py`](../tests/tooling/test_release.py), [`test_versioning.py`](../tests/tooling/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
+| [`tests/tooling/test_ci.py`](../tests/tooling/test_ci.py) | Executable-discovery regressions, including preservation of language-selecting compiler symlinks such as clang++. |
 | [`examples/single-file/clutch.toml`](../examples/single-file/clutch.toml), [`main.cpp`](../examples/single-file/main.cpp) | C++17 single-file entry source and separate debug/release profiles. |
 | [`examples/multi-file/clutch.toml`](../examples/multi-file/clutch.toml), [`src/main.cpp`](../examples/multi-file/src/main.cpp), [`greeting.hpp`](../examples/multi-file/src/greeting.hpp), [`greeting.cpp`](../examples/multi-file/src/greeting.cpp), [`tests/greeting_test.cpp`](../examples/multi-file/tests/greeting_test.cpp) | Explicit application/test sources, colocated headers, shared implementation and runtime arguments. |
 | [`examples/c-project/clutch.toml`](../examples/c-project/clutch.toml), [`main.c`](../examples/c-project/main.c) | C11 executable built with a C compiler. |
 | [`examples/mixed/clutch.toml`](../examples/mixed/clutch.toml), [`src/main.cpp`](../examples/mixed/src/main.cpp), [`double_value.h`](../examples/mixed/src/double_value.h), [`double_value.c`](../examples/mixed/src/double_value.c) | Recursive C/C++ discovery, separate standards and C linkage across languages. |
-| [`tests/integration.ps1`](../tests/integration.ps1) | Windows C/C++/mixed fixtures for configuration, databases, profiles, incremental builds, saved tools, workflows, failures, and ownership. Retains ignored fixtures. |
-| [`tests/graph_tests.cpp`](../tests/graph_tests.cpp) | Graph safety regression checks, shared-input handling, deterministic DOT escaping and optional real Graphviz SVG rendering. |
-| [`tests/clean-work.ps1`](../tests/clean-work.ps1) | Removes generated folders inside `tests/work` with preview support, containment checks, and link/junction rejection; preserves the work root and loose files. |
-| [`tests/clean-work.sh`](../tests/clean-work.sh) | Bash 3.2-compatible cleanup for macOS, Linux and containers, with dry-run support, target preflight and link rejection; preserves the work root and loose files. |
-| [`tests/verify.sh`](../tests/verify.sh) | Shared Linux/macOS/container CMake build and CTest runner; resolves compilers/tools, requires the POSIX integration test, and supports configurable jobs and a separate container build tree. |
-| [`tests/windows-verify.cmd`](../tests/windows-verify.cmd) | Initializes supplied vcvars64 and runs MSVC/Clang integration checks; accepts Ninja and optional Clutch paths and propagates failures. |
-| [`tests/windows-standalone.ps1`](../tests/windows-standalone.ps1) | Copies only the executable into a unique fixture and checks help/version/startup with Windows system paths only, using bounded process waits. |
-| [`tests/native-generators.ps1`](../tests/native-generators.ps1) | Native Windows generator fixtures for configuration, build/test execution, paths with spaces, incremental behavior, and header tracking. |
-| [`tests/posix-integration.sh`](../tests/posix-integration.sh) | Real C/C++/mixed Ninja and GNU Make checks on POSIX, including workflows, standards/warnings, IDE databases, incremental builds, profiles, errors and ownership; registered by CMake when the required tools are found. |
+| [`tests/integration/windows.ps1`](../tests/integration/windows.ps1) | Windows C/C++/mixed fixtures for configuration, databases, profiles, incremental builds, saved tools, workflows, failures, and ownership. Retains ignored fixtures. |
+| [`tests/unit/graph_tests.cpp`](../tests/unit/graph_tests.cpp) | Graph safety regression checks, shared-input handling, deterministic DOT escaping and optional real Graphviz SVG rendering. |
+| [`tests/scripts/clean-work.ps1`](../tests/scripts/clean-work.ps1) | Removes generated folders inside `tests/work` with preview support, containment checks, and link/junction rejection; preserves the work root and loose files. |
+| [`tests/scripts/clean-work.sh`](../tests/scripts/clean-work.sh) | Bash 3.2-compatible cleanup for macOS, Linux and containers, with dry-run support, target preflight and link rejection; preserves the work root and loose files. |
+| [`tests/scripts/verify.sh`](../tests/scripts/verify.sh) | Shared Linux/macOS/container CMake build and CTest runner; resolves compilers/tools, requires the POSIX integration test, and supports configurable jobs and a separate container build tree. |
+| [`tests/scripts/windows-verify.cmd`](../tests/scripts/windows-verify.cmd) | Initializes supplied vcvars64 and runs MSVC/Clang integration checks; accepts Ninja and optional Clutch paths and propagates failures. |
+| [`tests/integration/windows-standalone.ps1`](../tests/integration/windows-standalone.ps1) | Copies only the executable into a unique fixture and checks help/version/startup with Windows system paths only, using bounded process waits. |
+| [`tests/integration/native-generators.ps1`](../tests/integration/native-generators.ps1) | Native Windows generator fixtures for configuration, build/test execution, paths with spaces, incremental behavior, and header tracking. |
+| [`tests/integration/posix.sh`](../tests/integration/posix.sh) | Real C/C++/mixed Ninja and GNU Make checks on POSIX, including workflows, standards/warnings, IDE databases, incremental builds, profiles, errors and ownership; registered by CMake when the required tools are found. |
 | [`.gitignore`](../.gitignore) | Ignores generated trees, fixtures, root databases, and local IDE state. Custom output paths may need rules. |
 | [`.clang-tidy`](../.clang-tidy) | Advisory first-party analysis using an analysis build directory's database. |
 | [`.clang-format-ignore`](../.clang-format-ignore) | Excludes generated trees, fixtures and vendored code from formatting. |
@@ -282,6 +378,7 @@ and never requires Git at runtime. See [versions and releases](releases.md).
 | [`docs/clion-copyright-template.txt`](clion-copyright-template.txt) | Copyable Velocity notice with preserved first year, current year and BSD-3-Clause SPDX identifier. |
 | [`docs/installation.md`](installation.md) | Platform prerequisites, CMake source builds, installation prefixes and compiler environments. |
 | [`docs/usage.md`](usage.md) | Project configuration, generators, compilers, IDE metadata and executable tests. |
+| [`docs/file-api.md`](file-api.md), [`query-v1.schema.json`](file-api/query-v1.schema.json), [`reply-v1.schema.json`](file-api/reply-v1.schema.json) | Public protocol, query schema and index/object reply schema. |
 | [`docs/examples.md`](examples.md) | Running the checked-in examples with installed or locally built Clutch binaries. |
 | [`docs/testing.md`](testing.md) | Contributor verification commands, runner settings, fixture cleanup and validation scope. |
 | [`docs/architecture.md`](architecture.md) | This inventory and lifecycle guide. |

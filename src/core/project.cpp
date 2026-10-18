@@ -16,6 +16,9 @@
 #include "core/build_directory.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
+#include "core/source_files.hpp"
+#include "core/targets/manifest.hpp"
+#include "core/workspace/workspace.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
@@ -28,9 +31,8 @@
 
 namespace clutch {
 namespace {
-// Manifest-supported source suffixes and language standards. Array deduction
+// Manifest-supported language standards. Array deduction
 // preserves these immutable string literals without allocating temporary sets.
-constexpr std::array source_extensions{".c", ".cc", ".cpp", ".cxx"};
 constexpr std::array cpp_standards{"11", "14", "17", "20", "23"};
 constexpr std::array c_standards{"99", "11", "17", "23"};
 
@@ -95,28 +97,38 @@ std::string standard(const toml::node *const node, const std::string &context) {
   throw std::runtime_error(context +
                            " must be an integer or string standard version");
 }
-} // namespace
+}  // namespace
 
 /// Resolve manifest values into absolute paths and validated project settings.
-Project load_project(const Options &options) {
+Project load_project_manifest(const Options &options,
+                              const toml::table &doc,
+                              const bool virtual_workspace) {
   // Establish one physical project root for source, profile and ownership
   // checks.
   Project p;
   p.root = fs::canonical(options.root);
-  const auto doc = toml::parse_file((p.root / layout::manifest).string());
   if (doc.contains("package"))
     throw std::runtime_error("rename [package] to [project] in clutch.toml");
 
   // Validate supported tables and types before applying any defaults.
   keys(doc,
-       {"project", "build", "profile", "dependencies", "test"},
+       {"project",
+        "build",
+        "profile",
+        "dependencies",
+        "test",
+        "target",
+        "workspace"},
        "manifest");
+  const toml::table empty_project;
   const auto &project =
-      require_table(doc.get("project"), "clutch.toml: missing [project]");
+      virtual_workspace
+          ? empty_project
+          : require_table(doc.get("project"), "clutch.toml: missing [project]");
 
   if (project.contains("edition") || project.contains("c_standard"))
     throw std::runtime_error("replace project.edition/c_standard with "
-        "project.language and project.std");
+                             "project.language and project.std");
 
   keys(project, {"name", "version", "language", "std", "entry"}, "project");
   for (const auto &[key, node] : project) {
@@ -135,7 +147,7 @@ Project load_project(const Options &options) {
 
     keys(build, {"sources", "include_dirs", "defines", "generator"}, "build");
     if (const auto *value = build.get("generator");
-      value && !value->is_string())
+        value && !value->is_string())
       throw std::runtime_error("build.generator must be a string");
   }
 
@@ -159,18 +171,17 @@ Project load_project(const Options &options) {
     }
   }
 
-  p.name = doc["project"]["name"].value_or(std::string{});
+  p.name = virtual_workspace ? "workspace"
+                             : doc["project"]["name"].value_or(std::string{});
   if (p.name.empty() ||
-      !std::all_of(p.name.begin(),
-                   p.name.end(),
-                   [](const unsigned char c) {
-                     return std::isalnum(c) || c == '_' || c == '-';
-                   }))
+      !std::all_of(p.name.begin(), p.name.end(), [](const unsigned char c) {
+        return std::isalnum(c) || c == '_' || c == '-';
+      }))
     throw std::runtime_error(
         "project.name must contain only letters, digits, '_' or '-'");
 
-  if (const auto version = doc["project"]["version"].value<std::string>();
-    !version || version->empty())
+  p.version = project["version"].value_or(std::string{});
+  if (!virtual_workspace && p.version.empty())
     throw std::runtime_error("project.version must be a nonempty string");
 
   if (doc.contains("dependencies"))
@@ -181,37 +192,47 @@ Project load_project(const Options &options) {
     if (const auto node = doc["build"][key]; node) {
       const auto &values = require_array(node.node(),
                                          std::string("build.") + key +
-                                         " must be an array of strings");
+                                             " must be an array of strings");
       for (const auto &value : values)
         append(require_string(value,
                               std::string("build.") + key +
-                              " must contain strings"));
+                                  " must contain strings"));
     }
   };
 
-  // Prefer explicit sources; otherwise discover src/ and add any explicit
-  // entry.
-  array("sources",
-        [&](const std::string &s) {
-          p.sources.push_back(fs::canonical(p.root / s));
-        });
-  if (p.sources.empty() && fs::is_directory(p.root / "src")) {
-    for (const auto &e : fs::recursive_directory_iterator(p.root / "src")) {
-      if (const auto ext = e.path().extension().string();
-        e.is_regular_file() &&
-        (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx"))
-        p.sources.push_back(fs::canonical(e.path()));
-    }
-  }
+  if (!virtual_workspace)
+    load_manifest_targets(doc, p);
 
-  if (const auto entry = doc["project"]["entry"].value<std::string>())
-    p.sources.push_back(fs::canonical(p.root / *entry));
+  if (!virtual_workspace && p.targets.empty()) {
+    // Prefer explicit sources; otherwise discover src/ and add any explicit
+    // entry.
+    array("sources", [&](const std::string &s) {
+      p.sources.push_back(fs::canonical(p.root / s));
+    });
+    if (p.sources.empty() && fs::is_directory(p.root / "src")) {
+      for (const auto &e : fs::recursive_directory_iterator(p.root / "src")) {
+        if (const auto ext = e.path().extension().string();
+            e.is_regular_file() &&
+            (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx"))
+          p.sources.push_back(fs::canonical(e.path()));
+      }
+    }
+
+    if (const auto entry = doc["project"]["entry"].value<std::string>())
+      p.sources.push_back(fs::canonical(p.root / *entry));
+
+  } else {
+    for (const auto &target : p.targets)
+      p.sources.insert(p.sources.end(),
+                       target.sources.begin(),
+                       target.sources.end());
+  }
 
   // Stable, unique ordering also stabilizes object names across configurations.
   std::sort(p.sources.begin(), p.sources.end());
   p.sources.erase(std::unique(p.sources.begin(), p.sources.end()),
                   p.sources.end());
-  if (p.sources.empty())
+  if (!virtual_workspace && p.sources.empty())
     throw std::runtime_error(
         "no sources: add src/main.cpp, src/main.c or build.sources");
 
@@ -244,7 +265,7 @@ Project load_project(const Options &options) {
 
   if ((p.language == "c" && has_cpp) || (p.language == "cpp" && has_c))
     throw std::runtime_error("project.language does not match application "
-        "sources; use mixed for C and C++");
+                             "sources; use mixed for C and C++");
 
   // Mixed projects need separate standards; single-language projects accept a
   // scalar. Unspecified values retain the C11/C++17 defaults in Project.
@@ -259,7 +280,7 @@ Project load_project(const Options &options) {
     } else {
       if (p.language == "mixed")
         throw std::runtime_error("mixed-language project.std must be a table, "
-            "such as { c = 11, cpp = 20 }");
+                                 "such as { c = 11, cpp = 20 }");
       (p.language == "c" ? p.c_standard : p.cxx_standard) =
           standard(node, "project.std");
     }
@@ -275,8 +296,8 @@ Project load_project(const Options &options) {
 
   // CLI generator selection takes precedence over the manifest's default.
   p.generator = options.generator.empty()
-                  ? doc["build"]["generator"].value_or(std::string("ninja"))
-                  : options.generator;
+                    ? doc["build"]["generator"].value_or(std::string("ninja"))
+                    : options.generator;
   std::transform(p.generator.begin(),
                  p.generator.end(),
                  p.generator.begin(),
@@ -288,68 +309,18 @@ Project load_project(const Options &options) {
 
   // Resolve shared search paths and definitions once for application/test
   // units.
-  array("include_dirs",
-        [&](const std::string &s) {
-          if (const auto path = fs::canonical(p.root / s);
-            fs::is_directory(path))
-            p.includes.push_back(path);
-          else
-            throw std::runtime_error("include directory is not a folder: " + s);
-        });
+  array("include_dirs", [&](const std::string &s) {
+    if (const auto path = fs::canonical(p.root / s); fs::is_directory(path))
+      p.includes.push_back(path);
+    else
+      throw std::runtime_error("include directory is not a folder: " + s);
+  });
   if (fs::is_directory(p.root / "include"))
     p.includes.push_back(fs::canonical(p.root / "include"));
 
-  array("defines",
-        [&](const std::string &s) {
-          p.defines.push_back(s);
-        });
-
-  // Tests are independent executables with explicit, nonempty source lists.
-  if (const auto *node = doc.get("test")) {
-    const auto &tests =
-        require_array(node, "test must be an array of tables ([[test]])");
-
-    std::set<std::string> names;
-    for (const auto &value : tests) {
-      const auto &test = require_table(&value, "test must contain tables");
-      keys(test, {"name", "sources"}, "test");
-      Project::Test t;
-      t.name = test["name"].value_or(std::string{});
-      if (t.name.empty() ||
-          !std::all_of(t.name.begin(),
-                       t.name.end(),
-                       [](const unsigned char c) {
-                         return std::isalnum(c) || c == '_' || c == '-';
-                       }))
-        throw std::runtime_error(
-            "test.name must contain only letters, digits, '_' or '-'");
-
-      if (!names.insert(t.name).second)
-        throw std::runtime_error("duplicate test name: " + t.name);
-
-      const auto &sources =
-          require_array(test.get("sources"),
-                        "test.sources must be a nonempty array of strings");
-      if (sources.empty())
-        throw std::runtime_error(
-            "test.sources must be a nonempty array of strings");
-
-      for (const auto &source : sources) {
-        const auto file = fs::canonical(
-            p.root /
-            require_string(source, "test.sources must contain strings"));
-        if (!supported_source(file))
-          throw std::runtime_error("unsupported test source: " + file.string());
-
-        t.sources.push_back(file);
-      }
-
-      std::sort(t.sources.begin(), t.sources.end());
-      t.sources.erase(std::unique(t.sources.begin(), t.sources.end()),
-                      t.sources.end());
-      p.tests.push_back(std::move(t));
-    }
-  }
+  array("defines", [&](const std::string &s) {
+    p.defines.push_back(s);
+  });
 
   // Apply only the selected profile and keep its artifacts in its own
   // directory.
@@ -370,4 +341,4 @@ Project load_project(const Options &options) {
 #endif
   return p;
 }
-} // namespace clutch
+}  // namespace clutch

@@ -62,7 +62,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: Test release tooling
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        run: python -m unittest discover -s tests/tooling -p "test_*.py" -v
       - name: Build, test, install and package
         # Use the platform's default shell: Git Bash would shadow MSVC link.exe.
         run: python .github/scripts/ci.py --target ${{ matrix.target }}

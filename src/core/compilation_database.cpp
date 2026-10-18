@@ -14,37 +14,14 @@
 #include "compilation_database.hpp"
 
 #include "core/build_graph.hpp"
-#include "core/encoding_constants.hpp"
 #include "core/project_layout.hpp"
 #include "platform/files.hpp"
+#include "platform/json.hpp"
 
 #include <sstream>
 #include <string>
 
 namespace clutch {
-namespace {
-/// Quote a JSON string, including control bytes, without shell-escaping
-/// arguments.
-std::string json(const std::string &value) {
-  std::string result = "\"";
-  for (const unsigned char c : value) {
-    if (c == '"' || c == '\\') {
-      result += '\\';
-      result += static_cast<char>(c);
-    } else if (c < encoding::first_printable_ascii) {
-      constexpr auto hex = "0123456789abcdef";
-      const auto byte = static_cast<unsigned int>(c);
-      result += "\\u00";
-      result += hex[byte >> encoding::bits_per_nibble];
-      result += hex[byte & encoding::low_nibble_mask];
-    } else
-      result += static_cast<char>(c);
-  }
-
-  return result + '"';
-}
-} // namespace
-
 /// Emit one database record per application/test unit using exact graph
 /// arguments.
 void write_compilation_database(const Graph &graph) {
@@ -60,15 +37,15 @@ void write_compilation_database(const Graph &graph) {
       // An arguments array avoids shell parsing differences in IDE consumers.
       // The directory frame matches the working directory used by native
       // builds.
-      database << "  {\"directory\": " << json(graph.project.build.string())
-          << ", \"file\": " << json(source.string())
-          << ", \"output\": " << json(object.string())
+      database << "  {\"directory\": " << json_string(graph.project.build.string())
+          << ", \"file\": " << json_string(source.string())
+          << ", \"output\": " << json_string(object.string())
           << ", \"arguments\": [";
       for (size_t i = 0; i < arguments.size(); ++i) {
         if (i)
           database << ", ";
 
-        database << json(arguments[i]);
+        database << json_string(arguments[i]);
       }
 
       database << "]}";

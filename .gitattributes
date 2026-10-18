@@ -25,6 +25,7 @@
 *.LICENSE text eol=lf
 LICENSE text eol=lf
 *.toml text eol=lf
+clutch.lock text eol=lf
 
 # Language configurations
 .clang-format text eol=lf

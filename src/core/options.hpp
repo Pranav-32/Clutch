@@ -17,24 +17,23 @@
 
 #include <string>
 
-namespace clutch
-{
-    /// Invocation overrides; empty compiler/generator strings defer to resolution.
-    struct Options
-    {
-        // Project directory supplied positionally for configuration or by --project.
-        fs::path root = fs::current_path();
+namespace clutch {
+/// Invocation overrides; empty compiler/generator strings defer to resolution.
+struct Options {
+  // Project directory supplied positionally for configuration or by --project.
+  fs::path root = fs::current_path();
 
-        // Configuration-only driver overrides; unused languages need no compiler.
-        std::string cc, cxx;
+  // Configuration-only driver overrides; unused languages need no compiler.
+  std::string cc, cxx;
 
-        // Executable location override; selected independently from the generator.
-        std::string build_tool_executable;
-        // Native build-file format; an empty override defers to the manifest.
-        std::string generator;
+  // Executable location override; selected independently from the generator.
+  std::string build_tool_executable;
+  // Native build-file format; an empty override defers to the manifest.
+  std::string generator;
 
-        // Selects profile.release for both configuration and saved-graph execution.
-        bool release = false;
-        int jobs = 0; ///< Zero leaves parallelism at the selected backend's default.
-    };
-} // namespace clutch
+  // Selects profile.release for both configuration and saved-graph execution.
+  bool release = false;
+  bool locked = false;  ///< Configuration must use an unchanged existing lock.
+  int jobs = 0;  ///< Zero leaves parallelism at the selected backend's default.
+};
+}  // namespace clutch

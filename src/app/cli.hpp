@@ -16,5 +16,5 @@
 namespace clutch {
 /// Parse commands and return the command, compiler or launched program's exit
 /// status.
-int run_cli(int argc, char *const *const argv);
-} // namespace clutch
+int run_cli(int argc, char *const *argv);
+}  // namespace clutch
