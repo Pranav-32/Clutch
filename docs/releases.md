@@ -118,7 +118,7 @@ options, unrelated to Clutch project profiles.
 Tooling regression tests create temporary Git repositories and install trees:
 
 ```sh
-python -m unittest discover -s tests -p 'test_*.py' -v
+python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 ```
 
 Python is only a development dependency. Git, CMake and Python tests never become

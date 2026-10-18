@@ -1,5 +1,23 @@
 # Testing Clutch
 
+Tests are grouped by what they verify:
+
+| Directory | Purpose |
+| --- | --- |
+| `tests/unit/` | Native C++ graph and safety checks. |
+| `tests/integration/` | Actual Clutch builds, generators, file API, targets, workspaces and standalone startup. |
+| `tests/tooling/` | Python unit tests for CI, release packaging and Git versioning. |
+| `tests/scripts/` | Contributor verification commands and fixture cleanup. |
+| `tests/work/` | Ignored generated projects retained for inspection. |
+
+`tests/CMakeLists.txt` registers the native suites. Run them with CTest from the
+build root as shown below; moving test sources does not change the CTest names.
+Run tooling tests independently with Python 3.11+:
+
+```sh
+python -m unittest discover -s tests/tooling -p "test_*.py" -v
+```
+
 These workflows validate Clutch itself. To declare and run tests in a project
 built with Clutch, see [project workflows](usage.md#project-workflows). Run the
 following commands from the checkout root.
@@ -9,11 +27,11 @@ following commands from the checkout root.
 On Linux or macOS, run the complete native verification workflow:
 
 ```bash
-bash tests/verify.sh
+bash tests/scripts/verify.sh
 
 # Select compilers and adjust parallelism when needed:
 CC=clang CXX=clang++ CLUTCH_BUILD_JOBS=4 \
-    CLUTCH_TEST_BUILD_DIR=build-native-clang bash tests/verify.sh
+    CLUTCH_TEST_BUILD_DIR=build-native-clang bash tests/scripts/verify.sh
 ```
 
 The script builds Clutch in `build-native`, runs all registered CTest checks,
@@ -49,16 +67,16 @@ checks with `-DCLUTCH_TEST_NINJA="path/to/ninja.exe"`, then run:
 
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
-./tests/integration.ps1 -Clutch ./build/Release/clutch.exe -Ninja path/to/ninja.exe
-./tests/integration.ps1 -Clutch ./build/Release/clutch.exe -Ninja path/to/ninja.exe -CC clang -CXX clang++
+./tests/integration/windows.ps1 -Clutch ./build/Release/clutch.exe -Ninja path/to/ninja.exe
+./tests/integration/windows.ps1 -Clutch ./build/Release/clutch.exe -Ninja path/to/ninja.exe -CC clang -CXX clang++
 ```
 
-`tests/windows-verify.cmd <vcvars64.bat> <ninja.exe> [clutch.exe]` initializes the
+`tests/scripts/windows-verify.cmd <vcvars64.bat> <ninja.exe> [clutch.exe]` initializes the
 developer environment and runs MSVC/Clang checks. Integration checks cover C,
 C++, mixed projects, databases, spaces, profiles, incremental builds, header
 edits, saved configuration, workflows, and failures. Validate platform-specific
-generators on their native hosts. `tests/native-generators.ps1` exercises Windows
-native generators, and `tests/posix-integration.sh` covers Ninja/GNU Make on a
+generators on their native hosts. `tests/integration/native-generators.ps1` exercises Windows
+native generators, and `tests/integration/posix.sh` covers Ninja/GNU Make on a
 POSIX host with real C/C++ compilers.
 
 ## File-API checks
@@ -90,15 +108,15 @@ Remove generated folders under `tests/work` when you want fresh test workspaces:
 Linux, macOS, or the development container:
 
 ```bash
-bash tests/clean-work.sh --dry-run
-bash tests/clean-work.sh
+bash tests/scripts/clean-work.sh --dry-run
+bash tests/scripts/clean-work.sh
 ```
 
 Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/clean-work.ps1 -WhatIf
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/clean-work.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/scripts/clean-work.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/scripts/clean-work.ps1
 ```
 
 The first command in each pair previews cleanup. Both scripts preserve loose
@@ -115,6 +133,13 @@ member rejection, portable lock bytes, unchanged timestamps, `--locked` failures
 writer exclusion, relocation, and invalid member/cycle handling. It runs the
 available native generators on each host. POSIX additionally rejects symlinked
 members and lock files. CI and the POSIX verification runner require registration.
+
+The direct Ninja/GNU Make regeneration check ages the generated rules before
+invoking the native tool, establishing a strict timestamp order without sleeps
+or future-dated inputs. It edits only a member version, verifies that the generated
+file records the new input snapshot, and checks that the next native build skips
+configuration and preserves the file timestamp. A separate stale-input check
+preserves the edited manifest's timestamp to verify Clutch's content validation.
 
 ```sh
 ctest --test-dir build -R workspace --output-on-failure

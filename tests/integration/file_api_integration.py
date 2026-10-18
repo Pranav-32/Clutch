@@ -365,7 +365,7 @@ class FileApiTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
 
     def test_reference_client_and_stale_manifest(self):
-        client = Path(__file__).resolve().parents[1] / 'examples/file-api/client.py'
+        client = Path(__file__).resolve().parents[2] / 'examples/file-api/client.py'
         command = [sys.executable, str(client), '--clutch', OPTIONS.clutch,
                    '--project', str(self.root), '--cc', OPTIONS.cc,
                    '--cxx', OPTIONS.cxx, '--build-tool', OPTIONS.ninja]
@@ -379,7 +379,7 @@ class FileApiTests(unittest.TestCase):
         self.assertIn('manifest changed', stale.stderr)
 
     def test_protocol_schema_documents_have_resolvable_local_references(self):
-        directory = Path(__file__).resolve().parents[1] / 'docs/file-api'
+        directory = Path(__file__).resolve().parents[2] / 'docs/file-api'
         for path in directory.glob('*.schema.json'):
             document = json.loads(path.read_text(encoding='utf-8'))
 

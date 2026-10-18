@@ -151,6 +151,12 @@ a rename instruction. After changing a manifest or upgrading from an older
 saved configuration, run `clutch .` again to regenerate the build files and
 `compile_commands.json` with the current standard and profile settings.
 
+Direct Ninja and GNU Make invocations can regenerate their configuration when a
+root or member manifest is newer than the generated build file. These tools use
+file timestamps: edits that preserve timestamps, or land within the same clock
+tick, require an explicit `clutch .`. Clutch checks input contents when loading
+saved configuration and rejects stale inputs even when their timestamps match.
+
 ## Generators
 
 `clutch generators` lists implemented generators and their host availability.

@@ -238,7 +238,7 @@ The dev-container client runs this initialization script automatically:
 bash .devcontainer/post-create.sh
 ```
 
-It delegates to `tests/verify.sh`, configures a Debug CMake/Ninja build using
+It delegates to `tests/scripts/verify.sh`, configures a Debug CMake/Ninja build using
 Clang, compiles Clutch and runs CTest. The runner requires the POSIX integration
 suite to be registered and exercises Clutch's generated Ninja and GNU Make
 builds. You can rerun initialization or use these commands for an existing build:
@@ -269,8 +269,8 @@ container and native builds.
 To clear generated test workspace folders inside `tests/work`, preview and run:
 
 ```bash
-bash tests/clean-work.sh --dry-run
-bash tests/clean-work.sh
+bash tests/scripts/clean-work.sh --dry-run
+bash tests/scripts/clean-work.sh
 ```
 
 Cleanup preserves the `work` directory and loose files. It rejects links inside
@@ -451,7 +451,7 @@ credential forwarding.
 | `.devcontainer/devcontainer.json` | Image build, workspace mount, remote user, editor settings and initialization |
 | `.devcontainer/Dockerfile` | Ubuntu development tools, verified LLVM repository and CLion backend libraries |
 | `.devcontainer/post-create.sh` | CMake configuration, compilation and CTest execution |
-| `tests/verify.sh` | Shared Linux/macOS verification runner used by initialization |
+| `tests/scripts/verify.sh` | Shared Linux/macOS verification runner used by initialization |
 | `.devcontainer/.dockerignore` | Limits the tools-only image context to the Dockerfile and ignore rules |
 | `.gitattributes` | Keep shell and setup files in LF format across host platforms |
 

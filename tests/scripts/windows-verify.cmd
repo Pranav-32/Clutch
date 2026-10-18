@@ -19,15 +19,15 @@ set "CLUTCH_TEST_BINARY=%~3"
 if "%CLUTCH_TEST_BINARY%"=="" set "CLUTCH_TEST_BINARY=build\Release\clutch.exe"
 
 rem The first pass uses cl for both languages; the second explicitly selects Clang.
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\integration.ps1 -Clutch "%CLUTCH_TEST_BINARY%" -Ninja "%NINJA%"
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\integration\windows.ps1 -Clutch "%CLUTCH_TEST_BINARY%" -Ninja "%NINJA%"
 if errorlevel 1 exit /b %errorlevel%
 
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\integration.ps1 -Clutch "%CLUTCH_TEST_BINARY%" -Ninja "%NINJA%" -CC clang -CXX clang++
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\integration\windows.ps1 -Clutch "%CLUTCH_TEST_BINARY%" -Ninja "%NINJA%" -CC clang -CXX clang++
 if errorlevel 1 exit /b %errorlevel%
 
 rem Native Windows generators reuse the initialized compiler and SDK environment.
 rem Opt in explicitly so machines with only Ninja preserve the original workflow.
 if not "%~4"=="--native-generators" exit /b 0
 
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\native-generators.ps1 -Clutch "%CLUTCH_TEST_BINARY%"
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\integration\native-generators.ps1 -Clutch "%CLUTCH_TEST_BINARY%"
 exit /b %errorlevel%

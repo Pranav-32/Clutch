@@ -93,7 +93,7 @@ def build(target, build_dir, output):
     binary = build_dir / ('clutch.exe' if windows else 'clutch')
     if windows:
         run('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-            ROOT / 'tests/native-generators.ps1', '-Clutch', binary)
+            ROOT / 'tests/integration/native-generators.ps1', '-Clutch', binary)
     test_examples(binary, cc, cxx, 'ninja')
     if platform.system() == 'Darwin':
         test_examples(binary, cc, cxx, 'xcode')

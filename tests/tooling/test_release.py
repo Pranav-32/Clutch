@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '.github/scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / '.github/scripts'))
 import release
 
 

@@ -13,6 +13,11 @@ import tempfile
 import unittest
 
 
+# Leave a full clock tick between a manifest edit and native timestamp rules,
+# including filesystems/tools that compare modification times in whole seconds.
+TIMESTAMP_ORDERING_MARGIN_NS = 1_000_000_000
+
+
 class WorkspaceTests(unittest.TestCase):
     """Every fixture has independently scoped C/C++ manifests and local links."""
 
@@ -49,7 +54,7 @@ class WorkspaceTests(unittest.TestCase):
         self.write('app/main.c', '#include "api.h"\n#include <stdio.h>\n'
                    '#if __STDC_VERSION__ < 201710L\n#error wrong member C standard\n#endif\n'
                    'int local(void);\nint main(void) { FILE *f = fopen("member-data.txt", "r");\n'
-                   'if (!f) return 4; fclose(f); return answer() + local() == 22 ? 0 : 1; }\n')
+                   'if (!f) return 4;\nfclose(f);\nreturn answer() + local() == 22 ? 0 : 1; }\n')
         self.write('app/member-data.txt', 'Working directory belongs to this member.\n')
         self.write('app/check.cpp', '#include "api.h"\nint main() { return answer() == 21 ? 0 : 1; }\n')
 
@@ -138,9 +143,13 @@ class WorkspaceTests(unittest.TestCase):
             for unit in target['sources']:
                 record = next(item for item in database if Path(item['output']) == Path(unit['object']))
                 self.assertEqual(record['arguments'], unit['arguments'])
-        self.write('base/clutch.toml', (self.root / 'base/clutch.toml').read_text() + '\n# changed\n')
+        member = self.root / 'base/clutch.toml'
+        stamp = member.stat().st_mtime_ns
+        self.write('base/clutch.toml', member.read_text() + '\n# changed\n')
+        # Clutch validates content, even if a checkout/editor preserves mtimes.
+        os.utime(member, ns=(stamp, stamp))
         self.cli('build', success=False)
-        client = Path(__file__).resolve().parents[1] / 'examples/file-api/client.py'
+        client = Path(__file__).resolve().parents[2] / 'examples/file-api/client.py'
         stale = subprocess.run([sys.executable, str(client), '--clutch', OPTIONS.clutch,
                                 '--project', str(self.root), '--read-only'], capture_output=True, text=True)
         self.assertNotEqual(stale.returncode, 0)
@@ -193,11 +202,27 @@ class WorkspaceTests(unittest.TestCase):
                 path.write_text(text.replace('1.0.0', '1.0.1') if '1.0.0' in text
                                 else text.replace('1.0.1', '1.0.0'))
                 build = self.root / 'out debug'
+                rules = build / ('build.ninja' if generator == 'ninja' else 'Makefile')
+                previous_rules = rules.read_bytes()
+                # Native tools schedule regeneration by mtime, not content.
+                # Age the generated file instead of sleeping or future-dating
+                # inputs, which can cause endless regeneration/clock-skew errors.
+                stamp = path.stat().st_mtime_ns - TIMESTAMP_ORDERING_MARGIN_NS
+                os.utime(rules, ns=(stamp, stamp))
+                self.assertGreater(path.stat().st_mtime_ns, rules.stat().st_mtime_ns)
                 command = [OPTIONS.ninja, '-C', str(build)] if generator == 'ninja' else [
                     shutil.which('gmake' if sys.platform == 'darwin' else 'make'), '-C', str(build)]
                 result = subprocess.run(command, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertNotEqual(previous, lock.read_bytes())
+                self.assertTrue(previous_rules != rules.read_bytes(),
+                                'generated rules did not record the new input snapshot')
+                stamp = rules.stat().st_mtime_ns
+                unchanged = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(unchanged.returncode, 0, unchanged.stdout + unchanged.stderr)
+                self.assertNotIn('Configured', unchanged.stdout + unchanged.stderr,
+                                 'unchanged native build repeated configuration')
+                self.assertEqual(stamp, rules.stat().st_mtime_ns)
                 self.cli('run', '-t', 'app::value')
                 self.cli('clean')
 

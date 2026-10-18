@@ -34,7 +34,7 @@ Create a scope named **Clutch-owned sources** under
 the scope so it is available in copyright settings. Use this pattern:
 
 ```text
-file:src//*||file:tests/*.cpp||file:tests/*.hpp||file:examples/single-file/*.cpp||file:examples/c-project/*.c||file:examples/multi-file/src//*||file:examples/multi-file/tests//*||file:examples/mixed/src//*
+file:src//*||file:tests/unit//*||file:examples/single-file/*.cpp||file:examples/c-project/*.c||file:examples/multi-file/src//*||file:examples/multi-file/tests//*||file:examples/mixed/src//*
 ```
 
 These positive paths cover maintained sources and exclude `third_party/`,

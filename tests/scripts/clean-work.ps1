@@ -8,17 +8,17 @@ Validates every deletion target before removing anything, and refuses symbolic
 links or junctions in target trees or their ancestor paths. Close terminals and
 processes using generated test directories before running cleanup.
 .EXAMPLE
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/clean-work.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/scripts/clean-work.ps1 -WhatIf
 Preview which generated folders would be removed.
 .EXAMPLE
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/clean-work.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/scripts/clean-work.ps1
 Remove generated folders so later tests can create fresh workspaces.
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param()
 
 $ErrorActionPreference = 'Stop'
-$workDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'work'))
+$workDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../work'))
 $comparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') {
     [StringComparison]::OrdinalIgnoreCase
 } else {

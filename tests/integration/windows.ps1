@@ -26,7 +26,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Clutch = (Resolve-Path -LiteralPath $Clutch).Path
 $Ninja = (Resolve-Path -LiteralPath $Ninja).Path
-$work = Join-Path $PSScriptRoot ('work/' + [guid]::NewGuid().ToString())
+$work = Join-Path (Split-Path -Parent $PSScriptRoot) ('work/' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Force $work | Out-Null
 
 # Write BOM-free UTF-8 fixtures and create parent directories on demand.

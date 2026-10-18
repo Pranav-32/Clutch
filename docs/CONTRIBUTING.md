@@ -43,8 +43,8 @@ test-workspace cleanup.
 On Linux or macOS, the complete build-and-test workflow is:
 
 ```bash
-bash tests/verify.sh
-CC=clang CXX=clang++ CLUTCH_BUILD_JOBS=4 CLUTCH_TEST_BUILD_DIR=build-native-clang bash tests/verify.sh
+bash tests/scripts/verify.sh
+CC=clang CXX=clang++ CLUTCH_BUILD_JOBS=4 CLUTCH_TEST_BUILD_DIR=build-native-clang bash tests/scripts/verify.sh
 ```
 
 The runner requires Ninja and GNU Make and verifies that CTest registered the
@@ -75,6 +75,13 @@ builds and checks Clutch in `build-container`.
 
 - Keep module headers beside their implementations under the appropriate `src/`
   subdirectory. Keep upstream headers and licenses under `third_party/`.
+- Put native unit checks in `tests/unit/`, compiler-backed workflows in
+  `tests/integration/`, and CI/release unit checks in `tests/tooling/`. Register
+  native suites in `tests/CMakeLists.txt`; contributor runners and cleanup belong
+  in `tests/scripts/`. Keep generated fixtures under ignored `tests/work/`.
+- Make clock conditions explicit in incremental-build tests. Native tools compare
+  timestamps, while Clutch validates saved input contents. Establish the required
+  timestamp order or simulate a coarse clock rather than relying on runner speed.
 - Follow [`.clang-format`](../.clang-format) and [`.clang-tidy`](../.clang-tidy).
   Use `const` or `constexpr` where appropriate and structured bindings when
   decomposing records.

@@ -7,7 +7,7 @@
 #
 
 # Configure, build and test Clutch on Linux or macOS, including containers.
-# Usage: bash tests/verify.sh
+# Usage: bash tests/scripts/verify.sh
 # CC/CXX select compiler executables. CLUTCH_BUILD_JOBS defaults to 2;
 # CLUTCH_TEST_BUILD_DIR defaults to build-native relative to the repository;
 # CLUTCH_TEST_EXPORT_DATABASE defaults to OFF (the devcontainer sets ON).
@@ -25,14 +25,14 @@ fail() {
 # Require a native POSIX host; Git Bash cannot validate Linux/macOS subprocesses.
 case "$(uname -s)" in
     Linux|Darwin) ;;
-    *) fail 'run this script on Linux or macOS; use tests/windows-verify.cmd on Windows' ;;
+    *) fail 'run this script on Linux or macOS; use tests/scripts/windows-verify.cmd on Windows' ;;
 esac
 
 if [[ $# -ne 0 ]]; then
-    fail 'usage: bash tests/verify.sh (configure CC, CXX and CLUTCH_BUILD_JOBS through the environment)'
+    fail 'usage: bash tests/scripts/verify.sh (configure CC, CXX and CLUTCH_BUILD_JOBS through the environment)'
 fi
 
-source_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 # Anchor relative output paths to the checkout, even when launched elsewhere.
 build_dir="${CLUTCH_TEST_BUILD_DIR:-build-native}"
 case "$build_dir" in

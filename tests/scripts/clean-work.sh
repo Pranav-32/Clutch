@@ -7,7 +7,7 @@
 #
 
 # Remove generated folders inside tests/work on Linux, macOS or in a container.
-# Usage: bash tests/clean-work.sh [--dry-run|-n]
+# Usage: bash tests/scripts/clean-work.sh [--dry-run|-n]
 # Resolves work relative to this script, preserves its root and loose files,
 # and preflights every target before deletion. Symbolic links and redirected
 # directories inside target trees are rejected. Uses Bash 3.2-compatible syntax.
@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Print the accepted options without changing or enumerating any workspaces.
 usage() {
-    printf 'Usage: bash tests/clean-work.sh [--dry-run|-n]\n'
+    printf 'Usage: bash tests/scripts/clean-work.sh [--dry-run|-n]\n'
 }
 
 if [[ $# -gt 1 ]]; then
@@ -38,8 +38,8 @@ fail() {
 }
 
 [[ ! -L "${BASH_SOURCE[0]}" ]] || fail 'the cleanup script is a symbolic link'
-script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-work_dir="$script_dir/work"
+tests_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+work_dir="$tests_dir/work"
 
 [[ ! -L "$work_dir" ]] || fail 'tests/work is a symbolic link'
 

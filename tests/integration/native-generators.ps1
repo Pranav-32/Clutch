@@ -32,7 +32,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Clutch = (Resolve-Path -LiteralPath $Clutch).Path
-$work = Join-Path $PSScriptRoot ('work/native-' + [guid]::NewGuid().ToString())
+$work = Join-Path (Split-Path -Parent $PSScriptRoot) ('work/native-' + [guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 
 # Explicit paths are validated rather than silently falling back to another tool.

@@ -36,7 +36,13 @@ src/
   platform/             Processes, file output, terminal messages
 third_party/            Vendored headers and upstream licenses
 examples/               Independent projects configured and built with Clutch
-tests/                  Verification scripts and ignored fixtures
+tests/
+  CMakeLists.txt        CTest registration and test-only targets
+  unit/                 Native graph unit checks
+  integration/          Real Clutch workflows, generators and public protocols
+  tooling/              CI, packaging and versioning unit checks
+  scripts/              Verification entry points and fixture cleanup
+  work/                 Ignored generated fixtures
 .devcontainer/          Contributor image and initialization
 docs/                   User guides and contributor documentation
 ```
@@ -234,7 +240,11 @@ artifacts and rejects redirected destinations.
   cross-project links. It contains no host compiler/backend selections.
 - Root/member manifests and the lock are fingerprinted. Builds reject stale
   inputs and file-API indices expose the entire snapshot. Native Ninja/GNU Make
-  regeneration watches each manifest.
+  regeneration watches each manifest using the native tool's timestamp rules.
+  Generated Ninja/Make files also record manifest fingerprints, so metadata-only
+  edits update their contents and GNU Make does not repeat configuration on every
+  build. Equal or preserved manifest timestamps require explicit configuration;
+  saved-state content validation still rejects stale inputs.
 - Atomic lock replacement uses a project-local exclusive writer directory,
   POSIX rename or Windows MoveFileExW, with cleanup limited to owned temporary
   files. Frozen configuration compares parsed resolution before generator output,
@@ -300,7 +310,7 @@ generators with executable build behavior.
 | [`workspace.hpp`](../src/core/workspace/workspace.hpp), [`workspace.cpp`](../src/core/workspace/workspace.cpp) | Validate explicit member roots, load project manifests, qualify links/targets and scope compile requirements. |
 | [`inputs.hpp`](../src/core/workspace/inputs.hpp), [`inputs.cpp`](../src/core/workspace/inputs.cpp) | FNV-1a input fingerprints and stale-configuration checks. |
 | [`lock.hpp`](../src/core/workspace/lock.hpp), [`lock.cpp`](../src/core/workspace/lock.cpp) | Canonical local resolution, frozen checks, schema validation and atomic lock publication. |
-| [`tests/workspace_integration.py`](../tests/workspace_integration.py) | Native workspace builds, IDE metadata, lock portability/failures and member boundary checks. |
+| [`tests/integration/workspace_integration.py`](../tests/integration/workspace_integration.py) | Native workspace builds, IDE metadata, lock portability/failures and member boundary checks. |
 | [`examples/workspace/README.md`](../examples/workspace/README.md) | Root/member manifests and cross-project library consumers. |
 | [`workspaces.md`](workspaces.md), [`lock-files.md`](lock-files.md) | Public membership, output, command and lock contracts. |
 
@@ -317,7 +327,8 @@ and never requires Git at runtime. See [versions and releases](releases.md).
 
 | File | Purpose and maintenance |
 | --- | --- |
-| [`CMakeLists.txt`](../CMakeLists.txt) | C++17 development target, private/vendor include roots, warnings, static MSVC runtime, executable/license installation, and CTest registration. Synchronize its source list with new modules. |
+| [`CMakeLists.txt`](../CMakeLists.txt) | C++17 development target, private/vendor include roots, warnings, static MSVC runtime, executable/license installation, and optional test subdirectory. Synchronize its source list with new modules. |
+| [`tests/CMakeLists.txt`](../tests/CMakeLists.txt) | Test-only targets, compiler/tool discovery and stable CTest registration for unit and integration suites. |
 | [`VERSION`](../VERSION), [`cmake/ClutchVersion.cmake`](../cmake/ClutchVersion.cmake), [`cmake/GenerateVersion.cmake`](../cmake/GenerateVersion.cmake), [`src/core/version.hpp.in`](../src/core/version.hpp.in) | Canonical release version, Git/source-archive identity, changed-content generation and CLI header template. |
 | [`src/core/project_layout.hpp`](../src/core/project_layout.hpp) | Shared layout contract and default profile-directory policy. |
 | [`src/platform/json.hpp`](../src/platform/json.hpp), [`json.cpp`](../src/platform/json.cpp) | Shared JSON string escaping for compilation-database arguments and paths. |
@@ -327,29 +338,29 @@ and never requires Git at runtime. See [versions and releases](releases.md).
 | [`src/core/file_api/query.hpp`](../src/core/file_api/query.hpp), [`query.cpp`](../src/core/file_api/query.cpp) | Shared/client query parsing, version negotiation, metadata echo and isolated diagnostics. |
 | [`src/core/file_api/paths.hpp`](../src/core/file_api/paths.hpp), [`paths.cpp`](../src/core/file_api/paths.cpp) | Query-only bootstrap ownership, redirected-path rejection, bounded reads and deterministic enumeration. |
 | [`src/core/file_api/model.hpp`](../src/core/file_api/model.hpp), [`model.cpp`](../src/core/file_api/model.cpp) | Target/source rules, toolchains, workflow argv and configuration-input fingerprints from the native graph. |
-| [`tests/file_api_integration.py`](../tests/file_api_integration.py) | Independent CLI/JSON consumer tests for publication, versions, ownership, actions, concurrent readers and native path redirections. |
-| [`tests/targets_integration.py`](../tests/targets_integration.py) | Real compiler-backed target graphs, library interfaces, runtime staging, archive freshness, named selection and target metadata. |
+| [`tests/integration/file_api_integration.py`](../tests/integration/file_api_integration.py) | Independent CLI/JSON consumer tests for publication, versions, ownership, actions, concurrent readers and native path redirections. |
+| [`tests/integration/targets_integration.py`](../tests/integration/targets_integration.py) | Real compiler-backed target graphs, library interfaces, runtime staging, archive freshness, named selection and target metadata. |
 | [`examples/targets/README.md`](../examples/targets/README.md), [`clutch.toml`](../examples/targets/clutch.toml) | Local static library with colocated public header/source and separate application/test consumers. |
 | [`examples/file-api/client.py`](../examples/file-api/client.py), [`query.json`](../examples/file-api/query.json), [`README.md`](../examples/file-api/README.md) | Reference consumer, sample query and usage; no Clutch application manifest. |
 | [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`build.yml`](../.github/workflows/build.yml) | Push/PR checks, reusable native matrix, container verification and downloadable packages. |
 | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | Tagged-commit validation, full native verification, checksums and draft-first release publication. |
 | [`.github/workflows/version.yml`](../.github/workflows/version.yml), [`release-please-config.json`](../.github/release-please-config.json), [`release-please-manifest.json`](../.github/release-please-manifest.json) | Conventional Commit version/changelog proposals and automation state; no automatic merge or publication. |
 | [`.github/scripts/ci.py`](../.github/scripts/ci.py), [`release.py`](../.github/scripts/release.py) | Native build/test/install driver and release validation, archives, license checks, streaming checksums and publication gates. Python is CI tooling only. |
-| [`tests/test_release.py`](../tests/test_release.py), [`test_versioning.py`](../tests/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
-| [`tests/test_ci.py`](../tests/test_ci.py) | Executable-discovery regressions, including preservation of language-selecting compiler symlinks such as clang++. |
+| [`tests/tooling/test_release.py`](../tests/tooling/test_release.py), [`test_versioning.py`](../tests/tooling/test_versioning.py) | Packaging/identity/failure regressions and real disposable Git fixtures for tags, dirty files, shallow clones, worktrees and no-Git builds. |
+| [`tests/tooling/test_ci.py`](../tests/tooling/test_ci.py) | Executable-discovery regressions, including preservation of language-selecting compiler symlinks such as clang++. |
 | [`examples/single-file/clutch.toml`](../examples/single-file/clutch.toml), [`main.cpp`](../examples/single-file/main.cpp) | C++17 single-file entry source and separate debug/release profiles. |
 | [`examples/multi-file/clutch.toml`](../examples/multi-file/clutch.toml), [`src/main.cpp`](../examples/multi-file/src/main.cpp), [`greeting.hpp`](../examples/multi-file/src/greeting.hpp), [`greeting.cpp`](../examples/multi-file/src/greeting.cpp), [`tests/greeting_test.cpp`](../examples/multi-file/tests/greeting_test.cpp) | Explicit application/test sources, colocated headers, shared implementation and runtime arguments. |
 | [`examples/c-project/clutch.toml`](../examples/c-project/clutch.toml), [`main.c`](../examples/c-project/main.c) | C11 executable built with a C compiler. |
 | [`examples/mixed/clutch.toml`](../examples/mixed/clutch.toml), [`src/main.cpp`](../examples/mixed/src/main.cpp), [`double_value.h`](../examples/mixed/src/double_value.h), [`double_value.c`](../examples/mixed/src/double_value.c) | Recursive C/C++ discovery, separate standards and C linkage across languages. |
-| [`tests/integration.ps1`](../tests/integration.ps1) | Windows C/C++/mixed fixtures for configuration, databases, profiles, incremental builds, saved tools, workflows, failures, and ownership. Retains ignored fixtures. |
-| [`tests/graph_tests.cpp`](../tests/graph_tests.cpp) | Graph safety regression checks, shared-input handling, deterministic DOT escaping and optional real Graphviz SVG rendering. |
-| [`tests/clean-work.ps1`](../tests/clean-work.ps1) | Removes generated folders inside `tests/work` with preview support, containment checks, and link/junction rejection; preserves the work root and loose files. |
-| [`tests/clean-work.sh`](../tests/clean-work.sh) | Bash 3.2-compatible cleanup for macOS, Linux and containers, with dry-run support, target preflight and link rejection; preserves the work root and loose files. |
-| [`tests/verify.sh`](../tests/verify.sh) | Shared Linux/macOS/container CMake build and CTest runner; resolves compilers/tools, requires the POSIX integration test, and supports configurable jobs and a separate container build tree. |
-| [`tests/windows-verify.cmd`](../tests/windows-verify.cmd) | Initializes supplied vcvars64 and runs MSVC/Clang integration checks; accepts Ninja and optional Clutch paths and propagates failures. |
-| [`tests/windows-standalone.ps1`](../tests/windows-standalone.ps1) | Copies only the executable into a unique fixture and checks help/version/startup with Windows system paths only, using bounded process waits. |
-| [`tests/native-generators.ps1`](../tests/native-generators.ps1) | Native Windows generator fixtures for configuration, build/test execution, paths with spaces, incremental behavior, and header tracking. |
-| [`tests/posix-integration.sh`](../tests/posix-integration.sh) | Real C/C++/mixed Ninja and GNU Make checks on POSIX, including workflows, standards/warnings, IDE databases, incremental builds, profiles, errors and ownership; registered by CMake when the required tools are found. |
+| [`tests/integration/windows.ps1`](../tests/integration/windows.ps1) | Windows C/C++/mixed fixtures for configuration, databases, profiles, incremental builds, saved tools, workflows, failures, and ownership. Retains ignored fixtures. |
+| [`tests/unit/graph_tests.cpp`](../tests/unit/graph_tests.cpp) | Graph safety regression checks, shared-input handling, deterministic DOT escaping and optional real Graphviz SVG rendering. |
+| [`tests/scripts/clean-work.ps1`](../tests/scripts/clean-work.ps1) | Removes generated folders inside `tests/work` with preview support, containment checks, and link/junction rejection; preserves the work root and loose files. |
+| [`tests/scripts/clean-work.sh`](../tests/scripts/clean-work.sh) | Bash 3.2-compatible cleanup for macOS, Linux and containers, with dry-run support, target preflight and link rejection; preserves the work root and loose files. |
+| [`tests/scripts/verify.sh`](../tests/scripts/verify.sh) | Shared Linux/macOS/container CMake build and CTest runner; resolves compilers/tools, requires the POSIX integration test, and supports configurable jobs and a separate container build tree. |
+| [`tests/scripts/windows-verify.cmd`](../tests/scripts/windows-verify.cmd) | Initializes supplied vcvars64 and runs MSVC/Clang integration checks; accepts Ninja and optional Clutch paths and propagates failures. |
+| [`tests/integration/windows-standalone.ps1`](../tests/integration/windows-standalone.ps1) | Copies only the executable into a unique fixture and checks help/version/startup with Windows system paths only, using bounded process waits. |
+| [`tests/integration/native-generators.ps1`](../tests/integration/native-generators.ps1) | Native Windows generator fixtures for configuration, build/test execution, paths with spaces, incremental behavior, and header tracking. |
+| [`tests/integration/posix.sh`](../tests/integration/posix.sh) | Real C/C++/mixed Ninja and GNU Make checks on POSIX, including workflows, standards/warnings, IDE databases, incremental builds, profiles, errors and ownership; registered by CMake when the required tools are found. |
 | [`.gitignore`](../.gitignore) | Ignores generated trees, fixtures, root databases, and local IDE state. Custom output paths may need rules. |
 | [`.clang-tidy`](../.clang-tidy) | Advisory first-party analysis using an analysis build directory's database. |
 | [`.clang-format-ignore`](../.clang-format-ignore) | Excludes generated trees, fixtures and vendored code from formatting. |
