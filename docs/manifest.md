@@ -21,7 +21,7 @@ Point your IDE at the selected profile's compilation database. See
 uses client query files in the profile directory; no extra manifest fields are
 required.
 
-Try the [runnable examples](examples.md) for complete single-file, multi-file,
+Try the [runnable examples](../examples/README.md) for complete single-file, multi-file,
 C and mixed-language projects using these fields.
 
 ## Tables and value rules

@@ -1,4 +1,4 @@
-# Static analysis for Clutch-owned C++17 code. See docs/static-analysis.md.
+# Static analysis for Clutch-owned C++17 code. See docs/CONTRIBUTING.md.
 # Keep findings advisory while the baseline is adopted; do not apply fixes blindly.
 ---
 InheritParentConfig: false

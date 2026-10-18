@@ -1,8 +1,8 @@
-# Verify all pushes and pull requests; superseded CI runs may be cancelled.
+# Verify PRs once, then the merged main commit. Tags use the Release workflow.
 name: CI
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -14,10 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Verification scope
+    runs-on: ubuntu-24.04
+    outputs:
+      metadata_only: ${{ steps.scope.outputs.metadata_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Classify changed files
+        id: scope
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python .github/scripts/ci_policy.py plan
   native:
+    needs: changes
     uses: ./.github/workflows/build.yml
+    with:
+      metadata-only: ${{ needs.changes.outputs.metadata_only == 'true' }}
   container:
     name: Development container
+    needs: changes
+    # Release notes/version metadata cannot affect the image or native tests.
+    if: needs.changes.outputs.metadata_only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:

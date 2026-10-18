@@ -152,7 +152,7 @@ Try the [workspace example](examples/workspace/README.md), or read the
 | Guide | What it covers |
 | --- | --- |
 | [Installation](docs/installation.md) | Build and install Clutch on your platform |
-| [Runnable examples](docs/examples.md) | Try single-file, multi-file, C and mixed-language projects |
+| [Runnable examples](examples/README.md) | Try single-file, multi-file, C and mixed-language projects |
 | [Using Clutch](docs/usage.md) | Configuration, compilers, generators, IDE setup and project tests |
 | [Manifest reference](docs/manifest.md) | Every supported field, default and example |
 | [Workspaces](docs/workspaces.md) | Member manifests, qualified links, shared profiles and build outputs |
