@@ -215,6 +215,12 @@ configuration-variable cache or shared compiler-result cache. Cache performance
 depends on the project, compiler and backend; no performance advantage over CMake
 has been established by comparative benchmarks.
 
+Make response-file content changes invalidate the associated object or linked
+output before new metadata is written. This includes removed archive members and
+changed flags, without depending on subsecond timestamp support. Unchanged
+commands preserve their outputs. Invalidation removes only the generated artifact
+and rejects redirected destinations.
+
 ## Invariants and limits
 
 - Workspaces compose explicit member manifests into qualified targets. Member

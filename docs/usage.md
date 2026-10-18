@@ -187,6 +187,12 @@ NMake executes serially; `--jobs` controls parallelism where supported.
 Make-based MSVC builds conservatively track project headers instead of precise
 per-unit compiler dependency files.
 
+When a Make compile/link command changes during configuration, Clutch invalidates
+its old object or linked output before updating the response file. This prevents
+stale flags or archive members when Make observes equal file timestamps.
+Unchanged commands keep existing outputs for incremental builds. Configuration
+still performs no compilation; the next build recreates invalidated outputs.
+
 ## Build directories and IDEs
 
 Debug builds generate symbols automatically. MSVC-style executable/DLL links

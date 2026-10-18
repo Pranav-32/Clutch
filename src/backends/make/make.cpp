@@ -22,12 +22,40 @@
 #include "platform/process.hpp"
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 
 namespace clutch {
 namespace {
+/// Invalidate stale results before publishing a changed command. Timestamp-only
+/// dependencies can miss edits within one clock tick on older Make versions.
+void write_response(const fs::path &path,
+                    const std::string &content,
+                    const fs::path &output) {
+  if (std::ifstream input(path, std::ios::binary); input) {
+    const std::string previous((std::istreambuf_iterator(input)), {});
+    if (input.bad())
+      throw std::runtime_error("cannot read Make response file: " +
+                               path.string());
+
+    if (previous == content)
+      return;
+  }
+
+  // Only remove this generated artifact, never a redirected destination. Do
+  // this before writing metadata so interrupted configuration can be retried.
+  if (fs::is_symlink(fs::symlink_status(output)) ||
+      fs::canonical(output.parent_path()) != output.parent_path())
+    throw std::runtime_error("refusing redirected Make output: " +
+                             output.string());
+
+  fs::remove(output);
+  write_if_changed(path, content);
+}
+
 /// Reject characters that would split a rule/recipe or truncate a native
 /// argument.
 void validate_text(const std::string &value) {
@@ -316,9 +344,11 @@ void generate_make(const Graph &graph,
                          {"-MP", "-MQ", relative_path(unit.object, build)});
       }
 
-      // Response-file timestamps become prerequisites, so flag changes rebuild.
-      write_if_changed(response_path,
-                       response(arguments, graph.toolchain.msvc));
+      // Keep timestamp prerequisites for native builds and invalidate old
+      // objects when the command changes, even within one timestamp tick.
+      write_response(response_path,
+                     response(arguments, graph.toolchain.msvc),
+                     unit.object);
       make << make_path(unit.object, build, gnu) << ": "
            << make_path(unit.source, build, gnu) << ' '
            << make_path(response_path, build, gnu);
@@ -337,7 +367,7 @@ void generate_make(const Graph &graph,
       throw std::runtime_error("Make target has no linker command");
 
     const auto response_path = fs::path(output.string() + ".make.rsp");
-    write_if_changed(response_path, response(link, graph.toolchain.msvc));
+    write_response(response_path, response(link, graph.toolchain.msvc), output);
     make << make_path(output, build, gnu) << ": "
          << make_path(response_path, build, gnu);
 

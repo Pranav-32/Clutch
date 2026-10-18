@@ -141,6 +141,11 @@ outside the source tree and build directories containing spaces; archive/import
 names are not inferred from one compiler's naming convention. Native Visual
 Studio checks select Microsoft's CL driver; clang-cl remains covered by other
 compatible generators when selected for testing.
+Each native generator uses an independent source/build fixture, so one failed
+subtest cannot leave optional targets or archives behind for the next generator.
+POSIX Make regressions force equal timestamps across response files and build
+products to verify archive-member removal and changed definitions. They also
+check that unchanged configuration preserves a static archive.
 Ninja and GNU Make run on Linux; Ninja, NMake and Visual Studio run with MSVC on
 Windows. macOS additionally exercises Xcode when installed. Python is used by
 the test harness, not by Clutch or any generated build action.

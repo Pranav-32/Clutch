@@ -29,6 +29,10 @@ class TargetTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        self.create_fixture()
+
+    def create_fixture(self):
+        """Initialize independent source trees so failed subtests cannot leak state."""
         for folder in ('base', 'shared', 'apps', 'checks'):
             (self.root / folder).mkdir()
         self.write('base/base.h', '#pragma once\n#ifdef __cplusplus\nextern "C" {\n#endif\n'
@@ -139,6 +143,18 @@ links = ["shared"]
         """Follow the artifact contract, including compiler-specific import names."""
         return [Path(item['path']) for item in self.configured_targets[name]['artifacts']]
 
+    def tie_make_timestamps(self, stamp):
+        """Simulate one clock tick for response metadata, objects and final outputs."""
+        paths = set()
+        for target in self.configured_targets.values():
+            paths.update(Path(item['path']) for item in target['artifacts'])
+            paths.update(Path(source['object']) for source in target['sources'])
+        location = json.loads(self.cli('locate').stdout)
+        paths.update(Path(location['paths']['build']).rglob('*.make.rsp'))
+        for path in paths:
+            if path.is_file():
+                os.utime(path, ns=(stamp, stamp))
+
     def generators(self):
         result = ['ninja']
         if os.name == 'nt':
@@ -157,8 +173,12 @@ links = ["shared"]
 
     def test_native_generators(self):
         """The same DAG builds, runs, stages DLLs and stays incremental everywhere."""
+        fixture_root = self.root
         for generator in self.generators():
             with self.subTest(generator=generator):
+                self.root = fixture_root / generator
+                self.root.mkdir()
+                self.create_fixture()
                 self.manifest(generator)
                 self.configure(generator)
                 self.cli('build', '--target', 'app')
@@ -198,12 +218,61 @@ links = ["shared"]
                 self.assertEqual(len(archives), 1, archives)
                 archive, = archives
                 sentinel = REMOVED_SYMBOL.encode('ascii')
-                self.assertIn(sentinel, archive.read_bytes())
+                self.assertTrue(sentinel in archive.read_bytes(),
+                                'initial archive is missing the fixture sentinel')
                 self.manifest(generator, self.targets.replace(', "base/stale.cpp"', ''))
                 self.configure(generator)
                 self.cli('build', '-t', 'base')
-                self.assertNotIn(sentinel, archive.read_bytes())
+                self.assertFalse(sentinel in archive.read_bytes(),
+                                 f'{generator} retained a removed archive member')
                 self.cli('clean')
+
+    @unittest.skipIf(os.name == 'nt', 'GNU Make timestamp regression runs on POSIX')
+    def test_make_archive_membership_with_equal_timestamps(self):
+        """Removing a member rebuilds the archive even when metadata mtimes tie."""
+        if not (shutil.which('make') or shutil.which('gmake')):
+            self.skipTest('GNU Make is not installed')
+        self.manifest('make')
+        self.configure('make')
+        self.cli('build', '-t', 'base')
+        archive, = self.artifacts('base')
+        sentinel = REMOVED_SYMBOL.encode('ascii')
+        self.assertTrue(sentinel in archive.read_bytes())
+        original_stamp = archive.stat().st_mtime_ns
+
+        self.manifest('make', self.targets.replace(', "base/stale.cpp"', ''))
+        self.configure('make')
+        # Reproduce a coarse clock deterministically instead of sleeping until
+        # the next second. A timestamp-only dependency check skips this change.
+        self.tie_make_timestamps(original_stamp)
+        self.cli('build', '-t', 'base')
+        self.assertFalse(sentinel in archive.read_bytes(),
+                         'equal timestamps hid the removed archive member')
+        stamp = archive.stat().st_mtime_ns
+        self.configure('make')
+        self.cli('build', '-t', 'base')
+        self.assertEqual(stamp, archive.stat().st_mtime_ns,
+                         'unchanged configuration rebuilt the archive')
+
+    @unittest.skipIf(os.name == 'nt', 'GNU Make timestamp regression runs on POSIX')
+    def test_make_changed_flags_with_equal_timestamps(self):
+        """New compiler definitions take effect even when response mtimes tie."""
+        if not (shutil.which('make') or shutil.which('gmake')):
+            self.skipTest('GNU Make is not installed')
+        self.write('apps/main.c', '#include "api.h"\n#include <stdio.h>\n'
+                   'int main(void) { printf("%d\\n", answer()); return 0; }\n')
+        self.manifest('make')
+        self.configure('make')
+        self.assertIn(str(SHARED_API_VALUE), self.cli('run', '-t', 'app').stdout.splitlines())
+        original_stamp = self.build_path('app').stat().st_mtime_ns
+        changed_base = BASE_API_VALUE + 1
+        changed_shared = changed_base * DIAMOND_BRANCH_COUNT
+        targets = self.targets.replace(f'BASE_API={BASE_API_VALUE}', f'BASE_API={changed_base}')
+        targets = targets.replace(f'SHARED_API={SHARED_API_VALUE}', f'SHARED_API={changed_shared}')
+        self.manifest('make', targets)
+        self.configure('make')
+        self.tie_make_timestamps(original_stamp)
+        self.assertIn(str(changed_shared), self.cli('run', '-t', 'app').stdout.splitlines())
 
     def test_file_api_and_saved_targets(self):
         """Public metadata exposes concrete kinds, requirements and dependency IDs."""
