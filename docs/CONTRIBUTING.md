@@ -1,5 +1,13 @@
 # Contributing to Clutch
 
+Workspace/lock changes must update the [manifest reference](manifest.md),
+[workspace guide](workspaces.md), [lock contract](lock-files.md), file-API schemas
+and affected examples/tests. Run `clutch.workspace` with the existing suites.
+Keep portable `clutch.lock` files with example manifests; keep machine-local
+`backend.toml`, `toolchain.toml` and generated build files out of source control.
+Use `--locked` when verifying an existing resolution, and regenerate normally
+when deliberately changing project versions, members or cross-project links.
+
 Clutch is a native C++17 build tool for C and C++ projects. Develop Clutch using
 its CMake project, keep each change focused and include checks that demonstrate
 the resulting behavior.
@@ -82,8 +90,14 @@ builds and checks Clutch in `build-container`.
   platform behavior inline. Keep comments about intent and invariants rather
   than restating individual expressions, and update them with the implementation.
 - Update the README and relevant guides when features or workflows change.
+- Keep host paths and tool selections configurable or discoverable. Share policy
+  constants and explain format/algorithm values instead of repeating magic numbers.
+  Protocol tokens and intentional fixture inputs may remain literal; tests should
+  discover configured paths/artifacts instead of assuming platform file names.
 - Use a bare `@file` in file-local Doxygen blocks. Doxygen associates the block
   with its containing file without an IDE-resolved path.
+  Put `/**`, each Doxygen command such as `@file` and `@brief`, and the closing
+  `*/` on separate lines; prefix comment content with ` * `.
 - Keep the target graph independent of individual generators. Preserve source
   language, per-source flags, dependency tracking and profile settings.
 

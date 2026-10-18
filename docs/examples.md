@@ -10,8 +10,16 @@ its `clutch.toml` describes its own sources, standards and build profiles.
 | [Multi-file C++](../examples/multi-file/clutch.toml) | Explicit source lists, colocated headers, runtime arguments and an executable test | `Hello, Clutch!` |
 | [C project](../examples/c-project/clutch.toml) | C11 compilation and linking | `Hello from Clutch and C!` |
 | [Mixed C/C++](../examples/mixed/clutch.toml) | Recursive source discovery, separate language standards and a C interface called from C++ | `Twice 21 is 42.` |
+| [Local library targets](../examples/targets/README.md) | Static library, public requirements, named application and linked test | `Hello from a Clutch library!` |
+| [Workspace](../examples/workspace/README.md) | Separate member manifests, qualified links, shared profiles and a portable lock | `Hello from a Clutch workspace!` |
 
 ## Prerequisites
+
+The workspace example configures from its root; member manifests use root-owned
+profiles and generator selection. Configuration generates `clutch.lock`. Review
+and commit that file when adopting an example as a project. `clutch . --locked`
+checks the generated resolution. See [workspaces](workspaces.md) and
+[lock files](lock-files.md) for details.
 
 Build Clutch with CMake using the [installation guide](installation.md). Have
 Ninja 1.10+ and the appropriate C/C++ compilers available. All example manifests
@@ -136,3 +144,10 @@ configure again before building. Example profile outputs are ignored by Git.
 Copy an example to start your own project, keeping the manifest and source layout
 and changing its project name as needed. The repository root builds Clutch itself
 with CMake; it has no `clutch.toml`.
+
+## Developer-tool integration
+
+The [file-API example](../examples/file-api/README.md) is a client rather than a
+Clutch application. It discovers a project's profile, writes a query, configures
+the project and prints its code model. It provides a starting point for future
+IDE extensions without writing editor settings in Clutch's core.

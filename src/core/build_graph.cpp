@@ -14,8 +14,11 @@
 #include "build_graph.hpp"
 
 #include "core/options.hpp"
+#include "core/targets/resolve.hpp"
+#include "platform/process.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <queue>
 #include <set>
@@ -23,6 +26,23 @@
 #include <utility>
 
 namespace clutch {
+namespace {
+/// Windows artifact identity is case-insensitive even when manifest names
+/// differ.
+fs::path artifact_key(const fs::path &path) {
+  auto value = path.lexically_normal().generic_string();
+#ifdef _WIN32
+  std::transform(value.begin(),
+                 value.end(),
+                 value.begin(),
+                 [](const unsigned char c) {
+                   return static_cast<char>(std::tolower(c));
+                 });
+#endif
+  return fs::path(value);
+}
+} // namespace
+
 /// Validate artifact ownership and detect cycles using a topological traversal.
 void validate_build_graph(const Graph &graph) {
   if (graph.targets.empty())
@@ -36,7 +56,7 @@ void validate_build_graph(const Graph &graph) {
     if (path.empty() || !path.is_absolute())
       throw std::runtime_error("build artifact must have an absolute path");
 
-    if (!outputs.insert(path.lexically_normal()).second)
+    if (!outputs.insert(artifact_key(path)).second)
       throw std::runtime_error("multiple build commands produce " +
                                path.string());
   };
@@ -46,8 +66,8 @@ void validate_build_graph(const Graph &graph) {
     if (input.empty() || !input.is_absolute())
       throw std::runtime_error("build input must have an absolute path");
 
-    const auto prerequisite = input.lexically_normal();
-    const auto artifact = output.lexically_normal();
+    const auto prerequisite = artifact_key(input);
+    const auto artifact = artifact_key(output);
     edges[prerequisite].push_back(artifact);
     incoming.try_emplace(prerequisite, 0);
     ++incoming[artifact];
@@ -59,6 +79,23 @@ void validate_build_graph(const Graph &graph) {
           "build target has no compilation or link commands");
 
     produce(target.output);
+    if (!target.import_library.empty()) {
+      produce(target.import_library);
+      connect(target.output, target.import_library);
+    }
+
+    for (const auto dependency : target.dependencies) {
+      if (dependency >= graph.targets.size())
+        throw std::runtime_error("target dependency index is out of range");
+      if (graph.targets[dependency].type == TargetType::Executable)
+        throw std::runtime_error("cannot link an executable target");
+      connect(graph.targets[dependency].output, target.output);
+    }
+
+    for (const auto dependency : target.link_dependencies)
+      if (dependency >= graph.targets.size() ||
+          graph.targets[dependency].type == TargetType::Executable)
+        throw std::runtime_error("invalid linked library target");
     for (const auto &[source, object, arguments] : target.units) {
       if (arguments.empty())
         throw std::runtime_error("build unit has no compiler command");
@@ -108,27 +145,49 @@ Graph make_build_graph(Project project,
   graph.toolchain = toolchain;
   graph.backend = backend;
 
-  const auto &p = graph.project;
+  const auto specs = resolve_targets(graph.project);
   const auto &cc = toolchain.cc;
   const auto &cxx = toolchain.cxx;
-  // Index zero is always the application; later indices identify test targets.
-  std::vector<Project::Test> specs{{p.name, p.sources}};
-  specs.insert(specs.end(), p.tests.begin(), p.tests.end());
-
   for (size_t target_index = 0; target_index < specs.size(); ++target_index) {
-    const auto &[name, sources] = specs[target_index];
+    const auto &resolved = specs[target_index];
+    const auto &spec = resolved.spec;
+    const auto &name = spec.name;
+    const auto &sources = spec.sources;
+    const auto &p = graph.project;
     Target target;
     target.name = name;
-    target.output = target_index == 0 ? p.output : p.build / "tests" / name;
-#ifdef _WIN32
-    if (target_index)
-      target.output += ".exe";
-#endif
+    target.local_name = spec.local_name.empty() ? name : spec.local_name;
+    target.project_name =
+        spec.project_name.empty() ? p.name : spec.project_name;
+    target.source_root = spec.source_root.empty() ? p.root : spec.source_root;
+    target.c_standard =
+        spec.c_standard.empty() ? p.c_standard : spec.c_standard;
+    target.cxx_standard =
+        spec.cxx_standard.empty() ? p.cxx_standard : spec.cxx_standard;
+    target.type = spec.type;
+    target.is_test = spec.is_test;
+    target.build_by_default = spec.build_by_default;
+    target.dependencies = resolved.dependencies;
+    target.link_dependencies = resolved.link_dependencies;
+    target.includes = p.includes;
+    target.defines = p.defines;
+    target.includes.insert(target.includes.end(),
+                           spec.includes.begin(),
+                           spec.includes.end());
+    target.defines.insert(target.defines.end(),
+                          spec.defines.begin(),
+                          spec.defines.end());
+    target.output = target_output(p, spec, toolchain.msvc);
+    target.import_library =
+        target_import_library(target.output, spec.type, toolchain.msvc);
 
     // Per-target objects let an application and tests share a source safely.
-    const auto objects = target_index == 0
-                           ? p.build / "obj"
-                           : p.build / "obj" / ("test-" + name);
+    const auto objects =
+        graph.project.is_workspace
+          ? p.build / "obj" / target.project_name / target.local_name
+          : graph.project.targets.empty() && target_index == 0
+          ? p.build / "obj"
+          : p.build / "obj" / ((spec.is_test ? "test-" : "target-") + name);
     for (size_t index = 0; index < sources.size(); ++index) {
       Unit u;
       u.source = sources[index];
@@ -140,16 +199,20 @@ Graph make_build_graph(Project project,
       // Keep the entire compile command in the graph so every generator and the
       // compilation database preserve the same standards, includes and macros.
       if (toolchain.msvc) {
-        if (c && (p.c_standard == "99" || p.c_standard == "23"))
+        if (c && (target.c_standard == "99" || target.c_standard == "23"))
           throw std::runtime_error(
               "MSVC C builds currently support std 11 or 17");
 
         a.insert(a.end(), {"/nologo", "/c", "/showIncludes", "/utf-8", "/MT"});
+        if (!c && target.cxx_standard == "11")
+          throw std::runtime_error(
+              "MSVC-style drivers require C++ std 14 or newer");
+
         a.push_back(c
-                      ? "/std:c" + p.c_standard
-                      : "/std:c++" + (p.cxx_standard == "23"
+                      ? "/std:c" + target.c_standard
+                      : "/std:c++" + (target.cxx_standard == "23"
                                         ? std::string("latest")
-                                        : p.cxx_standard));
+                                        : target.cxx_standard));
         if (!c)
           a.emplace_back("/EHsc");
 
@@ -166,17 +229,18 @@ Graph make_build_graph(Project project,
                          : p.warnings == "none"
                          ? "/W0"
                          : "/W3");
-        for (const auto &inc : p.includes)
+        for (const auto &inc : target.includes)
           a.push_back("/I" + inc.string());
 
-        for (const auto &def : p.defines)
+        for (const auto &def : target.defines)
           a.push_back("/D" + def);
 
         a.push_back(u.source.string());
         a.push_back("/Fo" + u.object.string());
       } else {
-        a.push_back(std::string("-std=") +
-                    (c ? "c" + p.c_standard : "c++" + p.cxx_standard));
+        a.push_back(std::string("-std=") + (c
+                                              ? "c" + target.c_standard
+                                              : "c++" + target.cxx_standard));
         a.emplace_back(p.optimize == "speed"
                          ? "-O3"
                          : p.optimize == "size"
@@ -193,12 +257,16 @@ Graph make_build_graph(Project project,
         if (p.warnings == "extra")
           a.emplace_back("-Wextra");
 
-        for (const auto &inc : p.includes)
+        for (const auto &inc : target.includes)
           a.push_back("-I" + inc.string());
 
-        for (const auto &def : p.defines)
+        for (const auto &def : target.defines)
           a.push_back("-D" + def);
 
+#ifndef _WIN32
+        if (spec.type != TargetType::Executable)
+          a.emplace_back("-fPIC");
+#endif
         // Compiler depfiles drive precise header rebuilds in Ninja/GNU Make.
         a.insert(a.end(),
                  {"-MMD",
@@ -213,32 +281,137 @@ Graph make_build_graph(Project project,
       target.units.push_back(std::move(u));
     }
 
-    // Link mixed targets through the C++ driver to include its runtime
-    // libraries.
-    const bool needs_cxx =
-        std::any_of(sources.begin(),
-                    sources.end(),
-                    [](const fs::path &s) {
-                      return s.extension() != ".c";
-                    });
-    const auto &target_linker = needs_cxx ? cxx : cc;
-    target.link = {target_linker};
-    if (toolchain.msvc)
-      target.link.insert(target.link.end(), {"/nologo", "/MT"});
+    const auto &target_linker = resolved.needs_cpp ? cxx : cc;
+    if (spec.type == TargetType::StaticLibrary) {
+      std::vector<std::string> candidates;
+      if (toolchain.msvc)
+        candidates = {
+            (fs::path(target_linker).parent_path() / "lib.exe").string(),
+            "llvm-lib",
+            "lib"};
+      else
+        candidates = {
+            (fs::path(target_linker).parent_path() / "llvm-ar").string(),
+            "llvm-ar",
+            "ar"};
+#ifdef __APPLE__
+      candidates.insert(candidates.begin(), "/usr/bin/libtool");
+#endif
 
+      std::string archiver;
+      for (const auto &candidate : candidates) {
+        if (const auto program = find_program(candidate); !program.empty()) {
+          archiver = program;
+          break;
+        }
+      }
+      if (archiver.empty())
+        throw std::runtime_error("static target requires an installed "
+            "ar/llvm-ar or lib/llvm-lib archiver");
+
+      target.link =
+          toolchain.msvc
+            ? std::vector<std::string>{archiver,
+                                       "/NOLOGO",
+                                       "/OUT:" + target.output.string()}
+            : fs::path(archiver).filename() == "libtool"
+            ? std::vector<std::string>{archiver,
+                                       "-static",
+                                       "-o",
+                                       target.output.string()}
+            : std::vector<std::string>{archiver,
+                                       "rcs",
+                                       target.output.string()};
+      if (fs::path(archiver).stem() == "llvm-ar")
+        target.link.insert(target.link.begin() + 1, "--rsp-quoting=posix");
+    } else {
+      target.link = {target_linker};
+      if (toolchain.msvc)
+        target.link.insert(target.link.end(), {"/nologo", "/MT"});
+    }
     for (const auto &unit : target.units)
       target.link.push_back(unit.object.string());
 
-    if (toolchain.msvc) {
-      target.link.push_back("/Fe" + target.output.string());
-      if (!options.release)
-        target.link.insert(target.link.end(), {"/link", "/DEBUG"});
-    } else
-      target.link.insert(target.link.end(), {"-o", target.output.string()});
+    if (spec.type != TargetType::StaticLibrary) {
+      for (const auto dependency : resolved.link_dependencies) {
+        const auto output = target_output(graph.project,
+                                          specs[dependency].spec,
+                                          toolchain.msvc);
+        const auto import = target_import_library(output,
+                                                  specs[dependency].spec.type,
+                                                  toolchain.msvc);
+        target.link.push_back((import.empty() ? output : import).string());
+      }
+      if (toolchain.msvc) {
+        if (spec.type == TargetType::SharedLibrary)
+          target.link.emplace_back("/LD");
+        target.link.push_back("/Fe" + target.output.string());
+        target.link.emplace_back("/link");
+        if (!options.release)
+          target.link.emplace_back("/DEBUG");
+        if (!target.import_library.empty())
+          target.link.push_back("/IMPLIB:" + target.import_library.string());
+      } else {
+        if (spec.type == TargetType::SharedLibrary) {
+#ifdef __APPLE__
+          target.link.insert(target.link.end(),
+                             {"-dynamiclib",
+                              "-Wl,-install_name,@rpath/" +
+                              target.output.filename().string()});
+#else
+          target.link.emplace_back("-shared");
+#endif
+        }
+#ifdef _WIN32
+        if (!target.import_library.empty())
+          target.link.push_back("-Wl,--out-implib," +
+                                target.import_library.string());
+#elif defined(__APPLE__)
+        target.link.insert(
+            target.link.end(),
+            {"-Wl,-rpath,@loader_path", "-Wl,-rpath,@loader_path/.."});
+#else
+        target.link.insert(target.link.end(),
+                           {"-Wl,-rpath,$ORIGIN", "-Wl,-rpath,$ORIGIN/.."});
+#endif
+#ifndef _WIN32
+        // Member libraries may live beside another project's artifacts. Store
+        // loader-relative paths so moving the entire build tree remains valid.
+        std::set<fs::path> runtime_directories;
+        for (const auto dependency : resolved.link_dependencies) {
+          if (specs[dependency].spec.type != TargetType::SharedLibrary)
+            continue;
+
+          const auto library =
+              target_output(p, specs[dependency].spec, toolchain.msvc);
+          const auto relative = library.parent_path().lexically_relative(
+              target.output.parent_path());
+          if (runtime_directories.insert(relative).second)
+#ifdef __APPLE__
+        target.link.push_back("-Wl,-rpath,@loader_path/" +
+                              relative.generic_string());
+#else
+        target.link.push_back("-Wl,-rpath,$ORIGIN/" +
+                              relative.generic_string());
+#endif
+        }
+#endif
+        target.link.insert(target.link.end(), {"-o", target.output.string()});
+      }
+    }
 
     graph.targets.push_back(std::move(target));
   }
 
+  const auto runnable = std::find_if(
+      graph.targets.begin(),
+      graph.targets.end(),
+      [](const Target &target) {
+        return target.type == TargetType::Executable && !target.is_test;
+      });
+  graph.project.output = runnable == graph.targets.end()
+                           ? graph.targets.front().output
+                           : runnable->output;
   validate_build_graph(graph);
   return graph;
 }

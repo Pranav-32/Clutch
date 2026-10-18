@@ -30,18 +30,26 @@ struct Unit {
   std::vector<std::string> arguments;
 };
 
-/// One executable and its units; link includes the driver and all object
+/// One executable or library; link includes the native driver/archiver and
 /// inputs.
 struct Target {
   std::string name;
   fs::path output;
   std::vector<Unit> units;
   std::vector<std::string> link;
+  TargetType type = TargetType::Executable;
+  bool is_test = false, build_by_default = true;
+  fs::path import_library;
+  std::vector<size_t> dependencies, link_dependencies;
+  std::vector<fs::path> includes;
+  std::vector<std::string> defines;
+  std::string project_name{}, local_name{}, c_standard = "11",
+                                            cxx_standard = "17";
+  fs::path source_root{};
 };
 
 /// Resolved configuration shared by native generators, saved state and IDE
-/// data. targets[0] is the application; remaining entries are independent
-/// tests.
+/// data. Target indices identify dependencies, never implicit target roles.
 struct Graph {
   Project project;
   std::vector<Target> targets;
@@ -58,4 +66,4 @@ Graph make_build_graph(Project project,
                        const Toolchain &toolchain,
                        const BuildBackend &backend,
                        const Options &options);
-} // namespace clutch
+}  // namespace clutch

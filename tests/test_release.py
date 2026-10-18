@@ -83,7 +83,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn(f'clutch-1.2.3/bin/{binary.name}', names)
                 for name in release.NOTICES:
                     self.assertIn(f'clutch-1.2.3/share/licenses/clutch/{name}', names)
-                self.assertEqual(len(names), 4)
+                self.assertEqual(len(names), 1 + len(release.NOTICES))
 
     def test_package_rejects_missing_notice_and_wrong_binary_version(self):
         with self.assertRaises(ValueError):

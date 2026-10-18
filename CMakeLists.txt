@@ -36,9 +36,23 @@ add_executable(clutch
   src/core/compilation_database.cpp
   src/core/configure.cpp
   src/core/configuration_store.cpp
+  src/core/file_api/file_api.cpp
+  src/core/file_api/model.cpp
+  src/core/file_api/paths.cpp
+  src/core/file_api/protocol.cpp
+  src/core/file_api/query.cpp
   src/core/graph_visualization.cpp
   src/core/project.cpp
+  src/core/targets/archive.cpp
+  src/core/targets/manifest.cpp
+  src/core/targets/resolve.cpp
+  src/core/targets/runtime.cpp
+  src/core/targets/target.cpp
+  src/core/workspace/inputs.cpp
+  src/core/workspace/lock.cpp
+  src/core/workspace/workspace.cpp
   src/platform/files.cpp
+  src/platform/json.cpp
   src/platform/process.cpp
   src/platform/terminal.cpp
   src/toolchains/toolchain.cpp
@@ -74,6 +88,7 @@ install(FILES
   LICENSE
   third_party/CLI11.LICENSE
   third_party/tomlplusplus.LICENSE
+  third_party/nlohmann.LICENSE
   DESTINATION share/licenses/clutch)
 
 # CTest exposes smoke checks by default; BUILD_TESTING=OFF disables registration.
@@ -101,6 +116,8 @@ if(BUILD_TESTING)
   add_executable(clutch_graph_tests
     tests/graph_tests.cpp
     src/core/build_graph.cpp
+    src/core/targets/resolve.cpp
+    src/core/targets/target.cpp
     src/core/graph_visualization.cpp
     src/platform/files.cpp
     src/platform/process.cpp)
@@ -154,5 +171,37 @@ if(BUILD_TESTING)
           "$<TARGET_FILE:clutch>" "${CLUTCH_TEST_POSIX_NINJA}"
           "${CLUTCH_TEST_MAKE}" "${CLUTCH_TEST_CC}" "${CMAKE_CXX_COMPILER}")
     endif()
+  endif()
+
+  # Verify the public protocol with an independent JSON reader and real tools.
+  # Python is only a test dependency; the installed executable remains native.
+  find_package(Python3 3.9 COMPONENTS Interpreter QUIET)
+  if(CLUTCH_TEST_NINJA)
+    set(CLUTCH_API_NINJA "${CLUTCH_TEST_NINJA}")
+  elseif(CMAKE_GENERATOR MATCHES "^Ninja")
+    set(CLUTCH_API_NINJA "${CMAKE_MAKE_PROGRAM}")
+  else()
+    find_program(CLUTCH_API_NINJA NAMES ninja ninja-build)
+  endif()
+  if(MSVC)
+    set(CLUTCH_API_CC "${CMAKE_CXX_COMPILER}")
+  elseif(CLUTCH_TEST_CC)
+    set(CLUTCH_API_CC "${CLUTCH_TEST_CC}")
+  else()
+    find_program(CLUTCH_API_CC NAMES cc clang gcc)
+  endif()
+  if(Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    add_test(NAME clutch.file-api
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/file_api_integration.py"
+        --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+        --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    add_test(NAME clutch.targets
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/targets_integration.py"
+        --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+        --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    add_test(NAME clutch.workspace
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/workspace_integration.py"
+        --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+        --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
   endif()
 endif()

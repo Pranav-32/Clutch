@@ -80,6 +80,12 @@ repository root.
 
 ## Verify or contribute
 
+Once installed, configure a standalone project or a [workspace](workspaces.md)
+using the same native executable. Configuration generates a portable
+[`clutch.lock`](lock-files.md); the first configuration needs permission to create
+it in the source root. Existing matching locks support `--locked` verification.
+Workspace and lock handling require no Python runtime.
+
 Use `clutch --version` and the [quick start](../README.md#quick-start) to check
 your installation. To validate a development checkout, follow the
 [testing guide](testing.md). A shared Docker environment is described in the

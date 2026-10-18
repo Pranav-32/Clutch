@@ -18,7 +18,7 @@ CC=clang CXX=clang++ CLUTCH_BUILD_JOBS=4 \
 
 The script builds Clutch in `build-native`, runs all registered CTest checks,
 and requires the POSIX Ninja/GNU Make integration suite to be present. Install
-CMake/CTest, Ninja, GNU Make, and C/C++ compilers before running it. Integration
+CMake/CTest, Ninja, GNU Make, Python 3.9+ and C/C++ compilers before running it. Integration
 checks cover scaffolding, mixed C/C++, test execution, argument forwarding,
 profiles, C++17 and warning settings, IDE databases, incremental/header rebuilds,
 saved configuration, and safe cleanup. The container's initialization script calls
@@ -61,6 +61,28 @@ generators on their native hosts. `tests/native-generators.ps1` exercises Window
 native generators, and `tests/posix-integration.sh` covers Ninja/GNU Make on a
 POSIX host with real C/C++ compilers.
 
+## File-API checks
+
+`clutch.file-api` runs an independent Python consumer against the native CLI.
+It covers query-only first configuration, shared and multiple IDE clients,
+strict JSON and version diagnostics, profile isolation, exact compilation
+database arguments, failure/recovery, immutable generations, writer locks,
+concurrent readers and emitted build/run actions. POSIX symlinks and Windows
+junctions are checked on their respective hosts. Metadata is also inspected
+with additional available native generators. The reference client is exercised
+against successful and stale snapshots.
+
+```sh
+ctest --test-dir build -R file-api --output-on-failure
+```
+
+Use `-C Release` with a multi-configuration CMake generator. CMake registers this
+suite when Python 3.9+, Ninja and a C compiler are available; CI and the POSIX
+verification runner require registration, so missing dependencies cannot produce
+a false successful verification. Python is not a Clutch runtime dependency.
+The JSON schema documents are parsed and their local references are checked;
+the test runner does not claim to be a complete JSON Schema validator.
+
 ## Clean generated test workspaces
 
 Remove generated folders under `tests/work` when you want fresh test workspaces:
@@ -86,25 +108,60 @@ fresh workspace folders automatically on their next run.
 
 ## Scope and validation status
 
+`clutch.workspace` exercises virtual and real-root workspaces, cross-member static
+and shared links, local link scoping, member language standards, program working
+directories, qualified selection, compilation-database/file-API agreement, stale
+member rejection, portable lock bytes, unchanged timestamps, `--locked` failures,
+writer exclusion, relocation, and invalid member/cycle handling. It runs the
+available native generators on each host. POSIX additionally rejects symlinked
+members and lock files. CI and the POSIX verification runner require registration.
+
+```sh
+ctest --test-dir build -R workspace --output-on-failure
+```
+
+The example runner also verifies generated locks in debug and release. Lock
+checks cover double-quote migration/escaping, frozen preservation and local
+identities/links; they do not test Git downloads or commit
+pinning because those features are not implemented. See [lock files](lock-files.md).
+
 GitHub CI and release jobs share a native verification/packaging runner. Python
 tooling tests cover version identities with real temporary Git repositories,
 archive notices and checksums, and failed-publication behavior. See
 [versions and releases](releases.md) for the platform matrix and commands.
 
-The graph supports one application executable and explicit executable tests.
-Git dependencies, CMake/Make/Blaze dependency adapters, library targets, arbitrary
+The graph supports executable, static-library, shared-library and test targets.
+`clutch.targets` checks native generator builds, named/default selection, public
+usage requirements, diamond/static link order, C consumers of C++ archives,
+archive member removal, runtime DLL staging and missing import-library repair.
+It also verifies file-API kinds/dependency IDs and saved target restoration.
+Target fixtures locate their profile through `clutch locate`, follow code-model
+references by kind and use published run/artifact paths. This includes a profile
+outside the source tree and build directories containing spaces; archive/import
+names are not inferred from one compiler's naming convention. Native Visual
+Studio checks select Microsoft's CL driver; clang-cl remains covered by other
+compatible generators when selected for testing.
+Ninja and GNU Make run on Linux; Ninja, NMake and Visual Studio run with MSVC on
+Windows. macOS additionally exercises Xcode when installed. Python is used by
+the test harness, not by Clutch or any generated build action.
+
+Git dependencies, CMake/Make/Blaze dependency adapters, arbitrary
 custom commands, cross-compilation settings, PCH, project installation rules, automatic updates,
 and complete CMake capability coverage remain future work. Foreign adapters will
 configure external libraries while Clutch keeps its own configuration engine.
 
-Local validation covers the rebuilt Ubuntu 26.04 image with Clang 22 and GCC 15,
-including all four CTest checks, Graphviz, Ninja/GNU Make integration and examples.
-Windows MSVC validation covers all five CTest checks, NMake/MSBuild, examples and
-installed archives. Tooling tests cover Git versioning and release packaging;
-workflow syntax is checked with actionlint. The hosted-runner matrix and native
-Xcode builds have also run on GitHub: GCC, Windows MSVC and both macOS
-architectures passed the initial CI run. Linux Clang exposed a CI discovery bug
-that dereferenced clang++ to clang and omitted C++ runtime linking. Executable
-discovery now preserves driver symlink names, with a dedicated regression test.
-Rerun the Linux Clang job after pushing that fix. IDE attachment requires
-validation with the respective client.
+The v0.2.0 release passed the hosted Linux GCC/Clang, Windows MSVC and both macOS
+architecture jobs, including native generator and packaging checks. Executable
+discovery preserves driver symlink names such as `clang++`, with a dedicated
+regression test. Tooling tests cover Git versioning and release packaging;
+workflow syntax is checked with actionlint.
+
+Local tests cover Windows MSVC and Linux Clang; native
+macOS feature validation runs in the hosted matrix after pushing. Interactive
+IDE attachment requires validation with the respective client.
+
+Debug-symbol output was also checked manually on Windows MSVC with Ninja and
+Visual Studio: the workspace application and test each produced a linker PDB.
+This is not a cross-platform sidecar-regeneration guarantee or an automated
+symbol-artifact test. Explicit symbol-output tracking remains future work; see
+[debug symbols](manifest.md#debug-symbols).

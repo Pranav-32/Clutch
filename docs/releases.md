@@ -1,7 +1,13 @@
 # Versions, CI and releases
 
-Clutch uses Semantic Versioning. Implementation phases describe the roadmap;
-versions describe shipped changes. A phase can contain several releases. During
+User-project `clutch.lock` files have their own resolution schema, independent
+of Clutch's root `VERSION`, Git release tags, file-API versions and private build
+cache versions. Release Please does not resolve workspace dependencies or update
+user locks. After deliberately changing a member's project version, configure
+its workspace normally and review/commit the resulting lock change. See
+[lock files](lock-files.md) for the current local-only resolution scope.
+
+Clutch uses Semantic Versioning to describe shipped changes. During
 early development use `0.x.y`, and move to `1.0.0` when the supported interface
 and compatibility commitments are ready. Do not keep unrelated releases at 0.1.0.
 
@@ -49,10 +55,10 @@ Use Conventional Commit messages, especially squash-merge titles:
 | `feat!: change manifest syntax` or a `BREAKING CHANGE:` footer | Major: `0.1.0` → `1.0.0` |
 | `docs: clarify compiler setup` or `chore: update tooling` | No release by itself |
 
-The explicit pre-1.0 settings retain this mapping for 0.x releases. The initial
-automation state is 0.1.0, the current development baseline; it does not claim
-that 0.1.0 has already been published. Publish that first baseline with the tag
-procedure below. Later release PRs maintain the state automatically. If changing
+The explicit pre-1.0 settings retain this mapping for 0.x releases. The current
+release baseline is 0.2.0. A `fix:` change proposes 0.2.1; a `feat:` change
+proposes 0.3.0. When both are included, the feature's minor bump takes precedence.
+Release PRs maintain VERSION and the automation state automatically. If changing
 versions manually, also update `.github/release-please-manifest.json` to the same
 version so subsequent proposals start from the correct baseline.
 
@@ -142,7 +148,7 @@ Use the actual version for subsequent releases. The **Release** workflow:
 4. Creates or resumes a draft, uploads all archives, license notices and checksums,
    and publishes only after the expected assets are present.
 
-Archives contain `bin/clutch` (or `clutch.exe`) and the three required notices
+Archives contain `bin/clutch` (or `clutch.exe`) and the four required notices
 under `share/licenses/clutch/`. Each archive has a `.sha256` sidecar; the release
 also provides `SHA256SUMS`. Versions with a prerelease suffix become GitHub
 prereleases. Ordinary commits produce CI artifacts without publishing releases.

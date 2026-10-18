@@ -21,12 +21,15 @@
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
+#include "core/targets/archive.hpp"
+#include "core/targets/runtime.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -132,7 +135,7 @@ std::string response(const std::vector<std::string> &args, const bool msvc) {
 
   return out;
 }
-} // namespace
+}  // namespace
 
 /// Probe Windows IDE bundles only after normal executor resolution has failed.
 std::string discover_ninja() {
@@ -142,8 +145,8 @@ std::string discover_ninja() {
       "Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja";
   if (const auto *installation = std::getenv("VSINSTALLDIR")) {
     if (const auto executable =
-          bundled_ninja(fs::path(installation) / visual_studio_ninja);
-      !executable.empty())
+            bundled_ninja(fs::path(installation) / visual_studio_ninja);
+        !executable.empty())
       return executable;
   }
 
@@ -167,8 +170,8 @@ std::string discover_ninja() {
                fs::path(root) / "Microsoft Visual Studio")) {
         for (const auto &edition : installation_directories(version)) {
           if (const auto executable =
-                bundled_ninja(edition / visual_studio_ninja);
-            !executable.empty())
+                  bundled_ninja(edition / visual_studio_ninja);
+              !executable.empty())
             return executable;
         }
       }
@@ -180,7 +183,7 @@ std::string discover_ninja() {
 
         for (const auto *relative : clion_ninja_paths) {
           if (const auto executable = bundled_ninja(installation / relative);
-            !executable.empty())
+              !executable.empty())
             return executable;
         }
       }
@@ -204,44 +207,105 @@ void generate_ninja(const Graph &graph,
   // Response files preserve long argument lists; each driver supplies header
   // deps.
   ninja << "rule compile\n  command = $compiler @$out.rsp\n  rspfile = "
-      "$out.rsp\n  "
-      "rspfile_content = $args\n  description = Compiling $in\n";
+           "$out.rsp\n  "
+           "rspfile_content = $args\n  description = Compiling $in\n";
   if (graph.toolchain.msvc)
     ninja << "  deps = msvc\n";
   else
     ninja << "  deps = gcc\n  depfile = $out.d\n";
 
-  ninja << "rule link\n  command = $compiler @$out.rsp\n  rspfile = $out.rsp\n "
-      " rspfile_content "
-      "= $args\n  description = Linking $out\n";
+  ninja << "rule link\n  command = $compiler @\"$artifact.rsp\"\n  rspfile = "
+           "$artifact.rsp\n"
+        << "  rspfile_content = $args\n  description = Linking $artifact\n";
+  ninja << "rule archive\n  command = $archive_command\n  description = "
+           "Archiving $out\n";
+  ninja << "rule runtime_copy\n  command = $copy_command\n  description = "
+           "Staging $out\n";
+  std::set<fs::path> staged;
 
   // Every application/test unit keeps its graph-selected compiler and object
   // path.
-  for (const auto &target : graph.targets) {
+  for (size_t target_index = 0; target_index < graph.targets.size();
+       ++target_index) {
+    const auto &target = graph.targets[target_index];
     fs::create_directories(target.output.parent_path());
 
     for (const auto &[source, object, arguments] : target.units) {
       fs::create_directories(object.parent_path());
       ninja << "build " << path(object) << ": compile " << path(source)
-          << "\n  compiler = "
-          << ninja_value(command_line({arguments.front()})) << "\n  args = "
-          << ninja_value(response(arguments, graph.toolchain.msvc)) << "\n";
+            << "\n  compiler = "
+            << ninja_value(command_line({arguments.front()})) << "\n  args = "
+            << ninja_value(response(arguments, graph.toolchain.msvc)) << "\n";
     }
 
-    ninja << "build " << path(target.output) << ": link";
+    const auto copies = runtime_copies(graph, target_index);
+    for (const auto &[library, destination] : copies) {
+      if (!staged.insert(destination).second)
+        continue;
+
+      ninja << "build " << path(destination) << ": runtime_copy "
+            << path(graph.targets[library].output) << "\n  copy_command = "
+            << ninja_value(command_line(runtime_copy_command(graph,
+                                                             options,
+                                                             executable,
+                                                             target_index,
+                                                             library)))
+            << "\n";
+    }
+
+    ninja << "build " << path(target.output);
+    if (!target.import_library.empty())
+      ninja << " | " << path(target.import_library);
+    ninja << (target.type == TargetType::StaticLibrary ? ": archive"
+                                                       : ": link");
     for (const auto &unit : target.units)
       ninja << ' ' << path(unit.object);
+    if (target.type == TargetType::StaticLibrary) {
+      const auto metadata =
+          p.build / "obj" /
+          ("archive-" + std::to_string(target_index) + ".command");
+      write_if_changed(metadata, command_line(target.link) + '\n');
+      ninja << " | " << path(metadata);
+    }
+    if (target.type != TargetType::StaticLibrary) {
+      for (const auto dependency : target.link_dependencies) {
+        const auto &library = graph.targets.at(dependency);
+        ninja << ' '
+              << path(library.import_library.empty() ? library.output
+                                                     : library.import_library);
+      }
+    } else if (!target.dependencies.empty()) {
+      ninja << " ||";
+      for (const auto dependency : target.dependencies)
+        ninja << ' ' << path(graph.targets.at(dependency).output);
+    }
+    if (!copies.empty()) {
+      ninja << " ||";
+      for (const auto &[library, destination] : copies) {
+        (void)library;
+        ninja << ' ' << path(destination);
+      }
+    }
 
-    ninja << "\n  compiler = "
-        << ninja_value(command_line({target.link.front()})) << "\n  args = "
-        << ninja_value(response(target.link, graph.toolchain.msvc)) << "\n";
+    ninja << "\n";
+    if (target.type == TargetType::StaticLibrary)
+      ninja << "  archive_command = "
+            << ninja_value(command_line(
+                   archive_command(graph, options, executable, target_index)))
+            << "\n";
+    else
+      ninja << "  artifact = " << ninja_value(target.output.string())
+            << "\n  compiler = "
+            << ninja_value(command_line({target.link.front()})) << "\n  args = "
+            << ninja_value(response(target.link, graph.toolchain.msvc)) << "\n";
   }
 
   // Tests are opt-in; the default goal below remains the application
   // executable.
   ninja << "build clutch-tests: phony";
-  for (size_t i = 1; i < graph.targets.size(); ++i)
-    ninja << ' ' << path(graph.targets[i].output);
+  for (size_t i = 0; i < graph.targets.size(); ++i)
+    if (graph.targets[i].is_test)
+      ninja << ' ' << path(graph.targets[i].output);
 
   ninja << "\n";
 
@@ -261,15 +325,26 @@ void generate_ninja(const Graph &graph,
 
   if (options.release)
     regenerate.emplace_back("--release");
+  if (options.locked)
+    regenerate.emplace_back("--locked");
 
   ninja << "rule regenerate\n  command = "
-      << ninja_value(command_line(regenerate))
-      << "\n  generator = 1\n  restat = 1\n  description = Configuring "
-      << p.name << "\n";
-  ninja << "build build.ninja: regenerate " << path(p.root / layout::manifest)
-      << "\n";
-  ninja << "default " << path(p.output) << "\n";
+        << ninja_value(command_line(regenerate))
+        << "\n  generator = 1\n  restat = 1\n  description = Configuring "
+        << p.name << "\n";
+  ninja << "build build.ninja: regenerate";
+  for (const auto &[input, signature] : p.inputs) {
+    (void)signature;
+    ninja << ' ' << path(input);
+  }
+  ninja << "\n";
+  const auto defaults = p.build / layout::environment / "default-targets";
+  ninja << "build " << path(defaults) << ": phony";
+  for (const auto &target : graph.targets)
+    if (target.build_by_default && !target.is_test)
+      ninja << ' ' << path(target.output);
+  ninja << "\ndefault " << path(defaults) << "\n";
 
   write_if_changed(p.build / "build.ninja", ninja.str());
 }
-} // namespace clutch
+}  // namespace clutch

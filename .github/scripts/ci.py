@@ -44,12 +44,17 @@ def test_examples(binary, cc, cxx, generator):
             settings = tomllib.loads(manifest.read_text(encoding='utf-8'))
             shutil.copytree(manifest.parent, project,
                             ignore=shutil.ignore_patterns('Clutch-build-*', '.clutch'))
+            # Checked-in resolution must already match; CI must not silently
+            # repair an outdated example lock before testing it.
+            frozen = ('--locked',) if (project / 'clutch.lock').is_file() else ()
             for profile in ((), ('--release',)):
                 run(binary, '.', '--generator', generator, '--cc', cc, '--cxx', cxx,
-                    *profile, cwd=project)
+                    *profile, *frozen, cwd=project)
                 run(binary, 'build', *profile, cwd=project)
                 run(binary, 'run', *profile, cwd=project)
-                if settings.get('test'):
+                run(binary, '.', '--locked', '--generator', generator, '--cc', cc, '--cxx', cxx,
+                    *profile, cwd=project)
+                if settings.get('test') or settings.get('workspace'):
                     run(binary, 'test', *profile, cwd=project)
                 if manifest.parent.name == 'multi-file':
                     run(binary, 'run', *profile, '--', 'Clutch contributor', cwd=project)
@@ -69,7 +74,7 @@ def build(target, build_dir, output):
     command = ['cmake', '-S', ROOT, '-B', build_dir, '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=ON',
                f'-DCMAKE_CXX_COMPILER={cxx}', f'-DCMAKE_MAKE_PROGRAM={ninja}']
-    required = {'clutch.help', 'clutch.version', 'clutch.graph'}
+    required = {'clutch.help', 'clutch.version', 'clutch.graph', 'clutch.file-api', 'clutch.targets', 'clutch.workspace'}
     if windows:
         command.append(f'-DCLUTCH_TEST_NINJA={ninja}')
         required.update(('clutch.standalone', 'clutch.integration'))

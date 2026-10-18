@@ -25,7 +25,7 @@ TARGETS = (
     'macos-arm64-apple-clang',
     'macos-x86_64-apple-clang',
 )
-NOTICES = ('LICENSE', 'CLI11.LICENSE', 'tomlplusplus.LICENSE')
+NOTICES = ('LICENSE', 'CLI11.LICENSE', 'tomlplusplus.LICENSE', 'nlohmann.LICENSE')
 # One MiB balances streaming checksum throughput against temporary memory use.
 CHECKSUM_BLOCK_BYTES = 1024 * 1024
 NUMBER = r'(?:0|[1-9][0-9]*)'

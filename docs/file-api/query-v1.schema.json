@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Clutch client file-API query v1",
+  "type": "object",
+  "required": [
+    "requests"
+  ],
+  "properties": {
+    "requests": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "version"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/version"
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 128,
+                "items": {
+                  "$ref": "#/$defs/version"
+                }
+              }
+            ]
+          },
+          "client": {}
+        }
+      }
+    },
+    "client": {}
+  },
+  "$defs": {
+    "natural": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "version": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/natural"
+        },
+        {
+          "type": "object",
+          "required": [
+            "major"
+          ],
+          "properties": {
+            "major": {
+              "$ref": "#/$defs/natural"
+            },
+            "minor": {
+              "$ref": "#/$defs/natural"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

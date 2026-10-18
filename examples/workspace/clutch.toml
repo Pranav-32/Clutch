@@ -1,0 +1,17 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# A virtual workspace coordinates child projects without creating a root target.
+[workspace]
+members = ["greeting", "hello"]
+
+[build]
+generator = "ninja"
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+warnings = "extra"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"

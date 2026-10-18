@@ -11,8 +11,8 @@
 # CC/CXX select compiler executables. CLUTCH_BUILD_JOBS defaults to 2;
 # CLUTCH_TEST_BUILD_DIR defaults to build-native relative to the repository;
 # CLUTCH_TEST_EXPORT_DATABASE defaults to OFF (the devcontainer sets ON).
-# Requires CMake/CTest, Bash, Ninja, GNU Make and C/C++ compilers. The POSIX
-# integration test must be registered; missing tools cannot silently skip it.
+# Requires CMake/CTest, Bash, Python 3.9+, Ninja, GNU Make and C/C++ compilers.
+# Compiler-backed and file-API tests must be registered; tools cannot silently skip them.
 # Uses Bash 3.2-compatible syntax for macOS's system Bash.
 set -euo pipefail
 
@@ -63,6 +63,7 @@ require_tool() {
 
 # Resolve all prerequisites before creating a build tree or starting compilation.
 cmake="$(require_tool cmake)"
+python_tool="$(require_tool python3 python)"
 ctest="$(require_tool ctest)"
 bash_tool="$(require_tool bash)"
 ninja="$(require_tool ninja ninja-build)"
@@ -77,6 +78,7 @@ make_version="$("$make_tool" --version)"
     -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_CXX_COMPILER="$cxx" \
     -DCMAKE_MAKE_PROGRAM="$ninja" \
+    -DPython3_EXECUTABLE="$python_tool" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS="$export_database" \
     -DBUILD_TESTING=ON \
     -DCLUTCH_TEST_BASH="$bash_tool" \
@@ -90,6 +92,12 @@ make_version="$("$make_tool" --version)"
 registered_tests="$("$ctest" --test-dir "$build_dir" -N)"
 [[ "$registered_tests" == *'clutch.posix-integration'* ]] \
     || fail 'clutch.posix-integration was not registered by CMake'
+[[ "$registered_tests" == *'clutch.file-api'* ]] \
+    || fail 'clutch.file-api was not registered (Python 3.9+ is required)'
+[[ "$registered_tests" == *'clutch.targets'* ]] \
+    || fail 'clutch.targets was not registered'
+[[ "$registered_tests" == *'clutch.workspace'* ]] \
+    || fail 'clutch.workspace was not registered'
 
 "$ctest" --test-dir "$build_dir" --output-on-failure
 printf '\nClutch verification passed: %s/clutch\n' "$build_dir"

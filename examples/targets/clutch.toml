@@ -1,0 +1,39 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Explicit targets replace build.sources and automatic source discovery.
+[project]
+name = "target_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[build]
+generator = "ninja"
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+warnings = "extra"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"
+
+# The header directory and definition become part of greeting's public interface.
+[[target]]
+name = "greeting"
+type = "static"
+sources = ["greeting/greeting.cpp"]
+public_include_dirs = ["greeting"]
+public_defines = ["GREETING_VERSION=1"]
+
+# Only the declared library's public requirements reach this executable.
+[[target]]
+name = "hello"
+sources = ["app/main.cpp"]
+links = ["greeting"]
+
+[[test]]
+name = "greeting_test"
+sources = ["checks/greeting_test.cpp"]
+links = ["greeting"]

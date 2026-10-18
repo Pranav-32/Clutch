@@ -17,16 +17,27 @@
 #include "backends/backend.hpp"
 #include "core/configuration_store.hpp"
 #include "core/configure.hpp"
+#include "core/file_api/file_api.hpp"
 #include "core/options.hpp"
+#include "core/targets/archive.hpp"
+#include "core/targets/resolve.hpp"
+#include "core/targets/runtime.hpp"
 #include "core/version.hpp"
 #include "platform/process.hpp"
 #include "platform/terminal.hpp"
 #include <CLI11.hpp>
 
 #include <chrono>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 namespace clutch {
+namespace {
+// Show milliseconds consistently even when a build lasts hundreds of seconds.
+constexpr auto elapsed_seconds_precision = 3;
+}  // namespace
+
 /// Parse one operation and preserve compiler, backend and application exit
 /// codes.
 int run_cli(const int argc, char *const *const argv) {
@@ -43,6 +54,9 @@ int run_cli(const int argc, char *const *const argv) {
       source_directory,
       "Configure the directory containing clutch.toml (for example .)");
   app.add_flag("--release", options.release, "Configure the release profile");
+  app.add_flag("--locked",
+               options.locked,
+               "Require an existing unchanged clutch.lock");
   app.add_option("--generator",
                  options.generator,
                  "Build-file generator (see generators)");
@@ -65,13 +79,29 @@ int run_cli(const int argc, char *const *const argv) {
   auto *const generators =
       app.add_subcommand("generators",
                          "List implemented build-file generators");
+  auto *const capabilities =
+      app.add_subcommand("capabilities",
+                         "Print machine-readable file-API capabilities");
+  auto *const locate = app.add_subcommand(
+      "locate",
+      "Print project/profile metadata paths as JSON without configuring");
+  auto *const targets =
+      app.add_subcommand("targets", "List configured target names and kinds");
+  auto *const archive =
+      app.add_subcommand("__archive", "Internal static archive action")
+          ->group("");
+  auto *const copy_runtime =
+      app.add_subcommand("__copy-runtime", "Internal DLL staging action")
+          ->group("");
+  std::string runtime_library;
+  copy_runtime->add_option("--library", runtime_library)->required();
   auto *const create =
       app.add_subcommand("new", "Create a new project directory");
   auto *const init =
       app.add_subcommand("init",
                          "Initialize without replacing existing sources");
   std::string destination, project_name, language = "cpp", filter;
-  std::vector<std::string> runtime_args;
+  std::vector<std::string> runtime_args, target_names;
 
   create->add_option("path", destination, "New directory")->required();
   init->add_option("path", destination, "Existing or new directory")
@@ -81,11 +111,12 @@ int run_cli(const int argc, char *const *const argv) {
                         project_name,
                         "Project name (defaults to directory name)");
     command->add_option("--language", language, "c or cpp")
-           ->check(CLI::IsMember({"c", "cpp"}));
+        ->check(CLI::IsMember({"c", "cpp"}));
   }
 
   // Reuse the same project/profile storage across mutually exclusive workflows.
-  for (auto *const command : {build, execute, test, clean}) {
+  for (auto *const command :
+       {build, execute, test, clean, locate, targets, archive, copy_runtime}) {
     command->add_option("--project",
                         root,
                         "Source directory containing clutch.toml");
@@ -102,6 +133,12 @@ int run_cli(const int argc, char *const *const argv) {
         ->check(CLI::PositiveNumber);
   }
 
+  for (auto *const command : {build, execute, test, archive, copy_runtime})
+    command->add_option(
+        "-t,--target",
+        target_names,
+        "Select a configured target by exact name (repeatable)");
+
   execute->add_option("args",
                       runtime_args,
                       "Program arguments (use -- before flags)");
@@ -117,16 +154,21 @@ int run_cli(const int argc, char *const *const argv) {
           "use clutch <source-directory> to configure, or a subcommand alone");
 
     if (has_command &&
-        (!options.generator.empty() || !options.cc.empty() ||
+        (options.locked || !options.generator.empty() || !options.cc.empty() ||
          !options.cxx.empty() || !options.build_tool_executable.empty()))
       throw std::runtime_error("compiler and generator options apply to clutch "
-          "<source-directory> configuration only");
+                               "<source-directory> configuration only");
 
     // Discovery and scaffolding commands do not require a configured project.
+    if (*capabilities) {
+      std::cout << file_api::capabilities_json() << '\n';
+      return 0;
+    }
+
     if (*generators) {
       for (const auto &[name, description, supported] : supported_generators())
         std::cout << name << "  " << description
-            << (supported ? "" : " (requires another host OS)") << '\n';
+                  << (supported ? "" : " (requires another host OS)") << '\n';
 
       return 0;
     }
@@ -139,11 +181,14 @@ int run_cli(const int argc, char *const *const argv) {
       return 0;
     }
 
-    options.root = fs::absolute(has_command
-                                  ? root
-                                  : source_directory.empty()
-                                  ? "."
-                                  : source_directory);
+    options.root = fs::absolute(has_command                ? root
+                                : source_directory.empty() ? "."
+                                                           : source_directory);
+    if (*locate) {
+      std::cout << file_api::locate_json(options) << '\n';
+      return 0;
+    }
+
     if (*clean) {
       clean_project(options);
       return 0;
@@ -157,12 +202,12 @@ int run_cli(const int argc, char *const *const argv) {
       }
 
       if (const auto executable = current_executable(argv[0]);
-        !executable.empty()) {
+          !executable.empty()) {
         const auto graph = configure(options, executable);
         status("Configured",
                graph.project.name + " [" +
-               (options.release ? "release" : "debug") + "] -> " +
-               graph.project.build.string());
+                   (options.release ? "release" : "debug") + "] -> " +
+                   graph.project.build.string());
         return 0;
       }
 
@@ -173,23 +218,41 @@ int run_cli(const int argc, char *const *const argv) {
     // targets.
     const auto start = std::chrono::steady_clock::now();
     const auto graph = load_configuration(options);
-    std::vector<size_t> selected;
-    if (*test) {
-      for (size_t index = 1; index < graph.targets.size(); ++index) {
-        if (graph.targets[index].name.find(filter) != std::string::npos)
-          selected.push_back(index);
-      }
-
-      if (selected.empty()) {
-        if (!filter.empty())
-          throw std::runtime_error("no tests match --filter " + filter);
-
+    if (*targets) {
+      for (const auto &target : graph.targets)
+        std::cout << target.name << "  " << target_type_name(target.type)
+                  << (target.is_test            ? " (test)"
+                      : target.build_by_default ? " (default)"
+                                                : "")
+                  << '\n';
+      return 0;
+    }
+    const auto selected = select_targets(graph,
+                                         target_names,
+                                         static_cast<bool>(*test),
+                                         static_cast<bool>(*execute),
+                                         filter);
+    if (*archive) {
+      if (selected.size() != 1)
+        throw std::runtime_error(
+            "internal archive action requires one --target");
+      return archive_target(graph, selected.front());
+    }
+    if (*copy_runtime) {
+      if (selected.size() != 1)
+        throw std::runtime_error("internal runtime copy requires one --target");
+      copy_runtime_library(graph, selected.front(), runtime_library);
+      return 0;
+    }
+    if (selected.empty()) {
+      if (*test && filter.empty() && target_names.empty()) {
         status("Finished",
                "no tests declared; add [[test]] entries to clutch.toml");
         return 0;
       }
-    } else {
-      selected.push_back(0);
+      throw std::runtime_error(
+          *test ? "no tests match --filter"
+                : "no default targets; select --target <name>");
     }
 
     // Build failures stop execution before launching an application or any
@@ -200,19 +263,26 @@ int run_cli(const int argc, char *const *const argv) {
 
     const auto elapsed =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
-        .count();
+            .count();
+    std::ostringstream duration;
+    duration << std::fixed << std::setprecision(elapsed_seconds_precision)
+             << elapsed;
     status("Finished",
-           (*test ? "test executables" : graph.project.output.string()) + " (" +
-           std::to_string(elapsed).substr(0, 5) + "s)");
+           (*test ? "test executables"
+            : selected.size() == 1
+                ? graph.targets[selected.front()].output.string()
+                : "selected targets") +
+               " (" + duration.str() + "s)");
     // Forward program arguments as separate values and run from the source
     // root.
     if (*execute) {
-      std::vector invocation{graph.project.output.string()};
+      const auto &target = graph.targets[selected.front()];
+      std::vector invocation{target.output.string()};
       invocation.insert(invocation.end(),
                         runtime_args.begin(),
                         runtime_args.end());
-      status("Running", graph.project.name);
-      return run(invocation, graph.project.root);
+      status("Running", target.name);
+      return run(invocation, target.source_root);
     }
 
     if (*test) {
@@ -223,7 +293,7 @@ int run_cli(const int argc, char *const *const argv) {
         const auto &target = graph.targets[index];
         status("Testing", target.name);
         if (const int code =
-            run({target.output.string()}, graph.project.root)) {
+                run({target.output.string()}, target.source_root)) {
           ++failures;
           std::cerr << "failed: " << target.name << " (exit " << code << ")\n";
         }
@@ -231,7 +301,7 @@ int run_cli(const int argc, char *const *const argv) {
 
       status("Test result",
              std::to_string(selected.size() - failures) + " passed; " +
-             std::to_string(failures) + " failed");
+                 std::to_string(failures) + " failed");
       return failures ? 1 : 0;
     }
   } catch (const CLI::ParseError &error) {
@@ -243,4 +313,4 @@ int run_cli(const int argc, char *const *const argv) {
 
   return 0;
 }
-} // namespace clutch
+}  // namespace clutch

@@ -1,0 +1,14 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Sources resolve from this member. The workspace supplies build profiles/tools.
+[project]
+name = "greeting"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[[target]]
+name = "greeting"
+type = "static"
+sources = ["greeting.cpp"]
+public_include_dirs = ["."]

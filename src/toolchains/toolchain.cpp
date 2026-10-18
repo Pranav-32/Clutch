@@ -77,8 +77,8 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
   // A C application can still declare a C++ test, so inspect every target's
   // inputs.
   auto sources = project.sources;
-  for (const auto &[name, test_sources] : project.tests)
-    sources.insert(sources.end(), test_sources.begin(), test_sources.end());
+  for (const auto &test : project.tests)
+    sources.insert(sources.end(), test.sources.begin(), test.sources.end());
 
   const bool cpp =
       std::any_of(sources.begin(),

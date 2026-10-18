@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-/** @file
+/**
+ * @file
  * @brief Generated release/Git identity; edit VERSION or create a release tag.
  */
 #pragma once

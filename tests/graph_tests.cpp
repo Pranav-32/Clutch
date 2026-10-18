@@ -88,13 +88,13 @@ int main(const int argc, char** argv)
                 "app",
                 build / "app",
                 {{source, build / "app.o", {"compiler"}}},
-                {"linker"}
+                {"linker"}, clutch::TargetType::Executable, false, true, {}, {}, {}, {}, {}
             },
             {
                 "test",
                 build / "test",
                 {{source, build / "test.o", {"compiler"}}},
-                {"linker"}
+                {"linker"}, clutch::TargetType::Executable, true, false, {}, {}, {}, {}, {}
             }
         };
         clutch::validate_build_graph(graph);

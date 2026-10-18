@@ -41,6 +41,7 @@ upstream copyrights and licenses:
 | --- | --- | --- |
 | CLI11 | BSD 3-Clause | [CLI11.LICENSE](../third_party/CLI11.LICENSE) |
 | toml++ | MIT | [tomlplusplus.LICENSE](../third_party/tomlplusplus.LICENSE) |
+| JSON for Modern C++ | MIT | [nlohmann.LICENSE](../third_party/nlohmann.LICENSE) |
 
 Preserve upstream notices in source distributions. For Clutch binaries that
 incorporate these headers, distribute their complete license notices too.
@@ -57,11 +58,12 @@ share/licenses/clutch/
   LICENSE
   CLI11.LICENSE
   tomlplusplus.LICENSE
+  nlohmann.LICENSE
 ```
 
 When creating a release archive or installer, include those notices with the
 executable. When copying a binary directly out of a build directory, copy the
-root `LICENSE` and both `third_party/*.LICENSE` files into its distribution
+root `LICENSE` and all `third_party/*.LICENSE` files into its distribution
 materials as well; compiling alone does not package them.
 
 ## Per-file notices and IDE automation

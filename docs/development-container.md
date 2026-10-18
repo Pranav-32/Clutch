@@ -1,5 +1,13 @@
 # Shared development environment
 
+The container runs workspace configuration and lock checks through the same
+native Clutch executable. After the development build, try
+`./build-container/clutch examples/workspace`, followed by
+`./build-container/clutch run --project examples/workspace --target hello::hello`.
+Configure again with `--locked` to verify the generated root lock. The workspace
+database uses container paths, so run its language server in the container too.
+See [workspaces](workspaces.md) and [lock files](lock-files.md).
+
 Clutch's Dockerfile and devcontainer definition provide the same Ubuntu 26.04
 development environment across Linux, macOS and Windows hosts. Shared compiler,
 build and test tools make the workflow repeatable across machines. Each developer
@@ -83,7 +91,7 @@ CLUTCH_BUILD_JOBS=1 bash .devcontainer/post-create.sh
 ```
 
 The workspace should contain the checkout's sources and setup files. The script
-must exit successfully, CTest must report all four checks passing, and the last
+must exit successfully, CTest must report all registered checks passing, and the last
 command must print the Clutch version. The checks include compiler-backed
 Ninja/GNU Make builds and Graphviz rendering when available in the image.
 `docker ps` showing a running `sleep infinity` process only confirms that the
@@ -491,9 +499,10 @@ Validated on 2026-10-18 with Docker Desktop on Windows using Ubuntu 26.04 on
 `linux/amd64`. The Dockerfile built successfully, and the official Dev Container
 CLI created the persistent container with its writable project mount.
 Initialization ran as `clutch-dev` with Clang 22.1.8 and `CLUTCH_BUILD_JOBS=1`.
-All four CTest checks
-passed: help, version, graph validation/rendering, and the POSIX Ninja/GNU Make
-integration suite. The complete manifest-reference example and entry-only C/C++
+CTest checks cover help, version, graph validation/rendering,
+the POSIX Ninja/GNU Make integration suite, target/workspace builds, local locks
+and the file-API query/reply protocol.
+The complete manifest-reference example and entry-only C/C++
 examples also configured and built; the executable test example passed.
 
 The user/home directory, source writes, passwordless sudo, Git access, compiler
