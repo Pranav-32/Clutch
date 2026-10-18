@@ -74,7 +74,7 @@ own build directory. Keep native and container build trees separate.
 Projects configured by Clutch select their own generator and compilers
 independently; see [compiler selection](usage.md#configure-then-build).
 Self-hosting remains deferred: build Clutch itself with CMake. Runnable Clutch
-projects live under [examples/](examples.md), each with its own manifest.
+projects live under [examples/](../examples/README.md), each with its own manifest.
 The normal CMake build does not publish a compilation database to the
 repository root.
 

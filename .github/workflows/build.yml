@@ -7,6 +7,10 @@ on:
         description: Exact commit to verify (defaults to the calling event)
         type: string
         default: ''
+      metadata-only:
+        description: Validate release-only files without rebuilding unchanged sources
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,7 +18,9 @@ permissions:
 jobs:
   native:
     name: ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    # Metadata validation needs no host compiler or scarce macOS runner. Keep
+    # check names stable so existing branch-protection rules still resolve.
+    runs-on: ${{ inputs.metadata-only && 'ubuntu-24.04' || matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -29,44 +35,65 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
       CLUTCH_BUILD_JOBS: '2'
+      CLUTCH_TEST_JOBS: '2'
+      CLUTCH_COMPILER_LAUNCHER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.ref || github.sha }}
-          fetch-depth: 0
+          fetch-depth: ${{ inputs.metadata-only && 1 || 0 }}
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
       - name: Linux prerequisites
-        if: runner.os == 'Linux'
+        if: ${{ !inputs.metadata-only && runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build make graphviz clang g++
       - name: macOS prerequisites
-        if: runner.os == 'macOS'
+        if: ${{ !inputs.metadata-only && runner.os == 'macOS' }}
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: |
-          brew install ninja make graphviz
+          # Reuse runner tools; do not upgrade an already usable installation.
+          packages=()
+          command -v ninja >/dev/null || packages+=(ninja)
+          command -v gmake >/dev/null || packages+=(make)
+          command -v dot >/dev/null || packages+=(graphviz)
+          if (( ${#packages[@]} )); then brew install "${packages[@]}"; fi
           echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
       - name: MSVC developer environment
-        if: runner.os == 'Windows'
+        if: ${{ !inputs.metadata-only && runner.os == 'Windows' }}
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
       - name: Windows prerequisites
-        if: runner.os == 'Windows'
+        if: ${{ !inputs.metadata-only && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
             choco install ninja --no-progress -y
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: Compiler cache
+        if: ${{ !inputs.metadata-only }}
+        uses: Mozilla-Actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11, Node.js 24
+        with:
+          version: v0.18.0
       - name: Test release tooling
         run: python -m unittest discover -s tests/tooling -p "test_*.py" -v
+      - name: Validate release metadata
+        if: inputs.metadata-only
+        run: python .github/scripts/ci_policy.py validate
       - name: Build, test, install and package
+        if: ${{ !inputs.metadata-only }}
         # Use the platform's default shell: Git Bash would shadow MSVC link.exe.
         run: python .github/scripts/ci.py --target ${{ matrix.target }}
       - name: Preserve verified native package
+        if: ${{ !inputs.metadata-only }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: package-${{ matrix.target }}

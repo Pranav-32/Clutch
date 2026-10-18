@@ -254,9 +254,8 @@ Inspect compile/link dependencies with Graphviz:
 dot -Tsvg Clutch-build-debug/build-graph.dot -o Clutch-build-debug/build-graph.svg
 ```
 
-The development container includes Graphviz; Clutch does not require it to
-configure or build. The [container guide](development-container.md#inspect-a-projects-build-graph)
-explains graph inspection. Clutch validates cycles and duplicate artifact
+The [development container](development-container.md) includes Graphviz; Clutch
+does not require it to configure or build. Clutch validates cycles and duplicate artifact
 producers independently of rendering. Compiler-discovered headers and future
 package dependencies are outside this visualization.
 

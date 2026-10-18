@@ -17,6 +17,8 @@ from release import ROOT, TARGETS, package
 
 # Allow slow hosted runners five minutes for each compiler-backed CTest suite.
 TEST_TIMEOUT_SECONDS = 300
+# Limit nested compiler-backed suites rather than starting one per CPU core.
+DEFAULT_JOB_COUNT = 2
 
 
 def run(*command, cwd=ROOT):
@@ -32,6 +34,14 @@ def require_tool(name):
         # argv[0] and can disable C++ runtime linking or Microsoft-style options.
         return os.path.abspath(resolved)
     raise RuntimeError(f'required tool not found: {name}')
+
+
+def job_count(variable):
+    """Reject unbounded/invalid parallelism before starting any build work."""
+    value = os.environ.get(variable, str(DEFAULT_JOB_COUNT))
+    if not value.isascii() or not value.isdecimal() or int(value) < 1:
+        raise ValueError(f'{variable} must be a positive integer')
+    return value
 
 
 def test_examples(binary, cc, cxx, generator):
@@ -50,7 +60,8 @@ def test_examples(binary, cc, cxx, generator):
             for profile in ((), ('--release',)):
                 run(binary, '.', '--generator', generator, '--cc', cc, '--cxx', cxx,
                     *profile, *frozen, cwd=project)
-                run(binary, 'build', *profile, cwd=project)
+                # run builds its executable first; another build here starts
+                # Xcode/MSBuild twice without adding example coverage.
                 run(binary, 'run', *profile, cwd=project)
                 run(binary, '.', '--locked', '--generator', generator, '--cc', cc, '--cxx', cxx,
                     *profile, cwd=project)
@@ -62,6 +73,7 @@ def test_examples(binary, cc, cxx, generator):
 
 def build(target, build_dir, output):
     """Require host-specific integration suites before producing a release asset."""
+    build_jobs, test_jobs = job_count('CLUTCH_BUILD_JOBS'), job_count('CLUTCH_TEST_JOBS')
     windows = target.startswith('windows-')
     expected_system = 'Windows' if windows else ('Darwin' if target.startswith('macos-') else 'Linux')
     expected_machine = 'arm64' if '-arm64-' in target else 'x86_64'
@@ -74,6 +86,10 @@ def build(target, build_dir, output):
     command = ['cmake', '-S', ROOT, '-B', build_dir, '-G', 'Ninja',
                '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_TESTING=ON',
                f'-DCMAKE_CXX_COMPILER={cxx}', f'-DCMAKE_MAKE_PROGRAM={ninja}']
+    # Cache only compilation, never a saved CMake tree, test result or package.
+    # The actual compiler paths remain unchanged for Clutch integration tests.
+    launcher = os.environ.get('CLUTCH_COMPILER_LAUNCHER')
+    command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={require_tool(launcher) if launcher else ""}')
     required = {'clutch.help', 'clutch.version', 'clutch.graph', 'clutch.file-api', 'clutch.targets', 'clutch.workspace'}
     if windows:
         command.append(f'-DCLUTCH_TEST_NINJA={ninja}')
@@ -82,14 +98,15 @@ def build(target, build_dir, output):
         command.extend((f'-DCLUTCH_TEST_CC={cc}', f'-DCLUTCH_TEST_MAKE={require_tool("gmake" if platform.system() == "Darwin" else "make")}'))
         required.add('clutch.posix-integration')
     run(*command)
-    run('cmake', '--build', build_dir, '--parallel', os.environ.get('CLUTCH_BUILD_JOBS', '2'))
+    run('cmake', '--build', build_dir, '--parallel', build_jobs)
     registered = json.loads(subprocess.check_output(
         ['ctest', '--test-dir', str(build_dir), '--show-only=json-v1'], text=True
     ))
     missing = required - {test['name'] for test in registered['tests']}
     if missing:
         raise RuntimeError(f'required CTest suites were not registered: {missing}')
-    run('ctest', '--test-dir', build_dir, '--output-on-failure', '--timeout', str(TEST_TIMEOUT_SECONDS))
+    run('ctest', '--test-dir', build_dir, '--output-on-failure',
+        '--parallel', test_jobs, '--timeout', str(TEST_TIMEOUT_SECONDS))
     binary = build_dir / ('clutch.exe' if windows else 'clutch')
     if windows:
         run('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',

@@ -7,7 +7,7 @@
 
 * add native file API, library targets, workspaces and local locks ([ce85341](https://github.com/Pranav-32/Clutch/commit/ce85341acb2486640082ef72b4f37e3b9fda8cac))
 
-## [0.2.0](https://github.com/Pranav-32/Clutch/compare/v0.1.0...v0.2.0) (2026-10-17)
+## [0.2.0](https://github.com/Pranav-32/Clutch/releases/tag/v0.2.0) (2026-10-17)
 
 
 ### Features
@@ -20,7 +20,6 @@
 
 * preserve compiler driver names during CI discovery ([cd1a201](https://github.com/Pranav-32/Clutch/commit/cd1a2010940903511ecc812126af291720d20607))
 
-## Changelog
 
 Release Please maintains this file through version proposal pull requests.
 The initial development baseline is 0.1.0; no published release is implied.
