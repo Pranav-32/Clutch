@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Pranav-32/Clutch/compare/v0.3.1...v0.3.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* harden generated outputs and cross-platform builds ([#7](https://github.com/Pranav-32/Clutch/issues/7)) ([6886228](https://github.com/Pranav-32/Clutch/commit/6886228d12be452fff23eed75cb703698b750e45))
+
 ## [0.3.1](https://github.com/Pranav-32/Clutch/compare/v0.3.0...v0.3.1) (2026-10-18)
 
 
