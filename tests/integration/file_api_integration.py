@@ -134,12 +134,20 @@ class FileApiTests(unittest.TestCase):
         self.configure()
         tools = self.root / 'tools'
         tools.mkdir()
-        executor = tools / Path(OPTIONS.ninja).name
-        shutil.copy2(OPTIONS.ninja, executor)
-        with mock.patch.dict(os.environ, {'CLUTCH_BUILD_TOOL': str(executor)}):
+        executable = tools / Path(OPTIONS.clutch).name
+        shutil.copy2(OPTIONS.clutch, executable)
+        # Keep external launchers beside their installed assets (Chocolatey
+        # shims are not relocatable). Clutch is the binary we can relocate.
+        environment = {
+            'CLUTCH_BUILD_TOOL': Path(OPTIONS.ninja).name,
+            'PATH': os.pathsep.join((str(tools), str(Path(OPTIONS.ninja).parent),
+                                    os.environ.get('PATH', ''))),
+        }
+        with mock.patch.object(OPTIONS, 'clutch', str(executable)), \
+                mock.patch.dict(os.environ, environment):
             self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx)
-        self.cli('run', '-j', '1')
-        self.cli('test', '-j', '1')
+            self.cli('run', '-j', '1')
+            self.cli('test', '-j', '1')
         # Native Windows generators must decode rule filenames as well as
         # compiler response arguments; ASCII-only fixtures cannot catch this.
         if os.name == 'nt' and all(Path(compiler).stem.lower() == 'cl'
