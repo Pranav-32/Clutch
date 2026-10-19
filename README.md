@@ -1,5 +1,9 @@
 # Clutch
 
+<p align="center">
+  <img src="assets/branding/clutch-banner.png" alt="Clutch — C / C++ Build System" width="960">
+</p>
+
 A small native build system for C and C++ with a simple `clutch.toml` manifest.
 Configure your project, then build, run and test it from the command line.
 Clutch generates native build files and an IDE compilation database.
@@ -149,16 +153,16 @@ Try the [workspace example](examples/workspace/README.md), or read the
 
 ## Learn more
 
-| Guide | What it covers |
-| --- | --- |
-| [Installation](docs/installation.md) | Build and install Clutch on your platform |
-| [Runnable examples](examples/README.md) | Try single-file, multi-file, C and mixed-language projects |
-| [Using Clutch](docs/usage.md) | Configuration, compilers, generators, IDE setup and project tests |
-| [Manifest reference](docs/manifest.md) | Every supported field, default and example |
-| [Workspaces](docs/workspaces.md) | Member manifests, qualified links, shared profiles and build outputs |
-| [Lock files](docs/lock-files.md) | Portable local resolution, `--locked` and dependency-pinning limits |
-| [File API](docs/file-api.md) | Query/reply protocol for IDE and developer-tool integrations |
-| [Versions and releases](docs/releases.md) | Git version identity, automated checks and release downloads |
+| Guide                                     | What it covers                                                       |
+|-------------------------------------------|----------------------------------------------------------------------|
+| [Installation](docs/installation.md)      | Build and install Clutch on your platform                            |
+| [Runnable examples](examples/README.md)   | Try single-file, multi-file, C and mixed-language projects           |
+| [Using Clutch](docs/usage.md)             | Configuration, compilers, generators, IDE setup and project tests    |
+| [Manifest reference](docs/manifest.md)    | Every supported field, default and example                           |
+| [Workspaces](docs/workspaces.md)          | Member manifests, qualified links, shared profiles and build outputs |
+| [Lock files](docs/lock-files.md)          | Portable local resolution, `--locked` and dependency-pinning limits  |
+| [File API](docs/file-api.md)              | Query/reply protocol for IDE and developer-tool integrations         |
+| [Versions and releases](docs/releases.md) | Git version identity, automated checks and release downloads         |
 
 ## Contribute
 
