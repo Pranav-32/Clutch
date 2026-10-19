@@ -266,8 +266,8 @@ class FileApiTests(unittest.TestCase):
     def test_metadata_matches_other_native_generators(self):
         self.request()
         generators = []
-        if os.name != 'nt' and shutil.which('make'):
-            generators.append(('make', shutil.which('make')))
+        if os.name != 'nt' and (make := shutil.which('gmake') or shutil.which('make')):
+            generators.append(('make', make))
         if sys.platform == 'darwin' and shutil.which('xcodebuild'):
             generators.append(('xcode', shutil.which('xcodebuild')))
         if os.name == 'nt' and Path(OPTIONS.cxx).stem.lower() in ('cl', 'clang-cl'):

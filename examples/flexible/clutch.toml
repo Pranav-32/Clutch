@@ -1,0 +1,35 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# A real workspace root can keep an application entry and add local libraries.
+[project]
+name = "flexible"
+version = "0.1.0"
+std = 17
+entry = "main.cpp"
+
+[workspace]
+members = ["greeting"]
+
+# These compile defaults also reach member targets. Links apply only to the app.
+[build]
+generator = "ninja"
+include_dirs = ["shared"]
+defines = ["EXAMPLE_SCOPE=1"]
+links = ["number", "greeting::greeting"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+
+[[target]]
+name = "number"
+type = "static"
+sources = ["number.cpp"]
+defines = ["EXAMPLE_SCOPE=3"]
+
+[[test]]
+name = "greeting_test"
+sources = ["tests/greeting_test.cpp"]
+links = ["number", "greeting::greeting"]

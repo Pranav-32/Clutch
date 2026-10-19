@@ -28,8 +28,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace clutch {
@@ -101,7 +103,7 @@ const std::vector<BackendDriver> &drivers() {
        "GNU Make (Unix, MinGW and MSYS)",
        Host::Any,
        "MAKE",
-       {"make", "gmake", "mingw32-make"},
+       {"gmake", "make", "mingw32-make"},
        generate_make,
        make_build_command},
       {"nmake",
@@ -231,7 +233,7 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
   }
 
   // Search ordinary executable names before optional IDE-bundled installations.
-  for (const auto *candidate : driver.executable_names) {
+  for (const auto *const candidate : driver.executable_names) {
     if (const auto executable = find_program(candidate); !executable.empty())
       return {driver.name, executable};
   }
@@ -281,6 +283,14 @@ backend_build_command(const Graph &graph,
       throw std::runtime_error("invalid build target selection");
   }
 
-  return driver.build(graph, options, target_indices);
+  auto execution = options;
+  if (execution.jobs == 0) {
+    const auto processors = std::max(1U, std::thread::hardware_concurrency());
+    execution.jobs = static_cast<int>(
+        std::min(processors,
+                 static_cast<unsigned>(std::numeric_limits<int>::max())));
+  }
+
+  return driver.build(graph, execution, target_indices);
 }
 }  // namespace clutch

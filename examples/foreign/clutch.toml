@@ -1,0 +1,21 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Configure an ordinary CMake library without adding a Clutch manifest to it.
+[project]
+name = "foreign-example"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "main.cpp"
+
+[build]
+generator = "ninja"
+
+[dependencies]
+greeting = { path = "native", target = "Greeting::Greeting" }
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

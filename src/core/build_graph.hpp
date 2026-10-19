@@ -30,6 +30,15 @@ struct Unit {
   std::vector<std::string> arguments;
 };
 
+/// A target/language-specific prefix header, its creator and optional COFF
+/// object.
+struct PrecompiledHeader {
+  std::string language, driver;
+  fs::path header, ide_header, companion_object;
+  std::vector<fs::path> headers;
+  Unit creator;
+};
+
 /// One executable or library; link includes the native driver/archiver and
 /// inputs.
 struct Target {
@@ -46,6 +55,10 @@ struct Target {
   std::string project_name{}, local_name{}, c_standard = "11",
                                             cxx_standard = "17";
   fs::path source_root{};
+  std::vector<PrecompiledHeader> precompiled_headers{};
+  std::vector<std::string> foreign_dependencies{};
+  std::vector<fs::path> link_inputs{}, runtime_libraries{};
+  std::vector<fs::path> additional_files{};
 };
 
 /// Resolved configuration shared by native generators, saved state and IDE

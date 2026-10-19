@@ -15,6 +15,11 @@ the root selects the generator and profile build directories. `hello` explicitly
 links `greeting::greeting`, receiving its public header directory. Membership
 alone does not establish a dependency.
 
+The root can also provide shared `build.include_dirs` and `build.defines`.
+Root paths resolve from the workspace manifest; member and target settings can
+override shared defaults. A root with `[project]` may declare its own entry
+and targets alongside the members.
+
 Configuration writes one compilation database and build graph in the root's
 profile directory. Artifacts are separated under `members/<project>/`. It also
 generates a portable `clutch.lock` at the workspace root; commit that file with

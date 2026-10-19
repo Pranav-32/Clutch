@@ -1,3 +1,4 @@
+# Audience: maintainers and contributors changing CI/release automation.
 # Verify PRs once, then the merged main commit. Tags use the Release workflow.
 name: CI
 on:

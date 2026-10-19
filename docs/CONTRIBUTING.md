@@ -1,5 +1,94 @@
 # Contributing to Clutch
 
+Audience: contributors. Start here; reference guides are available when needed.
+
+The [README](../README.md) introduces Clutch and its basic usage. This guide is
+the entry point for contributing: setup, where to edit, conventions, checks and
+review. The related guides below supply details for particular kinds of changes.
+
+Documentation fixes, examples, tests and bug reports are welcome alongside C/C++
+changes. You do not need to understand every backend to make a useful contribution.
+Please follow the [code of conduct](../.github/CODE_OF_CONDUCT.md).
+
+## Your first pull request
+
+Clutch reads project manifests and generates native C/C++ build files. CMake
+builds Clutch itself. You can contribute without learning every generator or
+dependency adapter first.
+
+1. Choose one small change and create a branch in your fork. Browse
+   [good first issues](https://github.com/Pranav-32/Clutch/labels/good%20first%20issue),
+   or ask on an issue before starting larger work.
+2. Build Clutch with the [development container](development-container.md) or the
+   [native commands below](#build-and-test). A prose-only correction can skip
+   compiler setup: edit, preview and check the affected links instead.
+3. For code or example changes, run one small project before editing. From the
+   checkout root after a Ninja build:
+
+   ```sh
+   ./build-native/clutch examples/single-file
+   ./build-native/clutch run --project examples/single-file
+   ```
+
+   In the development container, use `./build-container/clutch` instead.
+   On Windows, use `.\build-native\clutch.exe` in an initialized developer
+   terminal. A multi-configuration Debug build places it under `build-native/Debug/`.
+   The example should print `Hello from Clutch and C++!`.
+4. Edit the relevant files and run the checks in the table below. Format changed
+   C/C++ files. Record commands that passed and checks you could not run, with
+   the missing tool or host.
+5. Open a focused PR with a Conventional Commit title such as
+   `docs: explain dependency paths` or `fix: preserve target include order`.
+   Explain the problem and resulting behavior; link an issue when relevant.
+   Draft PRs are welcome.
+6. Respond to review on the same branch. GitHub runs the
+   [platform checks](releases.md#continuous-verification). You do not need every
+   operating system locally or a release tag for an ordinary contribution.
+
+### Where to edit and what to check
+
+| Change | Files to start with | Smallest useful check |
+| --- | --- | --- |
+| Documentation | `README.md` or the relevant `docs/` guide | Preview formatting; verify changed file links and heading anchors |
+| Example | Its directory under `examples/` | Configure it, then run it and any declared tests; follow its README |
+| Native behavior | The module and paired header under `src/`; see [code layout](architecture.md#code-layout) | Rebuild Clutch, run the relevant [CTest suites](testing.md#select-checks), then format/analyze changed C/C++ |
+| Test or automation | `tests/`, or the script being changed | Run the affected suite; use [tooling tests](testing.md#select-checks) for Python automation |
+
+For a first documentation PR, clarify one confusing explanation, verify its
+links and commands, and avoid unrelated formatting. Use
+[Get help](#get-help-and-work-with-reviewers) if setup fails.
+
+The remaining sections are references. Read the ones that match your change:
+[build commands](#build-and-test), [style](#code-organization-and-style),
+[static analysis](#static-analysis), [test design](#tests-and-behavior-changes)
+or [submission](#submit-a-change). Release operations belong in the
+[maintainer guide](maintaining.md).
+
+### Related contributor references
+
+| Your change involves… | Read as needed |
+| --- | --- |
+| Configuration flow or module boundaries | [Architecture](architecture.md) |
+| Manifest fields or dependency adapters | [Manifest rules](manifest.md) and [dependency support](dependencies.md#contributing-to-dependency-support) |
+| Workspace composition or saved resolution | [Workspaces](workspaces.md) and [lock files](lock-files.md) |
+| IDE metadata or protocol compatibility | [File API](file-api.md) |
+| Test coverage or platform setup | [Testing](testing.md) and [development container](development-container.md) |
+| Repository automation or publication | [Maintainer guide](maintaining.md) |
+
+## Get help and work with reviewers
+
+Use [GitHub issues](https://github.com/Pranav-32/Clutch/issues/new/choose) for setup
+questions, bugs and feature proposals. Search existing issues first. Include your
+Clutch version, platform, compiler/generator and a small manifest or command when
+relevant. Say what you tried; it is fine to ask before you have a proposed fix.
+Security reports use the [private reporting channel](../.github/SECURITY.md).
+
+Maintainers triage reports, request missing reproductions and identify scoped
+`good first issue` or `help wanted` work. Review focuses on behavior, compatibility,
+clarity and relevant checks. Explain disagreements with examples and evidence;
+address the code rather than the person. Review is volunteer work with no promised
+response deadline. A passing CI run does not guarantee acceptance of a proposal.
+
 Develop Clutch with its CMake project. Keep changes focused, demonstrate the
 resulting behavior with appropriate checks, and update affected documentation
 and examples.
@@ -44,10 +133,6 @@ the existing PR checks.
   and C++17 `if` initializers for branch-scoped values.
 - Avoid redundant type qualifiers and template arguments where deduction is
   clear. Preserve meaningful constness and reference semantics.
-- Separate independent conditionals and meaningful blocks with blank lines.
-- Use unsigned operands/literals in bitwise operations, such as `byte >> 4U`.
-  Name format/algorithm constants and explain their purpose. Keep host paths
-  and tool selections configurable or discoverable.
 - Document file responsibilities, function contracts, lifetime/ownership rules
   and non-obvious platform behavior. Explain intent instead of repeating code.
   Put each Doxygen command on its own line, using a bare `@file`.
@@ -71,7 +156,7 @@ In PowerShell:
 
 ```powershell
 git ls-files -- 'src/*.cpp' 'src/*.hpp' 'tests/unit/*.cpp' 'examples/*.cpp' 'examples/*.hpp' 'examples/*.c' 'examples/*.h' |
-    ForEach-Object { clang-format --dry-run --Werror $_ }
+        ForEach-Object { clang-format --dry-run --Werror $_ }
 ```
 
 Replace `--dry-run --Werror` with `-i` to apply formatting. Keep unrelated
@@ -85,7 +170,7 @@ For a compilation database with the actual compiler settings:
 cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build-tidy --parallel 2
 clang-tidy --config-file=.clang-tidy --verify-config
-clang-tidy -p build-tidy src/main.cpp
+python tests/scripts/tidy.py --database build-tidy --scope src --scope tests/unit
 ```
 
 Select the desired compiler on initial configuration. Keep the database in its
@@ -93,6 +178,23 @@ build directory. The advisory baseline covers analyzer, bug-prone, performance,
 portability and selected modernization/readability checks. Analyze owned sources
 only, review findings before applying fixes, and justify narrowly scoped
 `NOLINT` suppressions. Passing build tests does not establish clean analysis.
+
+The analysis runner fails if any source in its selected scope lacks a compilation
+command, validates the clang-tidy configuration, and treats enabled diagnostics
+as errors. Omit `--scope` to cover `src/`, `tests/unit/` and all examples; supply
+every configured example database with another `--database` argument. To extend
+the command above with just the flexible example, configure it and add both
+`--scope examples/flexible` and `--database examples/flexible/Clutch-build-debug`. Use
+`--jobs 2` for limited parallel analysis. Each database must describe the current
+host; headers are analyzed through the units that include them, and inactive
+platform branches need checks on their own host.
+
+LLVM 22's const-correctness check does not catch every deduced `auto` pointer or
+parameter binding. Review these explicitly: `const auto *const node` makes both
+the pointee and binding immutable; `auto *const node` keeps the pointee mutable.
+Qualify unchanged parameter bindings in definitions where useful, keeping
+redundant top-level `const` out of declarations. A clean analysis run does not
+replace that review.
 
 ## Tests and behavior changes
 
@@ -119,10 +221,8 @@ Report suspected vulnerabilities through the private channel in the
 [security policy](../.github/SECURITY.md). Keep sensitive reproductions out of
 public issues and pull requests.
 
-GitHub-managed CodeQL default setup scans C/C++, Python and workflow actions.
-Dependabot proposes grouped weekly updates to pinned GitHub Actions. Vendored
-C++ headers still need upstream advisory review when updating them; see the
-[dependency notes](../third_party/README.md).
+Changes to scanning, dependency-update or release automation follow the
+[maintainer guide](maintaining.md#security-maintenance).
 
 Create a branch in your fork and open a pull request. Describe the problem and
 resulting behavior, include a small reproduction for bugs, and list checks run

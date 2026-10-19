@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Capture the use case before discussing implementation details.
+name: Feature proposal
+description: Describe a problem Clutch could solve better.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Describe your workflow and the limitation you encounter.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: A small manifest or CLI example is helpful. An implementation is not required.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility
+      description: Note existing workarounds and relevant platforms, generators or external libraries.

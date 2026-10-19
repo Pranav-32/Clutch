@@ -1,3 +1,4 @@
+# Audience: maintainers and contributors changing CI/release automation.
 # Reusable native verification and packaging pipeline, shared by CI and releases.
 name: Native build
 on:

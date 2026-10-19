@@ -1,5 +1,7 @@
 # Licensing
 
+Audience: Contributors and distributors preserving copyright and license notices.
+
 Clutch's own source and documentation use [BSD 3-Clause](../LICENSE).
 Contribute only material you have the right to provide under those terms.
 Contributors retain copyright; no copyright assignment is required.

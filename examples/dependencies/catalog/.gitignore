@@ -1,0 +1,3 @@
+# prepare.py writes the exact catalog baseline; its local-origin lock is not portable.
+/clutch.toml
+/clutch.lock

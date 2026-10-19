@@ -27,4 +27,8 @@ void validate_generated_path(const fs::path &path);
 /// the writer rejects redirected paths, creates missing parent directories and
 /// reports write/close failures. It does not provide a multi-file transaction.
 void write_if_changed(const fs::path &path, const std::string &content);
+
+/// Atomically publish a caller-owned staging directory. Transient Windows
+/// sharing errors receive bounded retries; existing destinations are rejected.
+void publish_directory(const fs::path &source, const fs::path &destination);
 }  // namespace clutch

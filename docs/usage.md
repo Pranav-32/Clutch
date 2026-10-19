@@ -1,5 +1,7 @@
 # Using Clutch
 
+Audience: Users configuring, building and testing C/C++ projects with Clutch.
+
 Configure and build C and C++ projects with Clutch. For your first project, see
 the [quick start](../README.md#quick-start); for every manifest field, see the
 [manifest reference](manifest.md).
@@ -25,17 +27,36 @@ clutch build --release --jobs 4
 ```
 
 `clutch .` validates the manifest, discovers sources and tools, and writes build
-files without compiling. `build`, `run`, and `test` load the saved configuration
+files without building project artifacts. External-library configuration may run
+compiler probes or upstream configure scripts; see [dependencies](dependencies.md#cmake-libraries).
+`build`, `run`, and `test` load the saved configuration
 and execute the selected native backend. They require configuration first.
 Changes to `clutch.toml` require another explicit `clutch .` invocation; adding
 or removing discovered sources also requires reconfiguration. Editing an
 existing source or header only requires a build.
 
+Source arrays accept recursive patterns such as `sources = ["src/*.{cpp,c,h}"]`.
+Use the same syntax for library and test targets. Matched headers are IDE files;
+only C/C++ source extensions are compiled. See [source selection](manifest.md#sources-and-headers)
+for matching rules and generated-directory exclusions.
+
 Configuration creates or updates `clutch.lock` at the source/workspace root.
 Commit it with the manifests. Use `clutch . --locked` (or add `--release`) to
 require an existing matching lock without rewriting resolution. This flag is
 configuration-only. Changes to any root/member manifest or the lock invalidate
-saved builds; see [lock files](lock-files.md) for its current local-only scope.
+saved builds; see [lock files](lock-files.md) for local edges and Git revision pins.
+
+Native builds use available CPU concurrency by default; `--jobs N` sets an
+explicit limit and `--jobs 1` requests serial execution. Ninja, GNU Make, JOM,
+MSBuild and Xcode own dependency scheduling. NMake remains serial because its
+executor has no parallel scheduler. Exact compiler/link prerequisites prevent a
+consumer from running before its library or PCH is ready.
+
+Git imports are downloaded during configuration into the source root's `.clutch/`.
+Use `clutch . --locked --offline` after caching them to prohibit network access.
+Refresh untagged imports explicitly with `clutch . --auto-update-dependencies`;
+normal configuration preserves compatible pins. See [dependencies](dependencies.md)
+and [PCH settings](manifest.md#precompiled-headers).
 
 Choose compilers and the generator during configuration:
 
@@ -80,10 +101,11 @@ examples for standards, profiles, sources and tests.
 | --- | --- |
 | `[project]` | `name`, `version`, `language`, `std`, `entry` |
 | `[workspace]` | `members` |
-| `[build]` | `generator`, `sources`, `include_dirs`, `defines` |
+| `[build]` | `generator`, `sources`, `links`, `include_dirs`, `defines`, `pch`, `runtime` |
 | `[profile.debug]`, `[profile.release]` | `build_dir`, `optimize`, `warnings` |
-| `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default` |
+| `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default`, `pch` |
 | `[[test]]` | Target fields except `default`; executable only |
+| `[dependencies]` | Aliased Git, local, installed-package or catalog imports; see [dependency fields](dependencies.md#dependency-field-reference) |
 
 ```toml
 [project]
@@ -118,6 +140,12 @@ an `include/` directory is optional and added automatically when present.
 `project.entry` can add an entry source. Without explicit targets, application
 sources form one executable. `version` is metadata. Use `[[target]]` for multiple
 executables and static/shared libraries; see the [target reference](manifest.md#target).
+
+Application shorthand can coexist with library targets: keep `project.entry` or
+`build.sources`, then use `build.links` for the application's libraries. Workspace
+roots may share include directories and definitions with members, which can
+override them locally. The [flexible example](../examples/flexible/README.md)
+combines these forms in one runnable project.
 
 `warnings = "none"` suppresses compiler warnings with `-w` on GCC/Clang or
 `/W0` on MSVC-style drivers. Errors remain errors. `default` enables `-Wall`
@@ -256,12 +284,12 @@ dot -Tsvg Clutch-build-debug/build-graph.dot -o Clutch-build-debug/build-graph.s
 
 The [development container](development-container.md) includes Graphviz; Clutch
 does not require it to configure or build. Clutch validates cycles and duplicate artifact
-producers independently of rendering. Compiler-discovered headers and future
-package dependencies are outside this visualization.
+producers independently of rendering. The graph includes logical package edges
+and PCH prerequisites; compiler-discovered headers are outside this visualization.
 
 Objects, executables, and backend metadata also stay in the profile directory.
-The reserved `.clutch/` directory is the project-local dependency workspace for
-future package management; it is excluded from Git and Docker build contexts.
+The reserved source-root `.clutch/` directory contains the project-local Git cache;
+it is excluded from Git and Docker build contexts.
 Existing nonempty directories must already belong to this project; Clutch
 refuses unrelated or redirected paths. Saved configuration is local to its
 project location and profile. Configure again after moving a project.
@@ -302,3 +330,62 @@ Use `clutch targets` to list configured target names and kinds. `build`, `run`
 and `test` accept `--target <name>` (short form `-t`). Repeat it for multiple
 build/test targets. Without selection, `build` uses ordinary targets marked
 `default`, while `test` uses all tests. `run` requires one application executable.
+
+## Source bundles
+
+`clutch bundle` creates a source ZIP containing the project, workspace members
+and snapshots of resolved Git/local source dependencies. It runs natively;
+neither Python nor an external ZIP utility is required.
+
+```sh
+clutch .
+clutch bundle
+clutch bundle --output ../hello-sources.zip --exclude private --exclude scratch
+```
+
+The default output is `.clutch/bundles/<project>-sources.zip`. `--project` selects
+another project directory; `--release` selects its release-profile inputs.
+An explicit output path is relative to the current working directory. Existing
+outputs are refused. `--exclude` accepts repeatable archive-relative file or
+directory paths, without wildcards.
+
+Configure first when the project imports Git/catalog dependencies: bundling
+uses existing pins and verified cached checkouts offline. It does not update
+versions, fetch missing source revisions, compile code or replace the original
+manifest/lock. Projects using only local files can bundle without configuring.
+
+After extracting the ZIP, configure for the recipient's machine before building:
+
+```sh
+clutch . --offline
+clutch build
+clutch test
+```
+
+Supply `--cc`, `--cxx` or `--generator` during configuration when needed.
+Source imports become relative `path` snapshots, including transitive imports.
+External snapshots live in `.clutch/bundle/deps/`; package origins/revisions
+are recorded in `.clutch/bundle/snapshot.toml`. The new configuration generates
+a fresh `clutch.lock` and native rules. Profile build directories use the default
+`Clutch-build-debug` / `Clutch-build-release` names in the snapshot.
+
+The archive includes regular files, empty directories and available executable
+permissions. It omits repository metadata, existing `.clutch` caches, lock/writer
+files and recognized Clutch/CMake build trees. Other files are included regardless
+of `.gitignore`; use exclusions for material you do not intend to distribute.
+Required manifests and selected sources cannot be excluded. Symlinks, junctions,
+special files, unsafe path components and ASCII case-colliding filenames are
+rejected. Unicode normalization/case rules still depend on the recipient filesystem.
+
+Compilers, build tools and installed SDKs remain prerequisites. A machine-specific
+SDK prefix outside the bundled trees is rejected; use environment-based package
+discovery or a redistributable prefix inside the project. Foreign build scripts,
+literal arguments and embedded absolute paths must themselves be portable;
+the bundler rewrites known Clutch manifest path fields, not arbitrary scripts.
+Foreign download commands may require separate offline settings. Review included
+licenses before redistributing dependencies, and avoid editing inputs while bundling.
+
+Archives use standard uncompressed ZIP records with CRC-32 checks, sorted members
+and fixed timestamps. The same unchanged source snapshot on the same host produces
+the same bytes. ZIP64 is not supported: archives must stay below four GiB and
+contain at most 65,534 entries, including directories and generated metadata.

@@ -13,11 +13,13 @@
 
 #pragma once
 
+#include "core/dependencies/dependency.hpp"
 #include "core/paths.hpp"
 #include "core/targets/target.hpp"
 #include "core/workspace/inputs.hpp"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace clutch {
@@ -38,8 +40,11 @@ struct Project {
   std::string name, cxx_standard = "17", c_standard = "11";
   std::string language = "auto", generator = "ninja";
   std::string optimize, warnings = "extra";
+  std::string runtime = "static";
   // Inputs are resolved before generation; headers are found through includes.
   std::vector<fs::path> sources, includes;
+  std::vector<fs::path> additional_files{};
+  std::vector<fs::path> pch_c, pch_cpp;
   // Definitions omit driver prefixes; graph construction supplies -D or /D.
   std::vector<std::string> defines;
 
@@ -52,6 +57,11 @@ struct Project {
   std::string version;
   std::vector<WorkspaceProject> projects;
   std::vector<ConfigurationInput> inputs;
+  std::vector<dependencies::Request> dependency_requests;
+  std::vector<dependencies::Package> packages;
+  std::vector<std::pair<std::string, std::string>> package_edges;
+  std::vector<dependencies::ForeignRequest> foreign_requests;
+  std::vector<dependencies::ForeignBuild> foreign_builds;
 };
 
 /// Parse and validate clutch.toml, discovering source files and normalizing

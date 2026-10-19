@@ -1,0 +1,21 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Compile a shared prefix once per target, then schedule its consumers in parallel.
+[project]
+name = "pch_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[build]
+generator = "ninja"
+sources = ["main.cpp", "sum.cpp"]
+pch = ["prefix.hpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+warnings = "extra"

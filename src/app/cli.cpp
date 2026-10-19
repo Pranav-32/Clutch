@@ -15,8 +15,10 @@
 
 #include "app/workflow.hpp"
 #include "backends/backend.hpp"
+#include "core/bundle/bundle.hpp"
 #include "core/configuration_store.hpp"
 #include "core/configure.hpp"
+#include "core/dependencies/foreign.hpp"
 #include "core/file_api/file_api.hpp"
 #include "core/options.hpp"
 #include "core/targets/archive.hpp"
@@ -57,6 +59,12 @@ int run_cli(const int argc, char *const *const argv) {
   app.add_flag("--locked",
                options.locked,
                "Require an existing unchanged clutch.lock");
+  app.add_flag("--offline",
+               options.offline,
+               "Configure without network access");
+  app.add_flag("--auto-update-dependencies",
+               options.update_dependencies,
+               "Refresh untagged Git imports within their version constraints");
   app.add_option("--generator",
                  options.generator,
                  "Build-file generator (see generators)");
@@ -76,6 +84,18 @@ int run_cli(const int argc, char *const *const argv) {
   auto *const clean =
       app.add_subcommand("clean",
                          "Remove the selected profile's build artifacts");
+  auto *const bundle = app.add_subcommand(
+      "bundle",
+      "Create a relocatable source ZIP with resolved source dependencies");
+  std::string bundle_output;
+  std::vector<std::string> bundle_exclusions;
+  bundle->add_option(
+      "--output",
+      bundle_output,
+      "New ZIP path (default .clutch/bundles/<project>-sources.zip)");
+  bundle->add_option("--exclude",
+                     bundle_exclusions,
+                     "Omit an archive-relative file/directory (repeatable)");
   auto *const generators =
       app.add_subcommand("generators",
                          "List implemented build-file generators");
@@ -115,8 +135,15 @@ int run_cli(const int argc, char *const *const argv) {
   }
 
   // Reuse the same project/profile storage across mutually exclusive workflows.
-  for (auto *const command :
-       {build, execute, test, clean, locate, targets, archive, copy_runtime}) {
+  for (auto *const command : {build,
+                              execute,
+                              test,
+                              clean,
+                              locate,
+                              targets,
+                              archive,
+                              copy_runtime,
+                              bundle}) {
     command->add_option("--project",
                         root,
                         "Source directory containing clutch.toml");
@@ -157,7 +184,8 @@ int run_cli(const int argc, char *const *const argv) {
           "use clutch <source-directory> to configure, or a subcommand alone");
 
     if (has_command &&
-        (options.locked || !options.generator.empty() || !options.cc.empty() ||
+        (options.locked || options.offline || options.update_dependencies ||
+         !options.generator.empty() || !options.cc.empty() ||
          !options.cxx.empty() || !options.build_tool_executable.empty()))
       throw std::runtime_error("compiler and generator options apply to clutch "
                                "<source-directory> configuration only");
@@ -195,6 +223,13 @@ int run_cli(const int argc, char *const *const argv) {
 
     if (*clean) {
       clean_project(options);
+      return 0;
+    }
+
+    if (*bundle) {
+      const auto output =
+          bundle_project(options, fs::u8path(bundle_output), bundle_exclusions);
+      status("Bundled", output.u8string());
       return 0;
     }
 
@@ -261,9 +296,15 @@ int run_cli(const int argc, char *const *const argv) {
 
     // Build failures stop execution before launching an application or any
     // tests.
+    if (const int result =
+            dependencies::build_foreign(graph, options, selected))
+      return result;
+
     if (const int result = run(backend_build_command(graph, options, selected),
                                graph.project.build))
       return result;
+
+    dependencies::stage_foreign_runtime(graph, selected);
 
     const auto elapsed =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start)

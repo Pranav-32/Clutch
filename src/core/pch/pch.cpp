@@ -1,0 +1,197 @@
+/* Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+ * SPDX-License-Identifier: BSD-3-Clause */
+
+/**
+ * @file
+ * @brief Keep PCH artifacts specific to a target, language and compiler
+ * command.
+ */
+
+#include "pch.hpp"
+#include "core/targets/requirements.hpp"
+#include "platform/files.hpp"
+#include <algorithm>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+
+namespace clutch::pch {
+namespace {
+/// Select the source language using the same rule as ordinary compilation.
+std::string language(const Unit &unit) {
+  return unit.source.extension() == ".c" ? "c" : "cpp";
+}
+}  // namespace
+
+const PrecompiledHeader *for_unit(const Target &target, const Unit &unit) {
+  const auto found = std::find_if(target.precompiled_headers.begin(),
+                                  target.precompiled_headers.end(),
+                                  [&](const PrecompiledHeader &prefix) {
+                                    return prefix.language == language(unit);
+                                  });
+  return found == target.precompiled_headers.end() ? nullptr : &*found;
+}
+
+void plan(Target &target,
+          const TargetSpec &spec,
+          const Project &project,
+          const Toolchain &toolchain) {
+  for (const auto c : {true, false}) {
+    const auto headers =
+        spec.external ? (c ? spec.pch_c : spec.pch_cpp)
+                      : merge_includes(c ? project.pch_c : project.pch_cpp,
+                                       c ? spec.pch_c : spec.pch_cpp);
+    if (headers.empty())
+      continue;
+
+    const auto found =
+        std::find_if(target.units.begin(),
+                     target.units.end(),
+                     [&](const Unit &unit) {
+                       return (unit.source.extension() == ".c") == c;
+                     });
+    if (found == target.units.end())
+      continue;
+
+    PrecompiledHeader prefix;
+    prefix.language = c ? "c" : "cpp";
+    prefix.driver =
+        toolchain.msvc ? "msvc" : (c ? toolchain.c_pch : toolchain.cpp_pch);
+    if (prefix.driver.empty())
+      throw std::runtime_error(
+          "PCH requires a recognized GCC, Clang or MSVC compiler");
+
+    const auto directory =
+        found->object.parent_path() / "pch" / prefix.language;
+    prefix.header = directory / "prefix.h";
+    prefix.ide_header = directory / "text" / "prefix.h";
+    prefix.headers = headers;
+    prefix.creator.source = toolchain.msvc
+                                ? directory / (c ? "prefix.c" : "prefix.cpp")
+                                : prefix.header;
+    prefix.creator.object = prefix.driver == "gcc"
+                                ? fs::path(prefix.header.u8string() + ".gch")
+                                : directory / "prefix.pch";
+    if (toolchain.msvc)
+      prefix.companion_object = directory / "prefix.obj";
+
+    // Copy the exact target flags, removing only source/output/dependency
+    // options.
+    const auto &original = found->arguments;
+    auto &arguments = prefix.creator.arguments;
+    for (size_t i = 0; i < original.size(); ++i) {
+      const auto &argument = original[i];
+      if (argument == found->source.u8string() || argument == "-c" ||
+          argument == "-MMD")
+        continue;
+
+      if (argument == "-o" || argument == "-MF") {
+        ++i;
+        continue;
+      }
+
+      if (toolchain.msvc && argument.rfind("/Fo", 0) == 0)
+        continue;
+
+      arguments.push_back(argument);
+    }
+
+    if (toolchain.msvc) {
+      arguments.insert(arguments.end(),
+                       {"/FI" + prefix.header.u8string(),
+                        "/Yc" + prefix.header.u8string(),
+                        "/Fp" + prefix.creator.object.u8string(),
+                        prefix.creator.source.u8string(),
+                        "/Fo" + prefix.companion_object.u8string()});
+    } else {
+      arguments.insert(arguments.end(),
+                       {"-x",
+                        c ? "c-header" : "c++-header",
+                        "-MD",
+                        "-MF",
+                        prefix.creator.object.u8string() + ".d",
+                        prefix.header.u8string(),
+                        "-o",
+                        prefix.creator.object.u8string()});
+    }
+
+    // IDEs can parse immediately after configuration, before a binary PCH
+    // exists.
+    for (auto &unit : target.units) {
+      if ((unit.source.extension() == ".c") != c)
+        continue;
+
+      if (toolchain.msvc)
+        unit.arguments.insert(unit.arguments.begin() + 1,
+                              "/FI" + prefix.ide_header.u8string());
+      else
+        unit.arguments.insert(unit.arguments.begin() + 1,
+                              {"-include", prefix.ide_header.u8string()});
+    }
+
+    target.precompiled_headers.push_back(std::move(prefix));
+  }
+}
+
+void write_headers(const Graph &graph) {
+  for (const auto &target : graph.targets) {
+    // Xcode owns its prefix compilation and combines C/C++ headers
+    // conditionally.
+    std::ostringstream combined;
+    combined << "/* Generated by Clutch. */\n";
+    for (const auto &prefix : target.precompiled_headers) {
+      std::ostringstream text;
+      text << "/* Generated by Clutch. */\n";
+      for (const auto &header : prefix.headers)
+        text << "#include \"" << header.generic_u8string() << "\"\n";
+
+      write_if_changed(prefix.header, text.str());
+      write_if_changed(prefix.ide_header, text.str());
+      if (prefix.driver == "msvc")
+        write_if_changed(prefix.creator.source,
+                         "/* Prefix is included through /FI. */\n");
+
+      combined << (prefix.language == "c" ? "#ifndef __cplusplus\n"
+                                          : "#ifdef __cplusplus\n")
+               << text.str() << "#endif\n";
+    }
+
+    if (!target.precompiled_headers.empty())
+      write_if_changed(target.precompiled_headers.front()
+                               .header.parent_path()
+                               .parent_path() /
+                           "xcode-prefix.h",
+                       combined.str());
+  }
+}
+
+std::vector<std::string> build_arguments(const Target &target,
+                                         const Unit &unit) {
+  auto arguments = unit.arguments;
+  if (const auto *const prefix = for_unit(target, unit)) {
+    if (prefix->driver == "msvc") {
+      for (auto &argument : arguments)
+        if (argument == "/FI" + prefix->ide_header.u8string())
+          argument = "/FI" + prefix->header.u8string();
+
+      arguments.insert(arguments.begin() + 1,
+                       {"/Yu" + prefix->header.u8string(),
+                        "/Fp" + prefix->creator.object.u8string()});
+    } else {
+      for (size_t i = 1; i < arguments.size(); ++i)
+        if (arguments[i] == prefix->ide_header.u8string()) {
+          arguments[i] = prefix->driver == "clang"
+                             ? prefix->creator.object.u8string()
+                             : prefix->header.u8string();
+          if (prefix->driver == "clang")
+            arguments[i - 1] = "-include-pch";
+          break;
+        }
+
+      arguments.insert(arguments.begin() + 1, {"-Werror=invalid-pch"});
+    }
+  }
+
+  return arguments;
+}
+}  // namespace clutch::pch

@@ -11,7 +11,7 @@
 # CC/CXX select compiler executables. CLUTCH_BUILD_JOBS defaults to 2;
 # CLUTCH_TEST_BUILD_DIR defaults to build-native relative to the repository;
 # CLUTCH_TEST_EXPORT_DATABASE defaults to OFF (the devcontainer sets ON).
-# Requires CMake/CTest, Bash, Python 3.9+, Ninja, GNU Make and C/C++ compilers.
+# Requires CMake/CTest, Bash, Python 3.9+, Ninja, GNU Make, Git and C/C++ compilers.
 # Compiler-backed and file-API tests must be registered; tools cannot silently skip them.
 # Uses Bash 3.2-compatible syntax for macOS's system Bash.
 set -euo pipefail
@@ -68,6 +68,7 @@ ctest="$(require_tool ctest)"
 bash_tool="$(require_tool bash)"
 ninja="$(require_tool ninja ninja-build)"
 make_tool="$(require_tool gmake make)"
+require_tool git >/dev/null
 cc="$(require_tool "${CC:-cc}")"
 cxx="$(require_tool "${CXX:-c++}")"
 make_version="$("$make_tool" --version)"
@@ -98,6 +99,17 @@ registered_tests="$("$ctest" --test-dir "$build_dir" -N)"
     || fail 'clutch.targets was not registered'
 [[ "$registered_tests" == *'clutch.workspace'* ]] \
     || fail 'clutch.workspace was not registered'
+[[ "$registered_tests" == *'clutch.dependencies'* ]] \
+    || fail 'clutch.dependencies was not registered (Git is required)'
+[[ "$registered_tests" == *'clutch.foreign-dependencies'* ]] \
+    || fail 'clutch.foreign-dependencies was not registered (CMake is required)'
+[[ "$registered_tests" == *'clutch.package-examples'* ]] \
+    || fail 'clutch.package-examples was not registered (CMake and Git are required)'
+[[ "$registered_tests" == *'clutch.files'* ]] \
+    || fail 'clutch.files was not registered'
+for suite in clutch.source-files clutch.capture clutch.stress-source-files clutch.stress-capture clutch.stress-integration clutch.bundle clutch.zip; do
+    [[ "$registered_tests" == *"$suite"* ]] || fail "$suite was not registered"
+done
 
 "$ctest" --test-dir "$build_dir" --output-on-failure
 printf '\nClutch verification passed: %s/clutch\n' "$build_dir"

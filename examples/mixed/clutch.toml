@@ -7,7 +7,8 @@ std = { c = 11, cpp = 17 }
 
 [build]
 generator = "ninja"
-# Omit sources to demonstrate recursive discovery below src/.
+# Recursive suffix sets include headers for IDEs and compile C/C++ files.
+sources = ["src/*.{cpp,c,h}"]
 include_dirs = ["src"]
 
 [profile.debug]

@@ -1,0 +1,2 @@
+# Local Git origins are recorded as absolute machine-specific paths in locks.
+/clutch.lock

@@ -1,0 +1,42 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Collect a minimal native-toolchain reproduction for triage.
+name: Bug report
+description: Report a reproducible Clutch failure.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Clutch. Search existing issues first.
+        Report vulnerabilities [privately](https://github.com/Pranav-32/Clutch/security/advisories/new).
+        Remove tokens, credentials and personal paths from logs before sharing.
+  - type: input
+    id: version
+    attributes:
+      label: Clutch version or commit
+      description: Paste clutch --version, or the commit you built.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, compiler/version and generator. Mention a container if relevant.
+      placeholder: Linux; clang++ 22; Ninja; debug profile
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest clutch.toml, source or example that reproduces it, and exact commands.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+      description: Explain what should happen and what happened instead; include relevant logs.
+    validations:
+      required: true

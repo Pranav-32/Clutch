@@ -1,5 +1,14 @@
 # Clutch file API v1
 
+Audience: IDE integrators and contributors changing code-model output. This protocol
+reference is not required for general contributions.
+
+For an initial client, use the [runnable example](../examples/file-api/README.md),
+then follow [discovery and requests](#discover-and-request) and
+[snapshot reading](#read-an-immutable-snapshot). For an output change, check the
+[object schemas](#object-schemas), [compatibility rules](#compatibility) and
+`clutch.file-api` tests in [testing](testing.md#select-checks).
+
 Clutch provides a versioned JSON query/reply interface for IDEs and developer
 tools. Clients request build metadata; `clutch .` exports it from the same graph
 used by native generators and `compile_commands.json`. Configuration does not
@@ -44,11 +53,28 @@ Under the reported query directory, create a client-owned query:
 ```json
 {
   "requests": [
-    { "kind": "codemodel", "version": 1 },
-    { "kind": "toolchains", "version": [2, { "major": 1, "minor": 0 }] },
-    { "kind": "inputs", "version": 1 }
+    {
+      "kind": "codemodel",
+      "version": 1
+    },
+    {
+      "kind": "toolchains",
+      "version": [
+        2,
+        {
+          "major": 1,
+          "minor": 0
+        }
+      ]
+    },
+    {
+      "kind": "inputs",
+      "version": 1
+    }
   ],
-  "client": { "requestId": "my-ide-42" }
+  "client": {
+    "requestId": "my-ide-42"
+  }
 }
 ```
 
@@ -65,15 +91,15 @@ and [query schema](file-api/query-v1.schema.json) are included.
 Each client uses a distinct `client-<name>` directory and may manage only its own
 query files. Clutch reads queries without modifying them. Supported forms are:
 
-| Location under `query/` | Form |
-| --- | --- |
-| `codemodel-v1`, `toolchains-v1`, `inputs-v1` | Empty shared stateless request |
-| `client-<name>/<kind>-v<major>` | Empty client-owned stateless request |
-| `client-<name>/query.json` | Stateful JSON request with a `requests` array |
+| Location under `query/`                      | Form                                          |
+|----------------------------------------------|-----------------------------------------------|
+| `codemodel-v1`, `toolchains-v1`, `inputs-v1` | Empty shared stateless request                |
+| `client-<name>/<kind>-v<major>`              | Empty client-owned stateless request          |
+| `client-<name>/query.json`                   | Stateful JSON request with a `requests` array |
 
 A stateless major version is an unsigned decimal integer with no leading zeros.
-Stateful versions accept a nonnegative integer major, a `{major, minor}` object
-(minor defaults to zero), or an ordered nonempty array of either form. A version
+Stateful versions accept a nonnegative integer major, a `{major, minor}` object (minor defaults to zero), or an ordered
+nonempty array of either form. A version
 object specifies the minimum required minor. Clutch selects a supported major
 and its current minor; currently every supported object is version 1.0. Floats,
 strings, booleans, negative versions and nested version arrays are invalid.
@@ -132,17 +158,17 @@ the file API does not translate compiler environments or paths across hosts.
 
 The index contains:
 
-| Field | Meaning |
-| --- | --- |
-| `api` | File-layout `{major, minor}` version |
-| `clutch.version` | Producing Clutch executable's release/Git identity |
-| `generation` | Monotonically increasing, zero-padded decimal snapshot identifier |
-| `status` | `success` or `error` |
-| `profile`, `paths.source`, `paths.build` | Snapshot identity |
-| `manifest` | Successful snapshot's FNV-1a manifest byte fingerprint |
-| `objects` | References to the unique requested top-level objects |
-| `reply` | Query-directory structure, per-request responses and diagnostics |
-| `error` | Configuration failure code/message when status is `error` |
+| Field                                    | Meaning                                                           |
+|------------------------------------------|-------------------------------------------------------------------|
+| `api`                                    | File-layout `{major, minor}` version                              |
+| `clutch.version`                         | Producing Clutch executable's release/Git identity                |
+| `generation`                             | Monotonically increasing, zero-padded decimal snapshot identifier |
+| `status`                                 | `success` or `error`                                              |
+| `profile`, `paths.source`, `paths.build` | Snapshot identity                                                 |
+| `manifest`                               | Successful snapshot's FNV-1a manifest byte fingerprint            |
+| `objects`                                | References to the unique requested top-level objects              |
+| `reply`                                  | Query-directory structure, per-request responses and diagnostics  |
+| `error`                                  | Configuration failure code/message when status is `error`         |
 
 Each successful object reference has `kind`, `{major, minor}` `version`, and
 `jsonFile`. Client query replies contain `requests`, ordered `responses` and any
@@ -185,6 +211,8 @@ Each target describes:
 - `directory`: compiler/linker working directory.
 - `sources`: source `path`, object path (`object`), `compileGroupIndex`, and the
   complete compiler `arguments` array, including its executable.
+- `additionalFiles` (optional): canonical header and other noncompiled paths
+  selected by source declarations. These files have no object or compiler action.
 - `compileGroups`: `language` (`C`/`CXX`), `standard`, `includes` with `path` and
   `isSystem`, and raw `defines` without `-D` or `/D` prefixes.
 - `link`: resolved linker/archiver arguments and working directory. Use the build
@@ -265,8 +293,41 @@ the API is active, so normal profile cleanup also reclaims historical replies.
 
 ## Compatibility
 
+Default applications created from project entry/source settings are ordinary
+targets in the code model. Source arguments include inherited workspace compile
+defaults and local overrides, using the same graph as the compilation database
+and native builds. This does not introduce a separate target kind.
+
 Layout major, object major/minor and Clutch release versions are independent.
 Readers must tolerate unknown fields. Compatible additive changes increase the
 object minor; incompatible semantics require a new major. Readers may request
 supported major alternatives and a minimum minor. The public JSON interface
 does not expose or stabilize Clutch's private `configuration.toml` cache.
+
+## Package and precompiled-header metadata
+
+The codemodel's optional `packages` array describes resolved imports with
+`id`, `git`, `revision`, `version`, `source` and direct package `dependencies`.
+These logical nodes include header-only imports; target dependencies continue to
+identify concrete native libraries. Git URLs may identify local repositories and
+must not be treated as executable commands.
+`provider` distinguishes `git`, live `path` and installed `system` sources;
+`locator` carries the non-Git identity. Git-only fields are empty for non-Git
+providers, and an installed package need not have a source directory. The lock
+records its discovered version, not the contents of the machine's SDK files.
+
+The optional `foreignBuilds` array describes upstream build boundaries with an
+`id`, absolute `directory`, library `artifacts`, and `compilationDatabase` path
+(empty for adapters without a database). Targets refer to these IDs in
+`foreignDependencies` and report imported artifact paths in `linkInputs`.
+Use the codemodel's Clutch build action to preserve upstream preparation and
+runtime staging. These records do not replace CMake's internal target graph.
+
+Target objects can contain `precompiledHeaders`, each with `language`, ordered
+`headers`, a `textHeader` for immediate IDE parsing, and `managedByGenerator`.
+For explicit creator actions, `artifact` identifies the binary PCH and `create`
+contains its argument array/directory. Xcode owns its binary prefix artifacts and
+instead reports `prefixHeader`. Clients should consume ordinary source argument
+arrays and the compilation database for editing: those commands deliberately use
+textual prefixes so binary PCH creation is unnecessary for code completion.
+The native build action schedules PCH creation and binary consumption.

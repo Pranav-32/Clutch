@@ -22,13 +22,21 @@ DIAMOND_BRANCH_COUNT = 2
 SHARED_API_VALUE = BASE_API_VALUE * DIAMOND_BRANCH_COUNT
 # Keep the sentinel shared by fixture creation and archive freshness assertions.
 REMOVED_SYMBOL = 'CLUTCH_REMOVED_SYMBOL_UNIQUE'
+# Advance a fixture prerequisite beyond whole-second backend timestamp precision.
+NANOSECONDS_PER_SECOND = 1_000_000_000
 
 
 class TargetTests(unittest.TestCase):
     """Exercise selection, link interfaces, runtime artifacts and archive freshness."""
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ')
+        # MSBuild excludes the system TEMP tree from header read tracking.
+        # Keep Windows fixtures in the ignored workspace area, like SDK tests.
+        work = None
+        if os.name == 'nt':
+            work = Path(__file__).resolve().parents[1] / 'work'
+            work.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ', dir=work)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.create_fixture()
@@ -350,7 +358,7 @@ links = ["shared"]
             self.assertFalse(output.exists())
 
     def test_invalid_graphs(self):
-        """Reject unknown targets, executable links, cycles and ambiguous source modes."""
+        """Reject invalid dependency graphs, target identities and field types."""
         invalid = [self.targets.replace('links = ["shared"]', 'links = ["missing"]'),
                    self.targets.replace('links = ["shared"]', 'links = ["optional"]'),
                    self.targets.replace('defines = ["BASE_PRIVATE"]', 'links = ["left"]'),
@@ -422,6 +430,229 @@ links=["base"]
 ''')
         self.configure()
         self.cli('run', '-t', 'direct')
+
+    def test_project_application_defaults_with_explicit_libraries(self):
+        """Project entry/sources coexist with libraries and feed a named application."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.write('entry.cpp', '#include "base.h"\nint extra();\n'
+                   'int main() { return base() == BASE_API && extra() == 1 ? 0 : 1; }\n')
+        self.write('extra.cpp', 'int extra() { return 1; }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator, library)
+                text = (self.root / 'clutch.toml').read_text()
+                text = text.replace('[build]', 'entry="entry.cpp"\n[build]\n'
+                                    'sources=["extra.cpp"]\nlinks=["base"]')
+                self.write('clutch.toml', text)
+                self.configure(generator)
+                self.cli('run', '-t', 'target_probe')
+                self.assertIn('target_probe', self.configured_targets)
+                self.assertEqual(len(self.configured_targets['target_probe']['sources']), 2)
+                self.cli('clean')
+
+                # An explicit executable with the project name can omit sources
+                # and use the project entry while adding target-local settings.
+                self.write('clutch.toml', text + '\n[[target]]\nname="target_probe"\n')
+                self.configure(generator)
+                self.cli('run', '-t', 'target_probe')
+                self.cli('clean')
+
+    def test_build_links_enables_discovery_beside_library_targets(self):
+        """Application links opt into discovery without requiring an entry path."""
+        (self.root / 'src').mkdir()
+        self.write('src/main.cpp', '#include "base.h"\nint main() { return base() == BASE_API ? 0 : 1; }\n')
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library)
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', '[build]\nlinks=["base"]'))
+        self.configure()
+        self.cli('run', '-t', 'target_probe')
+
+    def test_application_links_and_source_defaults_are_validated(self):
+        """Mixing declarations preserves type, dependency and empty-source checks."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library)
+        original = (self.root / 'clutch.toml').read_text()
+        for setting, diagnostic in (
+                ('links="base"', 'array'),
+                ('links=[42]', 'strings'),
+                ('links=["missing"]', 'unknown linked target'),
+                ('links=["base"]', 'sources')):
+            with self.subTest(setting=setting):
+                manifest = original.replace('[build]', '[build]\n' + setting)
+                if 'missing' in setting:
+                    manifest = manifest.replace('[build]', 'entry="apps/optional.cpp"\n[build]')
+                self.write('clutch.toml', manifest)
+                result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                                  '--build-tool', OPTIONS.ninja, success=False)
+                self.assertIn(diagnostic, result.stderr)
+
+    def test_local_compile_overrides_and_public_interfaces(self):
+        """Targets specialize defaults without duplicate definitions or lost exports."""
+        for folder, value in (('defaults', 1), ('local', 2)):
+            (self.root / folder).mkdir()
+            self.write(folder + '/config.h', f'#define HEADER_VALUE {value}\n')
+        self.write('entry.cpp', '#include <config.h>\n'
+                   '#if VALUE != 3 || HEADER_VALUE != 2\n'
+                   '#error incorrect compile overrides\n#endif\nint main() { return 0; }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator, '[[target]]\nname="target_probe"\n'
+                              'include_dirs=["local"]\ndefines=["VALUE=3"]\n'
+                              'public_defines=["VALUE=2"]\n')
+                self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+                    '[build]', 'entry="entry.cpp"\n[build]\ninclude_dirs=["defaults", "local"]\n'
+                    'defines=["VALUE=1"]'))
+                self.configure(generator)
+                self.cli('run')
+                arguments = self.configured_targets['target_probe']['sources'][0]['arguments']
+                self.assertEqual(sum(arg.startswith(('-DVALUE=', '/DVALUE='))
+                                     for arg in arguments), 1)
+                self.cli('clean')
+
+    def test_application_defaults_reject_real_name_conflicts(self):
+        """An executable and a library still need distinct target identities."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library.replace('name = "base"', 'name = "target_probe"'))
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', 'entry="apps/optional.cpp"\n[build]'))
+        result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                          '--build-tool', OPTIONS.ninja, success=False)
+        self.assertIn('conflict', result.stderr)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX executable-script fixture')
+    def test_make_prefers_explicit_gnu_executable(self):
+        """An installed gmake takes precedence over a host's legacy system make."""
+        executable = shutil.which('gmake') or shutil.which('make')
+        if not executable:
+            self.skipTest('GNU Make is not installed')
+        tools = self.root / 'tool bin'
+        tools.mkdir()
+        wrapper = tools / 'gmake'
+        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\n'
+                           f'os.execv({executable!r}, [{executable!r}, *sys.argv[1:]])\n', encoding='utf-8')
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        self.manifest('make')
+        with mock.patch.dict(os.environ, {'PATH': str(tools) + os.pathsep + os.environ['PATH']}):
+            os.environ.pop('MAKE', None)
+            os.environ.pop('CLUTCH_BUILD_TOOL', None)
+            self.configure('make')
+        cache = self.build_path('app').parent / 'backend.toml'
+        self.assertIn(str(wrapper), cache.read_text(encoding='utf-8'))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX executable-script fixture')
+    def test_legacy_make_is_rejected_before_generating_rules(self):
+        """Unsupported timestamp precision must fail instead of hiding rebuilds."""
+        fake = self.root / 'legacy-make'
+        fake.write_text(f'#!{sys.executable}\nimport sys\n'
+                        'assert sys.argv[1:] == ["--version"]\nprint("GNU Make 3.81")\n', encoding='utf-8')
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        self.manifest('make')
+        result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                          '--build-tool', str(fake), success=False)
+        self.assertIn('requires GNU Make 4 or newer', result.stderr)
+        self.assertFalse(list(self.root.rglob('Makefile')))
+
+    def test_recursive_source_patterns(self):
+        """Recursive suffix sets deduplicate units and expose uncompiled headers."""
+        (self.root / 'pattern lib/nested').mkdir(parents=True)
+        (self.root / 'headers').mkdir()
+        self.write('pattern lib/value.cpp', '#include "../headers/version.h"\n'
+                   'int value() { return SELECTED_VALUE; }\n')
+        self.write('pattern lib/value.h', '#error headers must not be compiled\n')
+        self.write('pattern lib/nested/value.c', 'int nested(void) { return 0; }\n')
+        self.write('pattern lib/nested/detail.hxx', '#pragma once\n')
+        self.write('pattern lib/nested/ignored.txt', 'not C++\n')
+        target = ('[[target]]\nname="library"\ntype="static"\n'
+                  'sources=["pattern lib/*.{cpp,c,h,hxx}", "headers/*.h", "pattern lib/value.cpp"]\n'
+                  '[[test]]\nname="pattern_test"\nsources=["checks/*.cpp"]\n'
+                  'links=["library"]\n')
+        self.write('checks/check.cpp', 'extern "C" int nested(void);\nint value();\n'
+                   'int main() { return value() + nested(); }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.write('headers/version.h', '#define SELECTED_VALUE 0\n')
+                self.manifest(generator, target)
+                self.configure(generator)
+                library = self.configured_targets['library']
+                compiled = [Path(unit['path']) for unit in library['sources']]
+                self.assertEqual(len(compiled), len(set(compiled)))
+                self.assertEqual(len(compiled), 2)
+                self.assertIn(self.root / 'pattern lib/nested/value.c', compiled)
+                self.assertEqual(set(map(Path, library['additionalFiles'])),
+                                 {self.root / 'pattern lib/value.h', self.root / 'pattern lib/nested/detail.hxx',
+                                  self.root / 'headers/version.h'})
+                self.cli('build')
+                self.cli('test')
+                self.write('headers/version.h', '#define SELECTED_VALUE 1\n')
+                stamp = max(path.stat().st_mtime_ns for name in ('library', 'pattern_test')
+                            for path in self.artifacts(name)) + NANOSECONDS_PER_SECOND
+                os.utime(self.root / 'headers/version.h', ns=(stamp, stamp))
+                result = self.cli('test', success=False)
+                self.assertIn('1 failed', result.stdout + result.stderr)
+                self.cli('clean')
+
+    def test_application_source_patterns_skip_generated_trees(self):
+        """Broad scans keep generated and version-control files out of builds."""
+        (self.root / 'sources/nested').mkdir(parents=True)
+        self.write('sources/main.cpp', 'int helper(); int main() { return helper(); }\n')
+        self.write('sources/nested/helper.cpp', 'int helper() { return 0; }\n')
+        self.write('sources/nested/value.hpp', '#pragma once\n')
+        self.write('sources/readme.txt', 'visible IDE file\n')
+        for directory, marker in (('generated', 'CMakeCache.txt'),
+                                  ('previous', '.clutch-build-owner'),
+                                  ('.clutch', None), ('.git', None)):
+            (self.root / 'sources' / directory).mkdir()
+            self.write(f'sources/{directory}/broken.cpp', '#error generated input\n')
+            if marker:
+                self.write(f'sources/{directory}/{marker}', '')
+        self.manifest(targets='', build_dir='sources/output')
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text(encoding='utf-8').replace(
+            '[build]', '[build]\nsources=["sources/*", "sources/**/*.cpp"]'))
+        self.configure()
+        app = self.configured_targets['target_probe']
+        self.assertEqual(len(app['sources']), 2)
+        self.assertEqual(set(map(Path, app['additionalFiles'])),
+                         {self.root / 'sources/nested/value.hpp', self.root / 'sources/readme.txt'})
+        self.cli('run')
+        location = json.loads(self.cli('locate').stdout)
+        database = json.loads(Path(location['paths']['compilationDatabase']).read_text(encoding='utf-8'))
+        self.assertEqual(len(database), 2)
+        self.write('sources/nested/new.cpp', 'int added() { return 1; }\n')
+        self.configure()
+        self.assertEqual(len(self.configured_targets['target_probe']['sources']), 3)
+        self.cli('build')
+
+    def test_invalid_source_patterns(self):
+        """Empty and malformed selections report the manifest pattern itself."""
+        for pattern, diagnostic in (('base/*.missing', 'matched no files'),
+                                    ('base/*.{cpp,}', 'empty source-pattern'),
+                                    ('base/*.{cpp,c', 'invalid source-pattern'),
+                                    ('base/*.{c,{cpp,h}}', 'invalid source-pattern'),
+                                    ('base/*/nested.cpp', 'wildcards belong'),
+                                    ('', 'must not be empty')):
+            with self.subTest(pattern=pattern):
+                self.manifest(targets='[[target]]\nname="library"\ntype="static"\n'
+                                     f'sources=[{json.dumps(pattern)}]\n')
+                result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                                  '--build-tool', OPTIONS.ninja, success=False)
+                self.assertIn(diagnostic, result.stderr)
+
+    def test_entry_discovery_excludes_declared_target_sources(self):
+        """Adding a library does not compile its discovered sources into the app."""
+        (self.root / 'src').mkdir()
+        self.write('src/main.cpp', 'int helper();\nint main() { return helper(); }\n')
+        self.write('src/helper.cpp', 'int helper() { return 0; }\n')
+        self.manifest(targets='[[target]]\nname="helper"\ntype="static"\n'
+                             'sources=["src/helper.cpp"]\n')
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', 'entry="src/main.cpp"\n[build]\nlinks=["helper"]'))
+        self.configure()
+        self.cli('run', '-t', 'target_probe')
+        self.assertEqual(len(self.configured_targets['target_probe']['sources']), 1)
+        location = json.loads(self.cli('locate').stdout)
+        database = json.loads(Path(location['paths']['compilationDatabase']).read_text())
+        self.assertEqual(sum(Path(unit['file']) == self.root / 'src/helper.cpp' for unit in database), 1)
 
 
 if __name__ == '__main__':

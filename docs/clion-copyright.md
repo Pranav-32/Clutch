@@ -1,5 +1,7 @@
 # CLion copyright template
 
+Audience: Contributors who want optional CLion copyright automation.
+
 The optional [template](clion-copyright-template.txt) includes the
 `BSD-3-Clause` SPDX identifier, preserves the original year and credits Pranav
 Sanjeevi Kumari and contributors. Preserve individual contributors' existing

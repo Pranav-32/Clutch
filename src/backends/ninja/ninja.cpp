@@ -12,6 +12,7 @@
  */
 
 #include "ninja.hpp"
+#include "core/pch/pch.hpp"
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
@@ -124,7 +125,7 @@ std::string discover_ninja() {
   constexpr std::array installation_roots{"ProgramFiles", "ProgramFiles(x86)"};
   constexpr std::array clion_ninja_paths{"bin/ninja/win/x64",
                                          "bin/ninja/win/aarch64"};
-  for (const auto *variable : installation_roots) {
+  for (const auto *const variable : installation_roots) {
     if (const auto root = environment_value(variable)) {
       for (const auto &version : installation_directories(
                fs::u8path(*root) / "Microsoft Visual Studio")) {
@@ -141,7 +142,7 @@ std::string discover_ninja() {
         if (installation.filename().u8string().rfind("CLion", 0) != 0)
           continue;
 
-        for (const auto *relative : clion_ninja_paths) {
+        for (const auto *const relative : clion_ninja_paths) {
           if (const auto executable = bundled_ninja(installation / relative);
               !executable.empty())
             return executable;
@@ -195,10 +196,35 @@ void generate_ninja(const Graph &graph,
     const auto &target = graph.targets[target_index];
     fs::create_directories(target.output.parent_path());
 
-    for (const auto &[source, object, arguments] : target.units) {
+    for (const auto &prefix : target.precompiled_headers) {
+      fs::create_directories(prefix.creator.object.parent_path());
+      ninja << "build " << path(prefix.creator.object);
+      if (!prefix.companion_object.empty())
+        ninja << " | " << path(prefix.companion_object);
+
+      ninja << ": compile " << path(prefix.creator.source) << " | "
+            << path(fs::u8path(prefix.creator.arguments.front()));
+      if (prefix.creator.source != prefix.header)
+        ninja << ' ' << path(prefix.header);
+
+      ninja << "\n  compiler = "
+            << ninja_value(command_line({prefix.creator.arguments.front()}))
+            << "\n  args = "
+            << ninja_value(response_file(prefix.creator.arguments,
+                                         graph.toolchain.msvc))
+            << '\n';
+    }
+
+    for (const auto &unit : target.units) {
+      const auto &[source, object, ide_arguments] = unit;
+      (void)ide_arguments;
+      const auto arguments = pch::build_arguments(target, unit);
       fs::create_directories(object.parent_path());
-      ninja << "build " << path(object) << ": compile " << path(source)
-            << "\n  compiler = "
+      ninja << "build " << path(object) << ": compile " << path(source);
+      if (const auto *const prefix = pch::for_unit(target, unit))
+        ninja << " | " << path(prefix->creator.object);
+
+      ninja << "\n  compiler = "
             << ninja_value(command_line({arguments.front()})) << "\n  args = "
             << ninja_value(response_file(arguments, graph.toolchain.msvc))
             << "\n";
@@ -226,6 +252,9 @@ void generate_ninja(const Graph &graph,
                                                        : ": link");
     for (const auto &unit : target.units)
       ninja << ' ' << path(unit.object);
+    for (const auto &prefix : target.precompiled_headers)
+      if (!prefix.companion_object.empty())
+        ninja << ' ' << path(prefix.companion_object);
     if (target.type == TargetType::StaticLibrary) {
       const auto metadata =
           p.build / "obj" /
@@ -234,6 +263,8 @@ void generate_ninja(const Graph &graph,
       ninja << " | " << path(metadata);
     }
     if (target.type != TargetType::StaticLibrary) {
+      for (const auto &input : target.link_inputs)
+        ninja << ' ' << path(input);
       for (const auto dependency : target.link_dependencies) {
         const auto &library = graph.targets.at(dependency);
         ninja << ' '
@@ -294,6 +325,10 @@ void generate_ninja(const Graph &graph,
     regenerate.emplace_back("--release");
   if (options.locked)
     regenerate.emplace_back("--locked");
+  if (options.offline)
+    regenerate.emplace_back("--offline");
+  if (options.update_dependencies)
+    regenerate.emplace_back("--auto-update-dependencies");
 
   ninja << "rule regenerate\n  command = "
         << ninja_value(command_line(regenerate))

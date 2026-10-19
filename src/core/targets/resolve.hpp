@@ -19,6 +19,7 @@ struct ResolvedTarget {
   TargetSpec spec;
   std::vector<size_t> dependencies, link_dependencies;
   bool needs_cpp = false;
+  std::vector<DependencyUsage> public_usage;
 };
 
 /// Normalize legacy applications/tests and explicit targets, rejecting missing,

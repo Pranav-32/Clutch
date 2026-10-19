@@ -30,7 +30,7 @@ class WorkspaceTests(unittest.TestCase):
         self.manifest()
         self.write('base/clutch.toml', '[project]\nname="base"\nversion="1.0.0"\n'
                    'language="cpp"\nstd=17\n[build]\ndefines=["BASE_PRIVATE"]\n'
-                   '[[target]]\nname="value"\ntype="static"\nsources=["value.cpp"]\n')
+                   '[[target]]\nname="value"\ntype="static"\nsources=["*.{cpp,hpp}"]\n')
         self.write('base/value.cpp', '#include <string_view>\n#ifndef BASE_PRIVATE\n#error scope lost\n#endif\n'
                    'int value() { return std::string_view("abc").size() * 7; }\n')
         self.write('bridge/clutch.toml', '[project]\nname="bridge"\nversion="2.0.0"\n'
@@ -306,6 +306,100 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('runtime library name collision', result.stderr)
         self.assertIn('bridge::api', result.stderr)
         self.assertIn('other::api', result.stderr)
+
+    def test_real_root_application_libraries_and_member_defaults(self):
+        """A real root mixes shorthand, targets and members in one locked model."""
+        (self.root / 'shared_headers').mkdir()
+        self.write('shared_headers/root_config.h', '#define ROOT_HEADER 1\n')
+        self.write('root.cpp', '#include <root_config.h>\n#include "api.h"\n'
+                   '#if ROOT_HEADER != 1 || ROOT_VALUE != 1 || PUBLIC_VALUE != 2\n'
+                   '#error root defaults or public interface lost\n#endif\n'
+                   'int root_helper();\nint main() { return root_helper() + answer() == 22 ? 0 : 1; }\n')
+        self.write('helper.cpp', '#include <root_config.h>\n'
+                   '#if ROOT_VALUE != 2\n#error target override lost\n#endif\n'
+                   'int root_helper() { return ROOT_HEADER; }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator)
+                manifest = (self.root / 'clutch.toml').read_text().replace(
+                    '[build]', '[project]\nname="root"\nversion="4.0.0"\nentry="root.cpp"\n'
+                    'std=17\n[build]\nlinks=["helper", "bridge::api"]\n'
+                    'include_dirs=["shared_headers"]\ndefines=["ROOT_VALUE=1", "PUBLIC_VALUE=1"]')
+                manifest += ('\n[[target]]\nname="helper"\ntype="static"\n'
+                             'sources=["helper.cpp"]\ndefines=["ROOT_VALUE=2"]\n'
+                             'public_defines=["PUBLIC_VALUE=2"]\n')
+                self.write('clutch.toml', manifest)
+                query_location = json.loads(self.cli('locate').stdout)
+                query = Path(query_location['paths']['query']) / 'codemodel-v1'
+                query.parent.mkdir(parents=True, exist_ok=True)
+                query.touch()
+                self.configure(generator)
+                self.cli('run', '-t', 'root::root')
+                self.cli('test', '-t', 'app::check')
+                snapshot = (self.root / 'clutch.lock').read_bytes()
+                self.configure(generator, '--locked')
+                self.assertEqual(snapshot, (self.root / 'clutch.lock').read_bytes())
+                self.assertIn(b'dependencies = [ "bridge" ]', snapshot)
+                reply = Path(query_location['paths']['reply'])
+                index = json.loads(sorted(reply.glob('index-*.json'))[-1].read_text())
+                model_ref = next(ref for ref in index['objects'] if ref['kind'] == 'codemodel')
+                model = json.loads((reply / model_ref['jsonFile']).read_text())
+                self.assertEqual({project['name'] for project in model['projects']},
+                                 {'root', 'base', 'bridge', 'app'})
+                database = json.loads(Path(query_location['paths']['compilationDatabase']).read_text())
+                for ref in model['targets']:
+                    target = json.loads((reply / ref['jsonFile']).read_text())
+                    for source in target['sources']:
+                        unit = next(unit for unit in database
+                                    if Path(unit['output']) == Path(source['object']))
+                        self.assertEqual(unit['arguments'], source['arguments'])
+                        self.assertTrue(any(str(self.root / 'shared_headers') in arg
+                                            for arg in unit['arguments']))
+                self.cli('clean')
+
+    def test_virtual_root_rejects_application_settings(self):
+        """Shared compile settings do not create a project at a virtual root."""
+        manifest = (self.root / 'clutch.toml').read_text()
+        for setting in ('sources=[]', 'links=[]'):
+            with self.subTest(setting=setting):
+                self.write('clutch.toml', manifest.replace('[build]', '[build]\n' + setting))
+                result = self.configure(success=False)
+                self.assertIn('require a root [project]', result.stderr)
+
+    def test_root_compile_defaults_and_local_overrides(self):
+        """Virtual-root settings reach every member; local includes/macros win."""
+        for folder in ('shared_headers', 'base/local_headers'):
+            (self.root / folder).mkdir()
+        self.write('shared_headers/workspace_config.h', '#define WORKSPACE_HEADER 1\n')
+        self.write('base/local_headers/workspace_config.h', '#define WORKSPACE_HEADER 2\n')
+        base = (self.root / 'base/clutch.toml').read_text()
+        self.write('base/clutch.toml', base.replace('defines=["BASE_PRIVATE"]',
+                   'include_dirs=["local_headers"]\ndefines=["BASE_PRIVATE", "VALUE=2"]')
+                   + 'defines=["VALUE=3"]\n')
+        for source in ('base/value.cpp', 'bridge/api.cpp', 'app/local.c', 'app/main.c', 'app/check.cpp'):
+            expected_header = 2 if source.startswith('base/') else 1
+            expected_value = 3 if source.startswith('base/') else 1
+            self.write(source, '#include "workspace_config.h"\n'
+                       '#ifndef WORKSPACE_FLAG\n#error missing workspace define\n#endif\n'
+                       f'#if WORKSPACE_HEADER != {expected_header} || VALUE != {expected_value}\n'
+                       '#error compile defaults have incorrect precedence\n#endif\n'
+                       + (self.root / source).read_text())
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator)
+                self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+                    '[build]', '[build]\ninclude_dirs=["shared_headers"]\n'
+                    'defines=["WORKSPACE_FLAG", "VALUE=1"]'))
+                self.configure(generator)
+                self.cli('run', '-t', 'app::value')
+                self.cli('test', '-t', 'app::check')
+                location = json.loads(self.cli('locate').stdout)
+                database = json.loads(Path(location['paths']['compilationDatabase']).read_text())
+                for unit in database:
+                    definitions = [arg for arg in unit['arguments'] if arg.startswith(('-DVALUE=', '/DVALUE='))]
+                    self.assertEqual(len(definitions), 1, 'overrides emitted conflicting macro flags')
+                    self.assertTrue(any(str(self.root / 'shared_headers') in arg for arg in unit['arguments']))
+                self.cli('clean')
 
     @unittest.skipIf(os.name == 'nt', 'POSIX symlink check')
     def test_redirected_member_and_lock_are_rejected(self):

@@ -1,5 +1,8 @@
 # Versions and CI
 
+Audience: Users and contributors checking version identity and CI expectations. Release
+operators should also read the [maintainer guide](maintaining.md).
+
 [`VERSION`](../VERSION) records Clutch's release version. Release history is in
 the [changelog](CHANGELOG.md); published tags and assets are listed on
 [GitHub Releases](https://github.com/Pranav-32/Clutch/releases).
@@ -54,15 +57,9 @@ profiles, verify installation and package binaries with license notices. A
 separate job checks the development image. JOM and Windows GNU Make are checked
 when available. See the workflow files for runner versions and tool settings.
 
-Changes limited to `VERSION`, `.github/release-please-manifest.json` and
-`docs/CHANGELOG.md` validate matching release metadata and tooling tests without
-rebuilding unchanged sources. This selection uses the Git diff, not a branch
-name or PR title. Unknown/missing history and manual runs receive full coverage.
-The five native check names stay stable in both modes.
-
-Native builds use a compiler cache and bounded parallel tests. Saved test results
-and packages are not cached. Tags always receive full native verification from
-the exact tagged commit; PR binaries are not promoted into releases.
+Implementation details, metadata-only selection and release operations are
+documented in the [maintainer guide](maintaining.md). Ordinary contributions
+do not need to change workflows or version files.
 
 Run the same pipeline locally with the target's tools on `PATH`, for example:
 

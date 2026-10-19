@@ -1,5 +1,8 @@
 # Architecture
 
+Audience: Contributors changing internals. Start with [Contributing](CONTRIBUTING.md)
+for setup and a first PR.
+
 Clutch configures C/C++ projects from `clutch.toml`, resolves a target graph,
 and generates native build files and IDE metadata. CMake builds Clutch itself;
 it is not Clutch's configuration engine.
@@ -15,6 +18,8 @@ to `src/`. Each module documents its own functions and platform assumptions.
 | `src/core/` | Manifest validation, build-directory ownership, graph construction and saved configuration |
 | `src/core/targets/` | Target kinds, dependency resolution, archives and runtime library staging |
 | `src/core/workspace/` | Member composition, input fingerprints and portable locks |
+| `src/core/dependencies/` | Git identities, version constraints, backtracking and immutable checkout publication |
+| `src/core/pch/` | Prefix-header parsing, isolated creator commands and textual IDE prefixes |
 | `src/core/file_api/` | Queries, versioned code models and snapshot publication |
 | `src/toolchains/` | Compiler discovery, driver families and saved selections |
 | `src/backends/` | Generator registry, native build-file generation and execution |
@@ -37,6 +42,13 @@ links. Workspace targets use qualified identities and retain their owning
 project's paths and standards. Duplicate output producers and dependency cycles
 are rejected before generation and after loading saved state.
 
+Application shorthand is normalized alongside explicit targets before resolving
+links. Root workspace include directories and definitions provide defaults for
+all members. `core/targets/requirements.*` applies local include precedence and
+merges definitions by macro identifier, so native rules, saved commands and IDE
+metadata share one resolved policy. Public library interfaces stay separate from
+private project defaults.
+
 `build`, `run` and `test` load the saved graph and invoke the selected backend.
 They reject changed manifests or locks using content fingerprints. Source/header
 edits are incremental; changing the manifest or discovered source set requires
@@ -47,7 +59,8 @@ manifest timestamps change, using recorded tool selections.
 
 | Location | Contract |
 | --- | --- |
-| Source-root `clutch.lock` | Portable local project resolution; commit with manifests |
+| Source-root `clutch.lock` | Local project edges and exact Git pins; commit with manifests |
+| Source-root `.clutch/deps/` | Verified project-local Git source cache; ignore in version control |
 | Build-directory `configuration.toml` | Private resolved graph and input fingerprints |
 | Build-directory `toolchain.toml` / `backend.toml` | Host-specific compiler and executor selections |
 | Build-directory `.clutch-build-owner` | Ownership marker used by configuration and cleanup |
@@ -98,3 +111,88 @@ A backend owns its file format, discovery, host restrictions and invocation;
 the CLI must not assume Ninja arguments. Test generator behavior on its native
 host, including unchanged rebuilds and changed headers/flags. See
 [testing](testing.md) and [contributor conventions](CONTRIBUTING.md).
+
+## Native dependency adapters
+
+Source selection and build adapters are separate. `dependencies/sources.*` routes
+live directories and installed packages without discovering Git, while Git owns
+immutable source publication. `dependencies/vcpkg.*` reads a pinned source-catalog
+entry without executing its port script or invoking vcpkg. Unsupported recipe
+requirements fail rather than silently changing their meaning.
+
+The CMake adapter configures a small external consumer with the selected compiler
+and profile. CMake evaluates imported targets and generator expressions; its file
+API supplies public usage and transitive link inputs. Upstream sources keep their
+native build graph. Makefiles have no standard interface metadata, so their
+adapter requires explicit usage/artifact declarations and out-of-source rules.
+Clutch's own configuration engine remains responsible for the main project.
+
+Installed packages use the same generic interfaces across vendors. Imports with
+`target`/`targets` use CMake discovery; imports with explicit `include_dirs` and/or
+`libraries` use `dependencies/system.*` without a configuration subprocess.
+`dependencies/interface.hpp` shares the evaluated interface between adapters.
+Package names do not select special SDK behavior. Existing library files become
+link prerequisites, while bare library names use the selected driver's spelling.
+
+Evaluated interfaces propagate through native library targets. Saved configuration
+retains foreign argv actions, artifact prerequisites and runtime paths. CLI builds
+run reachable upstream actions before the main backend, using the same job budget
+sequentially to avoid multiplying independent pools. Direct backend invocation
+currently does not run that preparation. IDE databases merge upstream records
+with their original directories and exclude adapter probe sources.
+
+## Packages, PCH and concurrency
+
+Package resolution precedes native target construction. The package graph includes
+header-only imports; the target graph contains concrete compiled libraries and
+executables. Both reject cycles. The resolver groups incoming constraints by Git
+source, prefers compatible lock pins, chooses the most constrained unresolved
+package first, and backtracks with cached ref listings and parsed commit metadata.
+Search and metadata limits bound untrusted or excessively broad input. Source
+publication uses one project-local writer and immutable revision directories.
+
+Native library manifests are composed as qualified targets with their own private
+settings and standards. Public requirements propagate through the existing target
+resolver. Header-only transitive interfaces are expanded once per consumer project.
+The file API exports package records and PCH metadata; DOT output distinguishes
+package edges, precompilation, compilation and linking.
+
+PCH creator actions copy target flags and are isolated by target and language.
+Compiler PCH capabilities are checked after external interfaces have supplied
+their headers, so installed and foreign libraries follow the same policy.
+IDE commands retain textual prefix headers, independent of binary artifact state.
+Ninja/Make rules add explicit creator prerequisites; Visual Studio and Xcode use
+their native prefix-header facilities. Native executors own scheduling and header
+tracking. Build execution supplies a CPU-derived job limit unless the user selects
+one explicitly; NMake retains its serial semantics.
+
+`core/source_files.*` expands source selections during configuration. One shared
+reader serves applications, targets, tests, workspace members and native imports.
+Canonical paths are sorted and deduplicated. Compile units feed the build graph;
+noncompiled selections feed native IDE projects and the file API's `additionalFiles`.
+Directory listings are reused across brace alternatives and repeated patterns
+within one expansion, preserving the scan bound without repeated filesystem walks.
+Changing pattern membership requires reconfiguration.
+
+The GNU Make backend selects `gmake` before `make` and requires version 4 or
+newer, including when executing saved configurations. Prefix-list bytes also
+have a private content signature: changing them invalidates the PCH, its compile
+units and consuming products before Make parses rules, independent of timestamp
+precision. Unchanged prefixes retain their artifacts.
+
+## Source snapshots
+
+`core/bundle/` resolves cached dependency pins, maps physical source roots into
+archive paths, and rewrites participating Clutch manifests without changing the
+original tree. Local imports already inside the project retain their location;
+external sources receive private snapshot paths. The recipient regenerates build
+rules for their compiler and location.
+
+`platform/zip.*` streams stored ZIP records with CRC-32 checks, fixed timestamps
+and bounded classic-ZIP fields. Publication uses a sibling staging directory and
+a no-replace hard link, so a failed/racing writer cannot expose a partial archive
+or replace an existing one. The destination filesystem must support hard links.
+See [source bundles](usage.md#source-bundles) for exclusions, relocation limits
+and external tool/SDK prerequisites. The native ZIP tests check publication/path
+contracts; Python integration tests independently parse CRCs and rebuild extracted
+Git/local/CMake snapshots after their original directories have been moved.

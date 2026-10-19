@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# The first configuration downloads this pinned GitHub header-only dependency.
+[project]
+name = "github-headers"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["."]
+
+[dependencies]
+cli = { git = "https://github.com/CLIUtils/CLI11.git", tag = "v2.4.2", build_system = "header-only", include_dirs = ["include"] }
+
+[[test]]
+name = "package-test"
+sources = ["../checks/package_test.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

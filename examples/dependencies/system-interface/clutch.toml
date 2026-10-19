@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# An explicit installed interface works without CMake metadata or a package manager.
+[project]
+name = "system-interface"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["."]
+
+[dependencies]
+sdk = { system = "vendor-sdk", root = "../installed-sdk", include_dirs = ["headers"] }
+
+[[test]]
+name = "package-test"
+sources = ["../checks/package_test.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

@@ -34,6 +34,10 @@ struct Options {
   // Selects profile.release for both configuration and saved-graph execution.
   bool release = false;
   bool locked = false;  ///< Configuration must use an unchanged existing lock.
-  int jobs = 0;  ///< Zero leaves parallelism at the selected backend's default.
+  bool update_dependencies =
+      false;  ///< Refresh untagged imports within constraints.
+  bool offline =
+      false;     ///< Resolve Git imports using existing local pins only.
+  int jobs = 0;  ///< Zero selects host CPU concurrency for parallel backends.
 };
 }  // namespace clutch

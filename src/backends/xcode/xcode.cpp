@@ -16,13 +16,16 @@
  */
 
 #include "xcode.hpp"
+#include "core/pch/pch.hpp"
 
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
+#include "core/source_files.hpp"
 #include "platform/files.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <iomanip>
 #include <map>
@@ -221,10 +224,18 @@ std::string flags(const std::vector<std::string> &arguments) {
 }
 
 /// Preserve semantic flags while leaving object/depfile scheduling to Xcode.
-std::vector<std::string> compile_flags(const Unit &unit) {
+std::vector<std::string> compile_flags(const Target &target, const Unit &unit) {
   std::vector<std::string> result;
+  const auto *const prefix = pch::for_unit(target, unit);
   for (size_t i = 1; i < unit.arguments.size(); ++i) {
     const auto &argument = unit.arguments[i];
+    // Xcode's native prefix setting owns PCH consumption for both languages.
+    if (prefix && argument == "-include" && i + 1 < unit.arguments.size() &&
+        unit.arguments[i + 1] == prefix->ide_header.u8string()) {
+      ++i;
+      continue;
+    }
+
     if (argument == "-o" || argument == "-MF" || argument == "-MT" ||
         argument == "-MQ" || argument == "-MJ") {
       if (++i == unit.arguments.size())
@@ -325,6 +336,17 @@ void target_settings(std::ostream &out,
       << "\t\t\t\tSKIP_INSTALL = YES;\n";
 
   std::vector<std::string> includes;
+  if (!target.precompiled_headers.empty()) {
+    const auto header =
+        target.precompiled_headers.front().header.parent_path().parent_path() /
+        "xcode-prefix.h";
+    out << "\t\t\t\tGCC_PREFIX_HEADER = " << literal(header.generic_u8string())
+        << ";\n"
+        << "\t\t\t\tGCC_PRECOMPILE_PREFIX_HEADER = YES;\n";
+    out << "\t\t\t\tSHARED_PRECOMPS_DIR = "
+        << literal((header.parent_path() / "xcode-cache").generic_u8string())
+        << ";\n";
+  }
   includes.reserve(target.includes.size());
   for (const auto &include : target.includes)
     includes.push_back(include.generic_u8string());
@@ -449,7 +471,24 @@ void generate_xcode(const Graph &graph,
           << "\t\t\tisa = PBXBuildFile;\n"
           << "\t\t\tfileRef = " << ids.get(source_key + ":file") << ";\n"
           << "\t\t\tsettings = { COMPILER_FLAGS = "
-          << literal(flags(compile_flags(unit))) << "; };\n\t\t};\n";
+          << literal(flags(compile_flags(target, unit))) << "; };\n\t\t};\n";
+    }
+
+    // Reference headers and other selected files without compiling them.
+    for (const auto &file : target.additional_files) {
+      const auto extension = file.extension().u8string();
+      const auto *const additional_type =
+          std::find(header_extensions.begin(),
+                    header_extensions.end(),
+                    extension) != header_extensions.end()
+              ? "sourcecode.c.h"
+              : "text";
+      out << "\t\t" << ids.get(key + ":additional:" + file.generic_u8string())
+          << " = { isa = PBXFileReference; lastKnownFileType = "
+          << additional_type
+          << "; name = " << literal(file.filename().u8string())
+          << "; path = " << literal(file.generic_u8string())
+          << "; sourceTree = \"<absolute>\"; };\n";
     }
 
     out << "\t\t" << ids.get(key + ":sources") << " = {\n"
@@ -475,6 +514,10 @@ void generate_xcode(const Graph &graph,
           << ids.get(key + ":source:" + unit.source.generic_u8string() +
                      ":file")
           << ",\n";
+
+    for (const auto &file : target.additional_files)
+      out << "\t\t\t\t"
+          << ids.get(key + ":additional:" + file.generic_u8string()) << ",\n";
 
     out << "\t\t\t);\n\t\t\tname = " << literal(target_name(target, index))
         << ";\n\t\t\tsourceTree = \"<group>\";\n\t\t};\n"
