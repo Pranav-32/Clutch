@@ -330,3 +330,62 @@ Use `clutch targets` to list configured target names and kinds. `build`, `run`
 and `test` accept `--target <name>` (short form `-t`). Repeat it for multiple
 build/test targets. Without selection, `build` uses ordinary targets marked
 `default`, while `test` uses all tests. `run` requires one application executable.
+
+## Source bundles
+
+`clutch bundle` creates a source ZIP containing the project, workspace members
+and snapshots of resolved Git/local source dependencies. It runs natively;
+neither Python nor an external ZIP utility is required.
+
+```sh
+clutch .
+clutch bundle
+clutch bundle --output ../hello-sources.zip --exclude private --exclude scratch
+```
+
+The default output is `.clutch/bundles/<project>-sources.zip`. `--project` selects
+another project directory; `--release` selects its release-profile inputs.
+An explicit output path is relative to the current working directory. Existing
+outputs are refused. `--exclude` accepts repeatable archive-relative file or
+directory paths, without wildcards.
+
+Configure first when the project imports Git/catalog dependencies: bundling
+uses existing pins and verified cached checkouts offline. It does not update
+versions, fetch missing source revisions, compile code or replace the original
+manifest/lock. Projects using only local files can bundle without configuring.
+
+After extracting the ZIP, configure for the recipient's machine before building:
+
+```sh
+clutch . --offline
+clutch build
+clutch test
+```
+
+Supply `--cc`, `--cxx` or `--generator` during configuration when needed.
+Source imports become relative `path` snapshots, including transitive imports.
+External snapshots live in `.clutch/bundle/deps/`; package origins/revisions
+are recorded in `.clutch/bundle/snapshot.toml`. The new configuration generates
+a fresh `clutch.lock` and native rules. Profile build directories use the default
+`Clutch-build-debug` / `Clutch-build-release` names in the snapshot.
+
+The archive includes regular files, empty directories and available executable
+permissions. It omits repository metadata, existing `.clutch` caches, lock/writer
+files and recognized Clutch/CMake build trees. Other files are included regardless
+of `.gitignore`; use exclusions for material you do not intend to distribute.
+Required manifests and selected sources cannot be excluded. Symlinks, junctions,
+special files, unsafe path components and ASCII case-colliding filenames are
+rejected. Unicode normalization/case rules still depend on the recipient filesystem.
+
+Compilers, build tools and installed SDKs remain prerequisites. A machine-specific
+SDK prefix outside the bundled trees is rejected; use environment-based package
+discovery or a redistributable prefix inside the project. Foreign build scripts,
+literal arguments and embedded absolute paths must themselves be portable;
+the bundler rewrites known Clutch manifest path fields, not arbitrary scripts.
+Foreign download commands may require separate offline settings. Review included
+licenses before redistributing dependencies, and avoid editing inputs while bundling.
+
+Archives use standard uncompressed ZIP records with CRC-32 checks, sorted members
+and fixed timestamps. The same unchanged source snapshot on the same host produces
+the same bytes. ZIP64 is not supported: archives must stay below four GiB and
+contain at most 65,534 entries, including directories and generated metadata.

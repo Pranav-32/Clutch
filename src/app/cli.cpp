@@ -15,6 +15,7 @@
 
 #include "app/workflow.hpp"
 #include "backends/backend.hpp"
+#include "core/bundle/bundle.hpp"
 #include "core/configuration_store.hpp"
 #include "core/configure.hpp"
 #include "core/dependencies/foreign.hpp"
@@ -83,6 +84,18 @@ int run_cli(const int argc, char *const *const argv) {
   auto *const clean =
       app.add_subcommand("clean",
                          "Remove the selected profile's build artifacts");
+  auto *const bundle = app.add_subcommand(
+      "bundle",
+      "Create a relocatable source ZIP with resolved source dependencies");
+  std::string bundle_output;
+  std::vector<std::string> bundle_exclusions;
+  bundle->add_option(
+      "--output",
+      bundle_output,
+      "New ZIP path (default .clutch/bundles/<project>-sources.zip)");
+  bundle->add_option("--exclude",
+                     bundle_exclusions,
+                     "Omit an archive-relative file/directory (repeatable)");
   auto *const generators =
       app.add_subcommand("generators",
                          "List implemented build-file generators");
@@ -122,8 +135,15 @@ int run_cli(const int argc, char *const *const argv) {
   }
 
   // Reuse the same project/profile storage across mutually exclusive workflows.
-  for (auto *const command :
-       {build, execute, test, clean, locate, targets, archive, copy_runtime}) {
+  for (auto *const command : {build,
+                              execute,
+                              test,
+                              clean,
+                              locate,
+                              targets,
+                              archive,
+                              copy_runtime,
+                              bundle}) {
     command->add_option("--project",
                         root,
                         "Source directory containing clutch.toml");
@@ -203,6 +223,13 @@ int run_cli(const int argc, char *const *const argv) {
 
     if (*clean) {
       clean_project(options);
+      return 0;
+    }
+
+    if (*bundle) {
+      const auto output =
+          bundle_project(options, fs::u8path(bundle_output), bundle_exclusions);
+      status("Bundled", output.u8string());
       return 0;
     }
 

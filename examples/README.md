@@ -1,5 +1,11 @@
 # Examples
 
+To share an example as a relocatable source ZIP, run
+`clutch bundle --project examples/multi-file --output multi-file-sources.zip`
+from the checkout root. Extract it elsewhere, configure with `clutch .`, then
+build with `clutch build`. See [source bundles](../docs/usage.md#source-bundles)
+for dependency snapshots, exclusions and installed-tool prerequisites.
+
 Build or install Clutch first, then make its executable available on `PATH`.
 The application examples use Ninja and installed C/C++ compilers by default.
 

@@ -33,6 +33,7 @@ add_executable(clutch
     src/backends/xcode/xcode.cpp
     src/core/build_directory.cpp
     src/core/build_graph.cpp
+    src/core/bundle/bundle.cpp
     src/core/compilation_database.cpp
     src/core/configure.cpp
     src/core/configuration_store.cpp
@@ -73,6 +74,7 @@ add_executable(clutch
     src/platform/json.cpp
     src/platform/process.cpp
     src/platform/terminal.cpp
+    src/platform/zip.cpp
     src/toolchains/toolchain.cpp
 )
 add_dependencies(clutch clutch_version)

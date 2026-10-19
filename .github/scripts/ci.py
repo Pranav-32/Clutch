@@ -92,7 +92,7 @@ def build(target, build_dir, output):
     command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={require_tool(launcher) if launcher else ""}')
     required = {'clutch.help', 'clutch.version', 'clutch.files', 'clutch.graph', 'clutch.file-api', 'clutch.targets',
                 'clutch.workspace', 'clutch.dependencies', 'clutch.foreign-dependencies',
-                'clutch.package-examples', 'clutch.version-ranges',
+                'clutch.package-examples', 'clutch.version-ranges', 'clutch.bundle', 'clutch.zip',
                 'clutch.source-files', 'clutch.capture', 'clutch.stress-source-files',
                 'clutch.stress-capture', 'clutch.stress-integration'}
     if windows:

@@ -139,7 +139,6 @@ class StressTests(unittest.TestCase):
         """Serial and parallel cold builds must link every unit and reuse unchanged artifacts."""
         count = OPTIONS.units
         seed = 42
-        self.write(self.app, 'include/seed.h', f'#pragma once\n#define SEED {seed}\n')
         self.write(self.app, 'include/prefix.h', '#pragma once\n#include <stdint.h>\n#include "seed.h"\n')
         self.write(self.app, 'include/prefix.hpp', '#pragma once\n#include <cstdint>\n#include "seed.h"\n')
         for index in range(count):
@@ -149,10 +148,15 @@ class StressTests(unittest.TestCase):
                        f'{linkage}int part{index}(void) {{ return SEED + {index}; }}\n')
         declarations = ''.join(f'int part{index}(void);\n' for index in range(count))
         expression = '+'.join(f'part{index}()' for index in range(count))
-        expected = count * seed + count * (count - 1) // 2
-        self.write(self.app, 'main.cpp', '#include <cstdio>\nextern "C" {\n' + declarations + '}\n'
-                   f'int main() {{ const int value={expression}; std::printf("%d\\n", value); '
-                   f'return value == {expected} ? 0 : 1; }}\n')
+
+        def update_consumer(value):
+            """Check every linked unit against the expected shared-header value."""
+            expected = count * value + count * (count - 1) // 2
+            self.write(self.app, 'main.cpp', '#include <cstdio>\nextern "C" {\n' + declarations + '}\n'
+                       f'int main() {{ const int value={expression}; std::printf("%d\\n", value); '
+                       f'return value == {expected} ? 0 : 1; }}\n')
+            return expected
+
         self.write(self.app, 'clutch.toml', '[project]\nname="stressapp"\nversion="1.0.0"\n'
                    'language="mixed"\nstd={c=11,cpp=17}\n[build]\ngenerator="ninja"\n'
                    'include_dirs=["include"]\npch={c=["include/prefix.h"],cpp=["include/prefix.hpp"]}\n'
@@ -162,6 +166,8 @@ class StressTests(unittest.TestCase):
                    '[[test]]\nname="check"\nsources=["main.cpp"]\nlinks=["parts"]\n')
         for jobs in (1, 4):
             with self.subTest(jobs=jobs):
+                self.write(self.app, 'include/seed.h', f'#pragma once\n#define SEED {seed}\n')
+                expected = update_consumer(seed)
                 self.configure()
                 self.assertIn(str(expected), self.cli('run', '--jobs', str(jobs)))
                 self.assertIn('1 passed', self.cli('test', '--jobs', str(jobs)))
@@ -176,6 +182,33 @@ class StressTests(unittest.TestCase):
                     self.cli('test', '--jobs', str(jobs))
                     self.assertEqual(stamps, {path: path.stat().st_mtime_ns for path in artifacts},
                                      'unchanged parallel build recompiled a unit or PCH')
+
+                # A header nested in both language prefixes must invalidate all
+                # archive members. Execute the result to catch stale code even
+                # when a tool reports that its build completed successfully.
+                changed_seed = seed + 1
+                self.write(self.app, 'include/seed.h', f'#pragma once\n#define SEED {changed_seed}\n')
+                expected = update_consumer(changed_seed)
+                self.assertIn(str(expected), self.cli('run', '--jobs', str(jobs)))
+                self.assertIn('1 passed', self.cli('test', '--jobs', str(jobs)))
+                self.assertEqual(set(stamps), {path for path in build.rglob('*')
+                                             if path.is_file() and path.suffix in ('.o', '.obj', '.pch', '.gch')})
+                self.assertTrue(all(path.stat().st_mtime_ns != stamp for path, stamp in stamps.items()),
+                                'shared PCH header edit did not rebuild every dependent artifact')
+
+                # An unsuccessful build must return failure rather than run an
+                # old executable, then recover without cleaning configuration.
+                broken = f'parts/u{count - 1}.{"c" if (count - 1) % 2 == 0 else "cpp"}'
+                self.write(self.app, broken, '#error clutch_stress_deliberate_failure\n')
+                failure = self.cli('run', '--jobs', str(jobs), success=False)
+                self.assertIn('clutch_stress_deliberate_failure', failure)
+                self.assertNotIn(str(expected), failure.splitlines(),
+                                 'failed build ran the previous executable')
+                linkage = '' if broken.endswith('.c') else 'extern "C" '
+                self.write(self.app, broken,
+                           f'{linkage}int part{count - 1}(void) {{ return SEED + {count - 1}; }}\n')
+                self.assertIn(str(expected), self.cli('run', '--jobs', str(jobs)))
+                self.assertIn('1 passed', self.cli('test', '--jobs', str(jobs)))
                 self.cli('clean')
 
 

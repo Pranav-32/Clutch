@@ -173,3 +173,20 @@ noncompiled selections feed native IDE projects and the file API's `additionalFi
 Directory listings are reused across brace alternatives and repeated patterns
 within one expansion, preserving the scan bound without repeated filesystem walks.
 Changing pattern membership requires reconfiguration.
+
+## Source snapshots
+
+`core/bundle/` resolves cached dependency pins, maps physical source roots into
+archive paths, and rewrites participating Clutch manifests without changing the
+original tree. Local imports already inside the project retain their location;
+external sources receive private snapshot paths. The recipient regenerates build
+rules for their compiler and location.
+
+`platform/zip.*` streams stored ZIP records with CRC-32 checks, fixed timestamps
+and bounded classic-ZIP fields. Publication uses a sibling staging directory and
+a no-replace hard link, so a failed/racing writer cannot expose a partial archive
+or replace an existing one. The destination filesystem must support hard links.
+See [source bundles](usage.md#source-bundles) for exclusions, relocation limits
+and external tool/SDK prerequisites. The native ZIP tests check publication/path
+contracts; Python integration tests independently parse CRCs and rebuild extracted
+Git/local/CMake snapshots after their original directories have been moved.

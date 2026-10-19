@@ -14,6 +14,12 @@ add_executable(clutch_files_tests unit/files_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
 clutch_target_defaults(clutch_files_tests)
 add_test(NAME clutch.files COMMAND clutch_files_tests "${CMAKE_CURRENT_BINARY_DIR}/file-tests")
+add_executable(clutch_zip_tests unit/zip_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/platform/zip.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
+clutch_target_defaults(clutch_zip_tests)
+add_test(NAME clutch.zip COMMAND clutch_zip_tests "${CMAKE_CURRENT_BINARY_DIR}/zip-tests")
+set_tests_properties(clutch.zip PROPERTIES LABELS "unit" TIMEOUT 30)
 
 # Unit suites are tool-independent; bounded stress variants are separately selectable.
 add_executable(clutch_source_files_tests unit/source_files_tests.cpp
@@ -131,6 +137,12 @@ else ()
     find_program(CLUTCH_API_CC NAMES cc clang gcc)
 endif ()
 if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    # Python independently checks ZIP headers/CRCs and rebuilds relocated sources.
+    add_test(NAME clutch.bundle
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/bundle_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.bundle PROPERTIES TIMEOUT 240)
     add_test(NAME clutch.stress-integration
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/stress_integration.py"
             --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"

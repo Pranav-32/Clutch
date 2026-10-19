@@ -69,6 +69,13 @@ may be reused; saved test results and release packages are not cached.
    the combined `SHA256SUMS`, and license notices. A failed upload leaves a draft
    that the workflow can resume. Published releases are not overwritten.
 
+For a prerelease, maintainers can put a `Release-As` footer with the desired
+canonical prerelease version in the squash commit body. Release Please then
+proposes that exact version through the usual review process; see its
+[version override documentation](https://github.com/googleapis/release-please#how-do-i-change-the-version-number).
+The publication script marks versions containing a prerelease suffix as GitHub
+prereleases. The same full verification and asset checks apply.
+
 Repository settings must allow the workflows' declared permissions and satisfy
 the configured branch rules. `RELEASE_PR_TOKEN`, when configured, allows the
 version bot's PR to trigger ordinary CI events. With only `GITHUB_TOKEN`, GitHub's

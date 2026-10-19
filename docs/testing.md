@@ -79,11 +79,13 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.standalone` | Windows MSVC executable startup without compiler DLL paths |
 | `clutch.graph` | Graph validation, deterministic DOT escaping and optional rendering |
 | `clutch.files` | Atomic directory publication, existing-output preservation and Windows sharing-handle retries |
+| `clutch.zip` | Archive path traversal, Windows device names, invalid UTF-8, case/hierarchy collisions, member bounds and existing-output preservation |
+| `clutch.bundle` | Independent ZIP/CRC parsing, repeatable bytes, Unicode/binary files, exclusions, workspace relocation and offline Git/local/CMake dependency snapshots; includes 256 files and a one-MiB binary fixture |
 | `clutch.source-files` | Recursive source matching, brace products, canonical paths, exclusions and invalid patterns without a compiler |
 | `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary and oversized-output rejection |
 | `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
 | `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |
-| `clutch.stress-integration` | Shared/deep package graphs, cycle recovery, conflict rollback, package limits and real serial/parallel C/C++ PCH builds |
+| `clutch.stress-integration` | Shared/deep package graphs, cycle recovery, conflict rollback, package limits, serial/parallel C/C++ PCH builds, shared-header invalidation and compile-failure recovery |
 | `clutch.integration` / `clutch.posix-integration` | Real C/C++ builds, profiles, flags, incremental behavior, saved tools and cleanup |
 | `clutch.file-api` | Query/reply versions, compilation-database agreement, snapshots, failures and concurrency |
 | `clutch.targets` | Library/application links, recursive source patterns, noncompiled IDE files, public requirements, target selection, archive replacement, import libraries and DLL staging |
@@ -129,6 +131,12 @@ examples in both profiles, verifies installation and builds packages.
 Bounded stress tests run with ordinary CTest and require no network service.
 They check correctness and resource cleanup, with process timeouts to catch hangs;
 they do not impose machine-dependent performance thresholds.
+
+The mixed-language build case changes a header shared by both PCH prefixes and
+checks that every dependent artifact is rebuilt and the linked program computes
+the new result. It also injects a compiler error, requires `clutch run` to report
+failure, then repairs the source and verifies recovery without cleaning. Both
+checks run with one and four compiler jobs.
 
 ```sh
 ctest --test-dir build-native -L stress --output-on-failure

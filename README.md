@@ -101,6 +101,7 @@ The build directory contains `compile_commands.json`; see
 | Understand dependency pins | [Lock files](docs/lock-files.md) |
 | Try a complete project | [Examples](examples/README.md) |
 | Integrate an IDE or developer tool | [File API](docs/file-api.md) |
+| Share sources and resolved source dependencies | [Source bundles](docs/usage.md#source-bundles) |
 
 ## Feature status
 
@@ -110,8 +111,8 @@ See the [changelog](docs/CHANGELOG.md) for release-specific changes.
 | Availability | Features |
 | --- | --- |
 | In `v0.3.2` and this checkout | C/C++ executable/library/test targets; native generators and `--jobs`; separate profiles; workspaces and local locks; compilation databases, DOT graphs and the native file API |
-| In this checkout, beyond `v0.3.2` | Flexible application/member manifests; recursive source patterns; Git resolution/updates; local/installed imports; CMake/Make adapters; limited named source catalogs; PCH and CPU-based default job limits |
-| Not implemented | Full CMake feature coverage, arbitrary foreign build systems/vcpkg recipes, CUDA device compilation, self-hosting and portable bundles |
+| In this checkout, beyond `v0.3.2` | Flexible application/member manifests; recursive source patterns; Git resolution/updates; local/installed imports; CMake/Make adapters; limited named source catalogs; PCH; CPU-based default job limits; relocatable source bundles |
+| Not implemented | Full CMake feature coverage, arbitrary foreign build systems/vcpkg recipes, CUDA device compilation, GUI telemetry and self-hosting |
 
 ## Contribute
 

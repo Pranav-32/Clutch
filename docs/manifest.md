@@ -597,8 +597,11 @@ Old spellings receive migration diagnostics. Regenerate configuration with
 fail configuration rather than silently enabling a different setting.
 
 General Bazel/Blaze adapters, arbitrary vcpkg recipes, folder aliases,
-automatic dependency update notifications, custom build hooks, bundled
-archives and general cross-compilation configuration remain future work. Do not
+automatic dependency update notifications, custom build hooks, prebuilt binary
+distributions and general cross-compilation configuration remain future work. Do not
 add fields for these to an active manifest yet. Clutch's own configuration
 engine and supported generators operate independently of the CMake project used
 to develop Clutch itself.
+
+Source ZIPs use the [`clutch bundle` command](usage.md#source-bundles); they do not
+add manifest configuration fields or package prebuilt executables/installed SDKs.
