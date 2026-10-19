@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Select the same library's GNU Make rules instead of its native Clutch target.
+[project]
+name = "makefile-package"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["../git-local"]
+
+[dependencies]
+number = { path = "../local/number", build_system = "make", libraries = ["libnumber.a"], include_dirs = ["src"] }
+
+[[test]]
+name = "package-test"
+sources = ["../checks/package_test.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

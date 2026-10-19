@@ -17,9 +17,12 @@
 #include "core/build_directory.hpp"
 #include "core/compilation_database.hpp"
 #include "core/configuration_store.hpp"
+#include "core/dependencies/foreign.hpp"
+#include "core/dependencies/resolve.hpp"
 #include "core/file_api/file_api.hpp"
 #include "core/graph_visualization.hpp"
 #include "core/options.hpp"
+#include "core/pch/pch.hpp"
 #include "core/project.hpp"
 #include "core/workspace/lock.hpp"
 #include "toolchains/toolchain.hpp"
@@ -28,14 +31,19 @@
 #include <utility>
 
 namespace clutch {
-/// Generate configuration outputs only; no compiler or build executor is run.
+/// Generate rules and metadata without building the project's final artifacts.
 Graph configure(const Options &options, const fs::path &executable) {
   file_api::Session api(options);
   try {
+    if (options.update_dependencies && (options.locked || options.offline))
+      throw std::runtime_error("--auto-update-dependencies cannot be combined "
+                               "with --locked or --offline");
+
     // Validate the manifest and destination before resolving tools or writing
     // files.
     auto project = load_project(options);
     validate_build_directory(project.root, project.build, false);
+    dependencies::resolve(project, options);
 
     // Claim only after validating source/include containment. API queries may
     // already exist in a fresh build directory; they are preserved for clients.
@@ -45,7 +53,9 @@ Graph configure(const Options &options, const fs::path &executable) {
     // Normalize the generator before choosing its compatible compiler defaults.
     const auto backend = resolve_backend(options, project);
     project.generator = backend.name;
-    const auto toolchain = resolve_toolchain(options, project);
+    auto toolchain = resolve_toolchain(options, project);
+    dependencies::configure_foreign(project, toolchain, backend, options);
+    resolve_pch_drivers(toolchain, project);
 
     // Build and validate one graph shared by generators, IDEs and saved state.
     auto graph =
@@ -55,6 +65,7 @@ Graph configure(const Options &options, const fs::path &executable) {
 
     // Serialize native rules only after the output directory has an owner
     // marker.
+    pch::write_headers(graph);
     generate_backend_files(graph, options, executable);
 
     // Publish IDE/inspection data and record reusable tool selections. Save the

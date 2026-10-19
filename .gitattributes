@@ -33,6 +33,7 @@ clutch.lock text eol=lf
 .clang-tidy text eol=lf
 
 # Build systems and configurations
+Makefile text eol=lf
 CMakeLists.txt text eol=lf
 *.cmake text eol=lf
 *.in text eol=lf

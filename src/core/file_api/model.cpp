@@ -15,9 +15,12 @@
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
 #include "core/source_files.hpp"
+#include "core/targets/requirements.hpp"
 #include "core/workspace/inputs.hpp"
 
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 namespace clutch::file_api {
 namespace {
@@ -38,11 +41,42 @@ Json action(const std::vector<std::string> &arguments,
 /// changes and are never used as output filenames or executable commands.
 std::string target_id(const Target &target) { return "target:" + target.name; }
 
+/// Public foreign usage may depend on COMPILE_LANGUAGE. Derive each overview
+/// from its actual argv so C/C++ definitions and system include status agree.
+std::pair<Json, std::vector<std::string>>
+compile_usage(const std::vector<std::string> &arguments) {
+  auto includes = Json::array();
+  std::vector<std::string> defines;
+  for (size_t index = 1; index < arguments.size(); ++index) {
+    const auto &argument = arguments[index];
+    std::string include;
+    bool system = false;
+    if (argument == "-isystem" || argument == "-I" || argument == "/I") {
+      system = argument == "-isystem";
+      if (++index >= arguments.size())
+        throw std::runtime_error(
+            "incomplete include option in compilation command");
+      include = arguments[index];
+    } else if (argument.rfind("/external:I", 0) == 0) {
+      include = argument.substr(std::string_view("/external:I").size());
+      system = true;
+    } else if (argument.rfind("-I", 0) == 0 || argument.rfind("/I", 0) == 0)
+      include = argument.substr(2);
+    else if (argument.rfind("-D", 0) == 0 || argument.rfind("/D", 0) == 0)
+      defines = merge_defines(defines, {argument.substr(2)});
+    if (!include.empty())
+      includes.push_back({{"path", fs::u8path(include).generic_u8string()},
+                          {"isSystem", system}});
+  }
+  return {std::move(includes), std::move(defines)};
+}
+
 /// Keep the structured overview and exact per-source argv together so clients
 /// can navigate a target without reverse-engineering its compiler flags.
 Json target_object(const Graph &graph,
                    const Options &options,
-                   const size_t index) {
+                   const size_t index,
+                   const fs::path &executable) {
   const auto &target = graph.targets[index];
   const auto &project = graph.project;
   auto result = object("target");
@@ -60,22 +94,47 @@ Json target_object(const Graph &graph,
                  {"sources", Json::array()},
                  {"compileGroups", Json::array()},
                  {"link", action(target.link, project.build)}});
+  result["precompiledHeaders"] = Json::array();
+  result["foreignDependencies"] = target.foreign_dependencies;
+  result["additionalFiles"] = Json::array();
+  for (const auto &path : target.additional_files)
+    result["additionalFiles"].push_back(path.generic_u8string());
+  result["linkInputs"] = Json::array();
+  for (const auto &path : target.link_inputs)
+    result["linkInputs"].push_back(path.generic_u8string());
+  for (const auto &prefix : target.precompiled_headers) {
+    auto headers = Json::array();
+    for (const auto &header : prefix.headers)
+      headers.push_back(header.generic_u8string());
+
+    Json description = {{"language", prefix.language == "c" ? "C" : "CXX"},
+                        {"headers", headers},
+                        {"textHeader", prefix.ide_header.generic_u8string()},
+                        {"managedByGenerator", graph.backend.name == "xcode"}};
+    if (graph.backend.name == "xcode")
+      description["prefixHeader"] =
+          (prefix.header.parent_path().parent_path() / "xcode-prefix.h")
+              .generic_u8string();
+    else {
+      description["artifact"] = prefix.creator.object.generic_u8string();
+      description["create"] = action(prefix.creator.arguments, project.build);
+    }
+
+    result["precompiledHeaders"].push_back(std::move(description));
+  }
   std::map<std::string, size_t> groups;
   for (const auto &[source, output, arguments] : target.units) {
     const std::string language = source.extension() == ".c" ? "C" : "CXX";
     const auto [group, inserted] = groups.emplace(language, groups.size());
     if (inserted) {
-      auto includes = Json::array();
-      for (const auto &include : target.includes)
-        includes.push_back(
-            {{"path", include.generic_u8string()}, {"isSystem", false}});
+      const auto [includes, defines] = compile_usage(arguments);
 
       result["compileGroups"].push_back(
           {{"language", language},
            {"standard",
             language == "C" ? target.c_standard : target.cxx_standard},
            {"includes", includes},
-           {"defines", target.defines}});
+           {"defines", defines}});
     }
 
     result["sources"].push_back({{"path", source.generic_u8string()},
@@ -89,9 +148,15 @@ Json target_object(const Graph &graph,
   if (!target.import_library.empty())
     result["artifacts"].push_back(
         {{"path", target.import_library.generic_u8string()}});
-  result["actions"] = {
-      {"build",
-       action(backend_build_command(graph, options, {index}), project.build)}};
+  std::vector<std::string> build{executable.generic_u8string(),
+                                 "build",
+                                 "--project",
+                                 project.root.generic_u8string(),
+                                 "--target",
+                                 target.name};
+  if (options.release)
+    build.emplace_back("--release");
+  result["actions"] = {{"build", action(build, project.root)}};
   if (target.type == TargetType::Executable)
     result["actions"]["run"] =
         action({target.output.generic_u8string()}, target.source_root);
@@ -163,7 +228,8 @@ make_objects(const Graph &graph,
       model["targets"].push_back({{"id", target_id(target)},
                                   {"name", target.name},
                                   {"jsonFile", reference}});
-      objects.emplace(filename, target_object(graph, options, index));
+      objects.emplace(filename,
+                      target_object(graph, options, index, executable));
     }
 
     std::vector<std::string> configure{executable.generic_u8string(),
@@ -189,6 +255,34 @@ make_objects(const Graph &graph,
     }
     if (options.locked)
       configure.emplace_back("--locked");
+    if (options.offline)
+      configure.emplace_back("--offline");
+    if (options.update_dependencies)
+      configure.emplace_back("--auto-update-dependencies");
+
+    model["packages"] = Json::array();
+    model["foreignBuilds"] = Json::array();
+    for (const auto &native_build : project.foreign_builds) {
+      auto artifacts = Json::array();
+      for (const auto &artifact : native_build.artifacts)
+        artifacts.push_back(artifact.generic_u8string());
+      model["foreignBuilds"].push_back(
+          {{"id", native_build.id},
+           {"directory", native_build.directory.generic_u8string()},
+           {"artifacts", artifacts},
+           {"compilationDatabase",
+            native_build.compilation_database.generic_u8string()}});
+    }
+    for (const auto &package : project.packages)
+      model["packages"].push_back(
+          {{"id", package.id},
+           {"git", package.git},
+           {"provider", package.provider},
+           {"locator", package.locator},
+           {"revision", package.revision},
+           {"version", package.version},
+           {"source", package.source.generic_u8string()},
+           {"dependencies", package.dependencies}});
 
     model["actions"] = {{"configure", action(configure, project.root)},
                         {"build", action(build, project.root)}};

@@ -13,9 +13,13 @@ tests in projects built by Clutch use the [project workflow](usage.md#project-wo
 | `tests/scripts/` | Verification runners and fixture cleanup |
 | `tests/work/` | Ignored generated fixtures |
 
+Windows target and dependency fixtures use `tests/work/` because MSBuild excludes
+the system TEMP tree from header read tracking. POSIX fixtures use local temporary
+storage to avoid bind-mount overhead. Each suite removes its own fixture directories.
+
 ## Linux, macOS and containers
 
-Install CMake/CTest, Bash, Python, Ninja, GNU Make and C/C++ compilers. Python
+Install CMake/CTest, Bash, Python, Ninja, GNU Make, Git and C/C++ compilers. Python
 3.12+ supports the complete development/CI tooling; native integration tests
 require at least 3.9. Graphviz enables the optional DOT rendering check. A full
 Xcode installation is needed to test the Xcode generator.
@@ -74,9 +78,19 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.help`, `clutch.version` | CLI startup and version identity |
 | `clutch.standalone` | Windows MSVC executable startup without compiler DLL paths |
 | `clutch.graph` | Graph validation, deterministic DOT escaping and optional rendering |
+| `clutch.files` | Atomic directory publication, existing-output preservation and Windows sharing-handle retries |
+| `clutch.source-files` | Recursive source matching, brace products, canonical paths, exclusions and invalid patterns without a compiler |
+| `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary and oversized-output rejection |
+| `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
+| `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |
+| `clutch.stress-integration` | Shared/deep package graphs, cycle recovery, conflict rollback, package limits and real serial/parallel C/C++ PCH builds |
 | `clutch.integration` / `clutch.posix-integration` | Real C/C++ builds, profiles, flags, incremental behavior, saved tools and cleanup |
 | `clutch.file-api` | Query/reply versions, compilation-database agreement, snapshots, failures and concurrency |
-| `clutch.targets` | Library/application links, public requirements, target selection, archive replacement, import libraries and DLL staging |
+| `clutch.targets` | Library/application links, recursive source patterns, noncompiled IDE files, public requirements, target selection, archive replacement, import libraries and DLL staging |
+| `clutch.version-ranges` | Semantic precedence, range intersections, prerelease gates and invalid constraints |
+| `clutch.dependencies` | Local Git histories, transitive conflicts/backtracking, cycle rejection, locks/offline recovery and C/C++ PCH rebuilds across host generators |
+| `clutch.foreign-dependencies` | Local directories, real CMake/Makefile libraries without Clutch manifests, generated headers, public compile flags, mixed-language linking, shared runtime libraries, installed SDKs and source-catalog imports without vcpkg |
+| `clutch.package-examples` | Shipped local directory, Git, catalog, Make and installed-package examples; both profiles, consumer tests and locked offline use |
 | `clutch.workspace` | Qualified links, member boundaries/standards, locks, stale inputs, relocation and native regeneration |
 
 `tests/scripts/tidy.py` checks enabled clang-tidy diagnostics and compilation
@@ -109,6 +123,63 @@ Tooling tests use disposable repositories and install trees to check source
 identity, release-only CI classification, package notices/checksums and failure
 handling. The [CI driver](releases.md#continuous-verification) additionally runs
 examples in both profiles, verifies installation and builds packages.
+
+## Stress checks
+
+Bounded stress tests run with ordinary CTest and require no network service.
+They check correctness and resource cleanup, with process timeouts to catch hangs;
+they do not impose machine-dependent performance thresholds.
+
+```sh
+ctest --test-dir build-native -L stress --output-on-failure
+ctest --test-dir build-native -LE stress --output-on-failure
+```
+
+For a larger local package/build fixture, supply your built Clutch and installed
+compiler paths. Use a Visual Studio developer terminal for `--cc cl --cxx cl`.
+
+```sh
+python tests/integration/stress_integration.py \
+  --clutch /absolute/path/to/clutch --cc clang --cxx clang++ --ninja ninja \
+  --packages 128 --units 96 --repeats 4 -v
+```
+
+Defaults are 48 packages, 24 compile units and two no-op repetitions. Each scale
+argument accepts 1–256. The package-limit case separately checks rejection above
+the documented 1,024-package bound. The large source-selection fixture uses the
+host's temporary filesystem so a container bind mount does not dominate setup.
+Fixtures are temporary and cleaned by their suite. These checks supplement normal
+integration tests and static analysis;
+passing them does not establish that every possible graph or toolchain is correct.
+
+## Package examples
+
+`clutch.package-examples` builds the shipped
+[dependency examples](../examples/dependencies/README.md) in debug and release,
+runs their independent consumer tests, and verifies locked offline reuse. The
+default suite needs no hosted service: it prepares local Git/catalog repositories
+and uses the example installed-package prefix. Windows SDK environments also
+build the real DirectX example. Fixture setup preserves unowned files.
+
+```sh
+ctest --test-dir build-native -R package-examples --output-on-failure
+```
+
+To fetch and test the real pinned CLI11 and fmt GitHub releases, run the same
+suite with explicit network access. Supply your built executable and native
+compiler/build-tool paths:
+
+```sh
+python tests/integration/package_examples_integration.py \
+  --clutch /absolute/path/to/clutch --cc clang --cxx clang++ --ninja ninja --network -v
+```
+
+The command is also available in PowerShell on one line, using `clutch.exe`,
+`--cc cl --cxx cl` in a developer terminal and a discoverable Ninja executable.
+Add `--cuda` only on a machine with a compatible installed CUDA Toolkit. Without
+these opt-in flags, the corresponding tests report explicit skips. Python drives
+the checks and sample-repository setup; it is not part of the Clutch executable.
+Each example also provides a `[[test]]` entry for direct `clutch test` use.
 
 ## Clean fixtures
 

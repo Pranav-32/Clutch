@@ -36,13 +36,27 @@ add_executable(clutch
     src/core/compilation_database.cpp
     src/core/configure.cpp
     src/core/configuration_store.cpp
+    src/core/dependencies/dependency.cpp
+    src/core/dependencies/cmake.cpp
+    src/core/dependencies/foreign.cpp
+    src/core/dependencies/make.cpp
+    src/core/dependencies/git.cpp
+    src/core/dependencies/manifest.cpp
+    src/core/dependencies/resolve.cpp
+    src/core/dependencies/sources.cpp
+    src/core/dependencies/system.cpp
+    src/core/dependencies/vcpkg.cpp
+    src/core/dependencies/version.cpp
     src/core/file_api/file_api.cpp
     src/core/file_api/model.cpp
     src/core/file_api/paths.cpp
     src/core/file_api/protocol.cpp
     src/core/file_api/query.cpp
     src/core/graph_visualization.cpp
+    src/core/pch/headers.cpp
+    src/core/pch/pch.cpp
     src/core/project.cpp
+    src/core/source_files.cpp
     src/core/targets/archive.cpp
     src/core/targets/manifest.cpp
     src/core/targets/requirements.cpp
@@ -53,6 +67,7 @@ add_executable(clutch
     src/core/workspace/lock.cpp
     src/core/workspace/workspace.cpp
     src/platform/arguments.cpp
+    src/platform/capture.cpp
     src/platform/environment.cpp
     src/platform/files.cpp
     src/platform/json.cpp

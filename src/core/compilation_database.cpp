@@ -17,6 +17,10 @@
 #include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/json.hpp"
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <set>
+#include <stdexcept>
 
 #include <sstream>
 #include <string>
@@ -53,6 +57,33 @@ void write_compilation_database(const Graph &graph) {
     }
   }
 
+  std::set<fs::path> imported;
+  // Upstream private flags belong only to its own records. Merge the original
+  // arguments/command records with their original working-directory frames.
+  for (const auto &build : graph.project.foreign_builds) {
+    if (build.compilation_database.empty() ||
+        !fs::exists(build.compilation_database) ||
+        !imported.insert(build.compilation_database).second)
+      continue;
+    constexpr auto maximum_database_bytes = 64U * 1024U * 1024U;
+    if (!fs::is_regular_file(build.compilation_database) ||
+        fs::file_size(build.compilation_database) > maximum_database_bytes)
+      throw std::runtime_error(
+          "invalid or oversized foreign compilation database");
+    std::ifstream stream(build.compilation_database, std::ios::binary);
+    const auto records = nlohmann::json::parse(stream);
+    if (!records.is_array())
+      throw std::runtime_error("foreign compilation database must be an array");
+    for (const auto &record : records) {
+      const auto file = fs::u8path(record.at("file").get<std::string>());
+      const auto probe = build.directory.parent_path() / "probe";
+      if (file.parent_path() == probe)
+        continue;
+      if (entries++)
+        database << ",\n";
+      database << "  " << record.dump();
+    }
+  }
   database << "\n]\n";
   write_if_changed(graph.project.build / layout::compilation_database,
                    database.str());

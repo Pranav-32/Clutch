@@ -152,6 +152,16 @@ void prepare_build_directory(const Project &project) {
           "build directory contains an include directory: " +
           include.u8string());
 
+  const auto validate_files = [&](const std::vector<fs::path> &inputs) {
+    for (const auto &input : inputs)
+      if (contains(project.build, input))
+        throw std::runtime_error("build directory contains a project input: " +
+                                 input.u8string());
+  };
+  validate_files(project.pch_c);
+  validate_files(project.pch_cpp);
+  validate_files(project.additional_files);
+
   for (const auto *const specs : {&project.targets, &project.tests}) {
     for (const auto &target : *specs) {
       const auto validate_includes =
@@ -164,6 +174,9 @@ void prepare_build_directory(const Project &project) {
           };
       validate_includes(target.includes);
       validate_includes(target.public_includes);
+      validate_files(target.pch_c);
+      validate_files(target.pch_cpp);
+      validate_files(target.additional_files);
     }
   }
 

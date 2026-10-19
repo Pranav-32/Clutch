@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Git fetches fmt; its existing CMake targets supply compilation/link interfaces.
+[project]
+name = "git-cmake-package"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["."]
+
+[dependencies]
+fmt = { git = "https://github.com/fmtlib/fmt.git", tag = "11.0.2", build_system = "cmake", target = "fmt::fmt", cmake_options = { FMT_TEST = "OFF", FMT_DOC = "OFF" } }
+
+[[test]]
+name = "package-test"
+sources = ["../checks/package_test.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

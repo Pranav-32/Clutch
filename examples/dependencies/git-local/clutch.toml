@@ -1,0 +1,26 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Run ../prepare.py first to publish the sample library as a local Git repository.
+[project]
+name = "git-local-package"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["."]
+
+[dependencies]
+number = { git = "../Clutch-build-fixtures/repositories/number", tag = "v1.0.0", build_system = "clutch", target = "number" }
+
+[[test]]
+name = "package-test"
+sources = ["../checks/package_test.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

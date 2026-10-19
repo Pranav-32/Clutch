@@ -12,6 +12,7 @@
  */
 
 #include "make.hpp"
+#include "core/pch/pch.hpp"
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
@@ -140,14 +141,23 @@ bool is_header(const fs::path &path) {
 /// are not watched; changing the compiler installation requires a clean build.
 std::set<fs::path> collect_headers(const Graph &graph) {
   std::set roots(graph.project.includes.begin(), graph.project.includes.end());
+  std::set<fs::path> headers;
 
   for (const auto &target : graph.targets) {
-    roots.insert(target.includes.begin(), target.includes.end());
-    for (const auto &unit : target.units)
-      roots.insert(unit.source.parent_path());
-  }
+    // Explicit header selections may live outside source/include roots.
+    for (const auto &file : target.additional_files)
+      if (is_header(file))
+        headers.insert(file);
 
-  std::set<fs::path> headers;
+    roots.insert(target.includes.begin(), target.includes.end());
+    for (const auto &unit : target.units) {
+      roots.insert(unit.source.parent_path());
+      for (const auto &argument : unit.arguments)
+        if ((argument.rfind("-I", 0) == 0 || argument.rfind("/I", 0) == 0) &&
+            argument.size() > 2)
+          roots.insert(fs::u8path(argument.substr(2)));
+    }
+  }
 
   for (const auto &root : roots) {
     if (!fs::is_directory(root))
@@ -198,6 +208,10 @@ std::vector<std::string> regenerate_command(const Graph &graph,
     arguments.emplace_back("--release");
   if (options.locked)
     arguments.emplace_back("--locked");
+  if (options.offline)
+    arguments.emplace_back("--offline");
+  if (options.update_dependencies)
+    arguments.emplace_back("--auto-update-dependencies");
 
   return arguments;
 }
@@ -336,6 +350,42 @@ void generate_make(const Graph &graph,
            << "\n\n";
     }
 
+    for (const auto &prefix : target.precompiled_headers) {
+      const auto &creator = prefix.creator;
+      fs::create_directories(creator.object.parent_path());
+      const auto response = fs::u8path(creator.object.u8string() + ".make.rsp");
+      auto arguments = creator.arguments;
+      if (gnu && !graph.toolchain.msvc)
+        arguments.insert(arguments.end(),
+                         {"-MP", "-MQ", relative_path(creator.object, build)});
+
+      write_response(response,
+                     response_file(arguments, graph.toolchain.msvc),
+                     creator.object,
+                     [&] {
+                       invalidate_target(index);
+                     });
+      make << make_path(creator.object, build, gnu) << ": "
+           << make_path(creator.source, build, gnu) << ' '
+           << make_path(response, build, gnu) << ' '
+           << make_path(fs::u8path(creator.arguments.front()), build, gnu);
+      if (creator.source != prefix.header)
+        make << ' ' << make_path(prefix.header, build, gnu);
+      for (const auto &header : prefix.headers)
+        make << " \\\n  " << make_path(header, build, gnu);
+      for (const auto &header : headers)
+        make << " \\\n  " << make_path(header, build, gnu);
+
+      const auto command = recipe(
+          {creator.arguments.front(), "@" + relative_path(response, build)});
+      make << "\n\t" << command << "\n\n";
+      if (!prefix.companion_object.empty())
+        make << make_path(prefix.companion_object, build, gnu) << ": "
+             << make_path(creator.object, build, gnu) << "\n\t@if not exist "
+             << make_path(prefix.companion_object, build, false) << ' '
+             << command << "\n\n";
+    }
+
     for (const auto &unit : units) {
       if (unit.arguments.empty())
         throw std::runtime_error("Make compile unit has no compiler command");
@@ -345,7 +395,7 @@ void generate_make(const Graph &graph,
           fs::u8path(unit.object.u8string() + ".make.rsp");
 
       // Copy only when adding generator-specific dependency flags.
-      auto arguments = unit.arguments;
+      auto arguments = pch::build_arguments(target, unit);
 
       if (gnu && !graph.toolchain.msvc) {
         // Match the Make rule's relative target and tolerate removed headers.
@@ -364,6 +414,8 @@ void generate_make(const Graph &graph,
       make << make_path(unit.object, build, gnu) << ": "
            << make_path(unit.source, build, gnu) << ' '
            << make_path(response_path, build, gnu);
+      if (const auto *const prefix = pch::for_unit(target, unit))
+        make << ' ' << make_path(prefix->creator.object, build, gnu);
 
       for (const auto &header : headers)
         make << " \\\n  " << make_path(header, build, gnu);
@@ -387,9 +439,14 @@ void generate_make(const Graph &graph,
                    });
     make << make_path(output, build, gnu) << ": "
          << make_path(response_path, build, gnu);
+    for (const auto &input : target.link_inputs)
+      make << " \\\n  " << make_path(input, build, gnu);
 
     for (const auto &unit : units)
       make << " \\\n  " << make_path(unit.object, build, gnu);
+    for (const auto &prefix : target.precompiled_headers)
+      if (!prefix.companion_object.empty())
+        make << " \\\n  " << make_path(prefix.companion_object, build, gnu);
 
     for (const auto dependency : target.type == TargetType::StaticLibrary
                                      ? target.dependencies
@@ -424,6 +481,12 @@ void generate_make(const Graph &graph,
     // optionally.
     if (!graph.toolchain.msvc) {
       for (const auto &target : graph.targets) {
+        for (const auto &prefix : target.precompiled_headers)
+          make << "-include "
+               << make_path(fs::u8path(prefix.creator.object.u8string() + ".d"),
+                            build,
+                            gnu)
+               << '\n';
         for (const auto &unit : target.units)
           make << "-include "
                << make_path(fs::u8path(unit.object.u8string() + ".d"),

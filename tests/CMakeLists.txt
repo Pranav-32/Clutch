@@ -6,6 +6,30 @@
 
 add_test(NAME clutch.help COMMAND clutch --help)
 add_test(NAME clutch.version COMMAND clutch --version)
+add_executable(clutch_version_tests unit/version_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/core/dependencies/version.cpp")
+clutch_target_defaults(clutch_version_tests)
+add_test(NAME clutch.version-ranges COMMAND clutch_version_tests)
+add_executable(clutch_files_tests unit/files_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
+clutch_target_defaults(clutch_files_tests)
+add_test(NAME clutch.files COMMAND clutch_files_tests "${CMAKE_CURRENT_BINARY_DIR}/file-tests")
+
+# Unit suites are tool-independent; bounded stress variants are separately selectable.
+add_executable(clutch_source_files_tests unit/source_files_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/core/source_files.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
+clutch_target_defaults(clutch_source_files_tests)
+add_test(NAME clutch.source-files COMMAND clutch_source_files_tests "${CMAKE_CURRENT_BINARY_DIR}/source-tests")
+add_test(NAME clutch.stress-source-files COMMAND clutch_source_files_tests "${CMAKE_CURRENT_BINARY_DIR}/source-tests" --stress)
+add_executable(clutch_capture_tests unit/capture_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/platform/capture.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/arguments.cpp")
+clutch_target_defaults(clutch_capture_tests)
+add_test(NAME clutch.capture COMMAND clutch_capture_tests)
+add_test(NAME clutch.stress-capture COMMAND clutch_capture_tests --stress)
+set_tests_properties(clutch.source-files clutch.capture PROPERTIES LABELS "unit" TIMEOUT 30)
+set_tests_properties(clutch.stress-source-files clutch.stress-capture PROPERTIES LABELS "stress" TIMEOUT 120)
 set_tests_properties(clutch.version PROPERTIES
         PASS_REGULAR_EXPRESSION "clutch ${CLUTCH_VERSION}")
 
@@ -26,6 +50,8 @@ endif ()
 add_executable(clutch_graph_tests
         unit/graph_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/core/build_graph.cpp"
+        "${PROJECT_SOURCE_DIR}/src/core/dependencies/dependency.cpp"
+        "${PROJECT_SOURCE_DIR}/src/core/pch/pch.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/resolve.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/requirements.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/target.cpp"
@@ -105,6 +131,18 @@ else ()
     find_program(CLUTCH_API_CC NAMES cc clang gcc)
 endif ()
 if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    add_test(NAME clutch.stress-integration
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/stress_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.stress-integration PROPERTIES LABELS "stress" TIMEOUT 240)
+    find_program(CLUTCH_TEST_CMAKE NAMES cmake)
+    if (CLUTCH_TEST_CMAKE)
+        add_test(NAME clutch.foreign-dependencies
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/foreign_dependencies_integration.py"
+                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    endif ()
     add_test(NAME clutch.file-api
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/file_api_integration.py"
             --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
@@ -117,4 +155,19 @@ if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/workspace_integration.py"
             --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
             --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    find_program(CLUTCH_TEST_GIT NAMES git)
+    if (CLUTCH_TEST_GIT)
+        # Shipped package examples run offline by default. Real GitHub/CUDA
+        # smoke checks are explicit options on the same Python test runner.
+        if (CLUTCH_TEST_CMAKE)
+            add_test(NAME clutch.package-examples
+                    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/package_examples_integration.py"
+                    --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                    --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+        endif ()
+        add_test(NAME clutch.dependencies
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/dependencies_integration.py"
+                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    endif ()
 endif ()

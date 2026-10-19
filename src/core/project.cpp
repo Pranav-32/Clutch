@@ -14,7 +14,9 @@
 #include "project.hpp"
 
 #include "core/build_directory.hpp"
+#include "core/dependencies/manifest.hpp"
 #include "core/options.hpp"
+#include "core/pch/headers.hpp"
 #include "core/project_layout.hpp"
 #include "core/source_files.hpp"
 #include "core/targets/manifest.hpp"
@@ -102,11 +104,13 @@ std::string standard(const toml::node *const node, const std::string &context) {
 /// Resolve manifest values into absolute paths and validated project settings.
 Project load_project_manifest(const Options &options,
                               const toml::table &doc,
-                              const bool virtual_workspace) {
+                              const bool virtual_workspace,
+                              const fs::path &shared_build) {
   // Establish one physical project root for source, profile and ownership
   // checks.
   Project p;
   p.root = fs::canonical(options.root);
+  p.build = shared_build.empty() ? build_directory(options) : shared_build;
   if (doc.contains("package"))
     throw std::runtime_error("rename [package] to [project] in clutch.toml");
 
@@ -146,11 +150,20 @@ Project load_project_manifest(const Options &options,
           "generator with generator = \"ninja\" under [build]");
 
     keys(build,
-         {"sources", "include_dirs", "defines", "generator", "links"},
+         {"sources",
+          "include_dirs",
+          "defines",
+          "generator",
+          "links",
+          "pch",
+          "runtime"},
          "build");
     if (const auto *const value = build.get("generator");
         value && !value->is_string())
       throw std::runtime_error("build.generator must be a string");
+    if (const auto *const value = build.get("runtime");
+        value && !value->is_string())
+      throw std::runtime_error("build.runtime must be a string");
   }
 
   if (const auto *const node = doc.get("profile")) {
@@ -186,9 +199,14 @@ Project load_project_manifest(const Options &options,
   if (!virtual_workspace && p.version.empty())
     throw std::runtime_error("project.version must be a nonempty string");
 
-  if (doc.contains("dependencies"))
-    throw std::runtime_error(
-        "dependency imports are not supported yet; use local targets or workspace members");
+  if (virtual_workspace && doc.contains("dependencies"))
+    throw std::runtime_error("dependency imports require a [project] or belong "
+                             "in workspace members");
+  for (auto &requirement : dependencies::read_requirements(doc, p.root))
+    p.dependency_requests.push_back({p.name, std::move(requirement)});
+  const auto precompiled = pch::read(doc["build"]["pch"].node(), "build.pch");
+  p.pch_c = pch::paths(precompiled.c, p.root);
+  p.pch_cpp = pch::paths(precompiled.cpp, p.root);
 
   // Apply one checked array-of-strings reader to sources, includes and defines.
   const auto array = [&](const char *const key, const auto &append) {
@@ -211,15 +229,22 @@ Project load_project_manifest(const Options &options,
                              doc["build"]["links"])) {
     // Prefer explicit sources; otherwise discover src/ and add any explicit
     // entry.
+    std::vector<std::string> patterns;
     array("sources", [&](const std::string &s) {
-      p.sources.push_back(fs::canonical(p.root / fs::u8path(s)));
+      patterns.push_back(s);
     });
-    if (p.sources.empty() && fs::is_directory(p.root / "src")) {
-      for (const auto &e : fs::recursive_directory_iterator(p.root / "src")) {
-        if (const auto ext = e.path().extension().u8string();
-            e.is_regular_file() &&
-            (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx"))
-          discovered_sources.insert(fs::canonical(e.path()));
+    auto selected = expand_sources(p.root, patterns, p.build);
+    p.sources = std::move(selected.sources);
+    p.additional_files = std::move(selected.additional_files);
+    if (patterns.empty() && fs::is_directory(p.root / "src")) {
+      // Automatic discovery shares generated-tree exclusions with explicit
+      // globs. An empty src/ is permitted when project.entry supplies the
+      // program.
+      if (!fs::is_empty(p.root / "src")) {
+        auto discovered = expand_sources(p.root, {"src/*"}, p.build, false);
+        discovered_sources.insert(discovered.sources.begin(),
+                                  discovered.sources.end());
+        p.additional_files = std::move(discovered.additional_files);
       }
       p.sources.insert(p.sources.end(),
                        discovered_sources.begin(),
@@ -342,6 +367,9 @@ Project load_project_manifest(const Options &options,
   p.generator = options.generator.empty()
                     ? doc["build"]["generator"].value_or(std::string("ninja"))
                     : options.generator;
+  p.runtime = doc["build"]["runtime"].value_or(std::string("static"));
+  if (p.runtime != "static" && p.runtime != "dynamic")
+    throw std::runtime_error("build.runtime must be static or dynamic");
   std::transform(p.generator.begin(),
                  p.generator.end(),
                  p.generator.begin(),
@@ -379,7 +407,6 @@ Project load_project_manifest(const Options &options,
   if (p.warnings != "extra" && p.warnings != "default" && p.warnings != "none")
     throw std::runtime_error("warnings must be extra, default or none");
 
-  p.build = build_directory(options);
   p.output = p.build / p.name;
 #ifdef _WIN32
   p.output += ".exe";

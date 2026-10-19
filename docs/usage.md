@@ -27,17 +27,36 @@ clutch build --release --jobs 4
 ```
 
 `clutch .` validates the manifest, discovers sources and tools, and writes build
-files without compiling. `build`, `run`, and `test` load the saved configuration
+files without building project artifacts. External-library configuration may run
+compiler probes or upstream configure scripts; see [dependencies](dependencies.md#cmake-libraries).
+`build`, `run`, and `test` load the saved configuration
 and execute the selected native backend. They require configuration first.
 Changes to `clutch.toml` require another explicit `clutch .` invocation; adding
 or removing discovered sources also requires reconfiguration. Editing an
 existing source or header only requires a build.
 
+Source arrays accept recursive patterns such as `sources = ["src/*.{cpp,c,h}"]`.
+Use the same syntax for library and test targets. Matched headers are IDE files;
+only C/C++ source extensions are compiled. See [source selection](manifest.md#sources-and-headers)
+for matching rules and generated-directory exclusions.
+
 Configuration creates or updates `clutch.lock` at the source/workspace root.
 Commit it with the manifests. Use `clutch . --locked` (or add `--release`) to
 require an existing matching lock without rewriting resolution. This flag is
 configuration-only. Changes to any root/member manifest or the lock invalidate
-saved builds; see [lock files](lock-files.md) for its current local-only scope.
+saved builds; see [lock files](lock-files.md) for local edges and Git revision pins.
+
+Native builds use available CPU concurrency by default; `--jobs N` sets an
+explicit limit and `--jobs 1` requests serial execution. Ninja, GNU Make, JOM,
+MSBuild and Xcode own dependency scheduling. NMake remains serial because its
+executor has no parallel scheduler. Exact compiler/link prerequisites prevent a
+consumer from running before its library or PCH is ready.
+
+Git imports are downloaded during configuration into the source root's `.clutch/`.
+Use `clutch . --locked --offline` after caching them to prohibit network access.
+Refresh untagged imports explicitly with `clutch . --auto-update-dependencies`;
+normal configuration preserves compatible pins. See [dependencies](dependencies.md)
+and [PCH settings](manifest.md#precompiled-headers).
 
 Choose compilers and the generator during configuration:
 
@@ -82,10 +101,11 @@ examples for standards, profiles, sources and tests.
 | --- | --- |
 | `[project]` | `name`, `version`, `language`, `std`, `entry` |
 | `[workspace]` | `members` |
-| `[build]` | `generator`, `sources`, `include_dirs`, `defines` |
+| `[build]` | `generator`, `sources`, `links`, `include_dirs`, `defines`, `pch`, `runtime` |
 | `[profile.debug]`, `[profile.release]` | `build_dir`, `optimize`, `warnings` |
-| `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default` |
+| `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default`, `pch` |
 | `[[test]]` | Target fields except `default`; executable only |
+| `[dependencies]` | Aliased Git, local, installed-package or catalog imports; see [dependency fields](dependencies.md#dependency-field-reference) |
 
 ```toml
 [project]
@@ -264,12 +284,12 @@ dot -Tsvg Clutch-build-debug/build-graph.dot -o Clutch-build-debug/build-graph.s
 
 The [development container](development-container.md) includes Graphviz; Clutch
 does not require it to configure or build. Clutch validates cycles and duplicate artifact
-producers independently of rendering. Compiler-discovered headers and future
-package dependencies are outside this visualization.
+producers independently of rendering. The graph includes logical package edges
+and PCH prerequisites; compiler-discovered headers are outside this visualization.
 
 Objects, executables, and backend metadata also stay in the profile directory.
-The reserved `.clutch/` directory is the project-local dependency workspace for
-future package management; it is excluded from Git and Docker build contexts.
+The reserved source-root `.clutch/` directory contains the project-local Git cache;
+it is excluded from Git and Docker build contexts.
 Existing nonempty directories must already belong to this project; Clutch
 refuses unrelated or redirected paths. Saved configuration is local to its
 project location and profile. Configure again after moving a project.

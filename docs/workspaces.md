@@ -7,6 +7,12 @@ has its own `clutch.toml` and targets. A workspace plays a similar composition
 role to adding subdirectories in CMake, while using declarative project membership.
 It does not execute CMake or interpret `CMakeLists.txt` files.
 
+For a first example, configure and run the
+[workspace sample](../examples/workspace/README.md). Contributors changing member
+composition should use this page for the rules, then follow
+[code layout](architecture.md#code-layout) and the `clutch.workspace` checks in
+[testing](testing.md#select-checks).
+
 ## Root manifest
 
 ```toml
@@ -32,7 +38,8 @@ automatic upward workspace discovery are not implemented.
 
 A root containing `[workspace]` without `[project]` is virtual: it coordinates
 members and creates no implicit executable. Its `[build]` accepts `generator`,
-`include_dirs` and `defines`. Shared header paths resolve from the root manifest.
+`include_dirs`, `defines`, `pch` and `runtime`. Shared header paths resolve from
+the root manifest.
 A root may also declare a real `[project]` with its own sources/targets/tests.
 That project's targets are qualified just like every other member's targets.
 
@@ -74,7 +81,7 @@ and stay private to that project's targets; public target requirements propagate
 through declared links. Members retain their own language standards: root compile
 defaults do not change a member's `project.std`.
 
-The root owns profiles, build directories, optimization/warning policy and the
+The root owns profiles, build directories, optimization/warning/runtime policy and the
 generator. Member `[profile]` tables and `build.generator` overrides are errors;
 remove them when moving an existing project into a workspace. Compiler overrides
 at configuration time apply to the entire workspace. Different compiler/ABI
@@ -134,3 +141,9 @@ silently switch to a parent workspace.
 
 See the [member workspace example](../examples/workspace/README.md) and
 [flexible root example](../examples/flexible/README.md).
+
+Git imports belong in real root/member manifests. Resolution combines their
+constraints into one [package graph](dependencies.md) and source-root cache,
+while compile settings remain scoped to the declaring project. A virtual root
+may share `build.pch` with members just as it shares includes and definitions;
+members and individual targets may add their own prefix headers.

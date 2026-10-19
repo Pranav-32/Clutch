@@ -14,6 +14,7 @@
 #include "build_graph.hpp"
 
 #include "core/options.hpp"
+#include "core/pch/pch.hpp"
 #include "core/targets/requirements.hpp"
 #include "core/targets/resolve.hpp"
 #include "core/targets/runtime.hpp"
@@ -78,12 +79,23 @@ void validate_build_graph(const Graph &graph) {
     ++incoming[artifact];
   };
 
+  std::set<std::string> foreign_ids;
+  for (const auto &build : graph.project.foreign_builds) {
+    if (build.id.empty() || !foreign_ids.insert(build.id).second ||
+        build.arguments.empty() || !build.directory.is_absolute())
+      throw std::runtime_error("duplicate or invalid foreign build action");
+    for (const auto &artifact : build.artifacts)
+      produce(artifact);
+  }
+
   for (const auto &target : graph.targets) {
     if (target.units.empty() || target.link.empty())
       throw std::runtime_error(
           "build target has no compilation or link commands");
 
     produce(target.output);
+    for (const auto &input : target.link_inputs)
+      connect(input, target.output);
     if (!target.import_library.empty()) {
       produce(target.import_library);
       connect(target.output, target.import_library);
@@ -101,12 +113,34 @@ void validate_build_graph(const Graph &graph) {
       if (dependency >= graph.targets.size() ||
           graph.targets[dependency].type == TargetType::Executable)
         throw std::runtime_error("invalid linked library target");
-    for (const auto &[source, object, arguments] : target.units) {
+
+    for (const auto &prefix : target.precompiled_headers) {
+      if (prefix.creator.arguments.empty() || prefix.headers.empty())
+        throw std::runtime_error("PCH step has no compiler command or headers");
+
+      produce(prefix.creator.object);
+      connect(prefix.header, prefix.creator.object);
+      if (prefix.creator.source != prefix.header)
+        connect(prefix.creator.source, prefix.creator.object);
+      for (const auto &header : prefix.headers)
+        connect(header, prefix.creator.object);
+
+      if (!prefix.companion_object.empty()) {
+        produce(prefix.companion_object);
+        connect(prefix.creator.object, prefix.companion_object);
+        connect(prefix.companion_object, target.output);
+      }
+    }
+
+    for (const auto &unit : target.units) {
+      const auto &[source, object, arguments] = unit;
       if (arguments.empty())
         throw std::runtime_error("build unit has no compiler command");
 
       produce(object);
       connect(source, object);
+      if (const auto *const prefix = pch::for_unit(target, unit))
+        connect(prefix->creator.object, object);
       connect(object, target.output);
     }
   }
@@ -167,24 +201,49 @@ Graph make_build_graph(Project project,
     target.project_name =
         spec.project_name.empty() ? p.name : spec.project_name;
     target.source_root = spec.source_root.empty() ? p.root : spec.source_root;
+    target.additional_files = spec.additional_files;
     target.c_standard =
         spec.c_standard.empty() ? p.c_standard : spec.c_standard;
     target.cxx_standard =
         spec.cxx_standard.empty() ? p.cxx_standard : spec.cxx_standard;
+    const auto require_standard = [](std::string &current,
+                                     const std::string &required) {
+      if (required.empty() || required == "98" || required == "99")
+        return;
+      if (required != "11" && required != "14" && required != "17" &&
+          required != "20" && required != "23")
+        throw std::runtime_error(
+            "dependency requires an unsupported language standard: " +
+            required);
+      if (current == "99" || std::stoi(current) < std::stoi(required))
+        current = required;
+    };
+    for (const auto &usage : spec.dependency_usage) {
+      require_standard(target.c_standard, usage.c_standard);
+      require_standard(target.cxx_standard, usage.cpp_standard);
+      if (std::any_of(p.foreign_builds.begin(),
+                      p.foreign_builds.end(),
+                      [&](const dependencies::ForeignBuild &build) {
+                        return build.id == usage.id;
+                      }))
+        target.foreign_dependencies.push_back(usage.id);
+    }
     target.type = spec.type;
     target.is_test = spec.is_test;
     target.build_by_default = spec.build_by_default;
     target.dependencies = resolved.dependencies;
     target.link_dependencies = resolved.link_dependencies;
-    target.includes = merge_includes(p.includes, spec.includes);
-    target.defines = merge_defines(p.defines, spec.defines);
+    target.includes = spec.external ? spec.includes
+                                    : merge_includes(p.includes, spec.includes);
+    target.defines =
+        spec.external ? spec.defines : merge_defines(p.defines, spec.defines);
     target.output = target_output(p, spec, toolchain.msvc);
     target.import_library =
         target_import_library(target.output, spec.type, toolchain.msvc);
 
     // Per-target objects let an application and tests share a source safely.
     const auto objects =
-        graph.project.is_workspace
+        graph.project.is_workspace || spec.external
             ? p.build / "obj" / target.project_name / target.local_name
         : graph.project.targets.empty() && target_index == 0
             ? p.build / "obj"
@@ -204,7 +263,10 @@ Graph make_build_graph(Project project,
           throw std::runtime_error(
               "MSVC C builds currently support std 11 or 17");
 
-        a.insert(a.end(), {"/nologo", "/c", "/showIncludes", "/utf-8", "/MT"});
+        a.insert(a.end(), {"/nologo", "/c", "/showIncludes", "/utf-8"});
+        a.emplace_back(p.runtime == "dynamic"
+                           ? (options.release ? "/MD" : "/MDd")
+                           : (options.release ? "/MT" : "/MTd"));
         if (!c && target.cxx_standard == "11")
           throw std::runtime_error(
               "MSVC-style drivers require C++ std 14 or newer");
@@ -271,8 +333,14 @@ Graph make_build_graph(Project project,
                   u.object.u8string()});
       }
 
+      for (const auto &usage : spec.dependency_usage) {
+        const auto &flags = c ? usage.c_options : usage.cpp_options;
+        u.arguments.insert(u.arguments.begin() + 1, flags.begin(), flags.end());
+      }
       target.units.push_back(std::move(u));
     }
+
+    pch::plan(target, spec, p, toolchain);
 
     const auto &target_linker = resolved.needs_cpp ? cxx : cc;
     if (spec.type == TargetType::StaticLibrary) {
@@ -320,10 +388,18 @@ Graph make_build_graph(Project project,
     } else {
       target.link = {target_linker};
       if (toolchain.msvc)
-        target.link.insert(target.link.end(), {"/nologo", "/MT"});
+        target.link.insert(target.link.end(),
+                           {"/nologo",
+                            p.runtime == "dynamic"
+                                ? (options.release ? "/MD" : "/MDd")
+                                : (options.release ? "/MT" : "/MTd")});
     }
     for (const auto &unit : target.units)
       target.link.push_back(unit.object.u8string());
+
+    for (const auto &prefix : target.precompiled_headers)
+      if (!prefix.companion_object.empty())
+        target.link.push_back(prefix.companion_object.u8string());
 
     if (spec.type != TargetType::StaticLibrary) {
       for (const auto dependency : resolved.link_dependencies) {
@@ -340,6 +416,9 @@ Graph make_build_graph(Project project,
           target.link.emplace_back("/LD");
         target.link.push_back("/Fe" + target.output.u8string());
         target.link.emplace_back("/link");
+        // Native backends decide when linking is needed. LINK's separate
+        // timestamp cache can reuse stale archive members during rapid edits.
+        target.link.emplace_back("/INCREMENTAL:NO");
         if (!options.release)
           target.link.emplace_back("/DEBUG");
         if (!target.import_library.empty())
@@ -396,6 +475,36 @@ Graph make_build_graph(Project project,
 #endif
         target.link.insert(target.link.end(), {"-o", target.output.u8string()});
       }
+      // Imported interfaces follow native archives, preserving static link
+      // ordering. Archives keep their requirements for the final consumer.
+      std::set<std::string> imported;
+      const auto consume = [&](const std::vector<DependencyUsage> &usages) {
+        for (const auto &usage : usages) {
+          if (!imported.insert(usage.id).second)
+            continue;
+          target.link.insert(target.link.end(),
+                             usage.link_options.begin(),
+                             usage.link_options.end());
+          target.link_inputs.insert(target.link_inputs.end(),
+                                    usage.link_inputs.begin(),
+                                    usage.link_inputs.end());
+          target.runtime_libraries.insert(target.runtime_libraries.end(),
+                                          usage.runtime_libraries.begin(),
+                                          usage.runtime_libraries.end());
+          if (std::any_of(p.foreign_builds.begin(),
+                          p.foreign_builds.end(),
+                          [&](const dependencies::ForeignBuild &build) {
+                            return build.id == usage.id;
+                          }) &&
+              std::find(target.foreign_dependencies.begin(),
+                        target.foreign_dependencies.end(),
+                        usage.id) == target.foreign_dependencies.end())
+            target.foreign_dependencies.push_back(usage.id);
+        }
+      };
+      consume(spec.dependency_usage);
+      for (const auto dependency : resolved.link_dependencies)
+        consume(specs[dependency].spec.dependency_usage);
     }
 
     graph.targets.push_back(std::move(target));

@@ -28,8 +28,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace clutch {
@@ -281,6 +283,14 @@ backend_build_command(const Graph &graph,
       throw std::runtime_error("invalid build target selection");
   }
 
-  return driver.build(graph, options, target_indices);
+  auto execution = options;
+  if (execution.jobs == 0) {
+    const auto processors = std::max(1U, std::thread::hardware_concurrency());
+    execution.jobs = static_cast<int>(
+        std::min(processors,
+                 static_cast<unsigned>(std::numeric_limits<int>::max())));
+  }
+
+  return driver.build(graph, execution, target_indices);
 }
 }  // namespace clutch

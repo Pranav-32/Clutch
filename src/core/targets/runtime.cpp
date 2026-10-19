@@ -26,15 +26,16 @@ void validate_runtime_dependencies(const Graph &graph) {
     if (graph.targets[consumer].type == TargetType::StaticLibrary)
       continue;
 
-    std::map<std::string, size_t> filenames;
+    std::map<std::string, std::pair<fs::path, std::string>> filenames;
     std::set<size_t> visited;
     std::function<void(size_t)> visit = [&](const size_t index) {
       if (!visited.insert(index).second)
         return;
 
       const auto &target = graph.targets.at(index);
-      if (target.type == TargetType::SharedLibrary) {
-        auto filename = target.output.filename().u8string();
+      const auto register_library = [&](const fs::path &library,
+                                        const std::string &name) {
+        auto filename = library.filename().u8string();
 #ifdef _WIN32
         std::transform(filename.begin(),
                        filename.end(),
@@ -43,14 +44,23 @@ void validate_runtime_dependencies(const Graph &graph) {
                          return static_cast<char>(std::tolower(c));
                        });
 #endif
-        if (const auto [entry, inserted] = filenames.emplace(filename, index);
-            !inserted && entry->second != index)
-          throw std::runtime_error(
-              "runtime library name collision: " +
-              graph.targets[entry->second].name + " and " + target.name +
-              " both load as " + filename +
-              "; give shared-library targets distinct names");
-      }
+        if (const auto [entry, inserted] =
+                filenames.emplace(filename, std::make_pair(library, name));
+            !inserted && entry->second.first != library) {
+          auto message =
+              "runtime library name collision: " + entry->second.second;
+          message += " and ";
+          message += name;
+          message += " both load as ";
+          message += filename;
+          message += "; give shared-library targets distinct names";
+          throw std::runtime_error(message);
+        }
+      };
+      if (target.type == TargetType::SharedLibrary)
+        register_library(target.output, target.name);
+      for (const auto &library : target.runtime_libraries)
+        register_library(library, library.u8string());
 
       for (const auto dependency : target.dependencies)
         visit(dependency);

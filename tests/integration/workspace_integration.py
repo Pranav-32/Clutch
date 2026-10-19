@@ -30,7 +30,7 @@ class WorkspaceTests(unittest.TestCase):
         self.manifest()
         self.write('base/clutch.toml', '[project]\nname="base"\nversion="1.0.0"\n'
                    'language="cpp"\nstd=17\n[build]\ndefines=["BASE_PRIVATE"]\n'
-                   '[[target]]\nname="value"\ntype="static"\nsources=["value.cpp"]\n')
+                   '[[target]]\nname="value"\ntype="static"\nsources=["*.{cpp,hpp}"]\n')
         self.write('base/value.cpp', '#include <string_view>\n#ifndef BASE_PRIVATE\n#error scope lost\n#endif\n'
                    'int value() { return std::string_view("abc").size() * 7; }\n')
         self.write('bridge/clutch.toml', '[project]\nname="bridge"\nversion="2.0.0"\n'

@@ -1,0 +1,28 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Combine live local directories with an installed-package discovery prefix.
+[project]
+name = "local-packages"
+version = "1.0.0"
+language = "cpp"
+std = 17
+entry = "main.cpp"
+
+[build]
+generator = "ninja"
+include_dirs = ["local"]
+
+[dependencies]
+headers = { path = "local/headers", build_system = "header-only" }
+number = { path = "local/number", build_system = "clutch", target = "number" }
+sdk = { system = "ClutchDemoSdk", root = "installed-sdk", target = "ClutchDemoSdk::Headers" }
+
+[[test]]
+name = "package-test"
+sources = ["checks/*.cpp"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

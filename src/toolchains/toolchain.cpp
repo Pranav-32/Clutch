@@ -12,6 +12,7 @@
  */
 
 #include "toolchain.hpp"
+#include "platform/capture.hpp"
 
 #include "backends/backend.hpp"
 #include "core/options.hpp"
@@ -76,10 +77,12 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
     sources.insert(sources.end(), test.sources.begin(), test.sources.end());
 
   const bool cpp =
+      !project.foreign_requests.empty() ||
       std::any_of(sources.begin(), sources.end(), [](const fs::path &p) {
         return p.extension() != ".c";
       });
   const bool c =
+      !project.foreign_requests.empty() ||
       std::any_of(sources.begin(), sources.end(), [](const fs::path &p) {
         return p.extension() == ".c";
       });
@@ -130,6 +133,41 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
     throw std::runtime_error("MSVC-style drivers require C++ std 14 or newer");
 
   return tools;
+}
+
+void resolve_pch_drivers(Toolchain &tools, const Project &project) {
+  // External interfaces can add prefix headers after compiler selection.
+  // Inspect the completed project so those requests receive the same probes.
+  bool pch_c = !project.pch_c.empty(), pch_cpp = !project.pch_cpp.empty();
+  for (const auto *const group : {&project.targets, &project.tests})
+    for (const auto &target : *group) {
+      pch_c = pch_c || !target.pch_c.empty();
+      pch_cpp = pch_cpp || !target.pch_cpp.empty();
+    }
+
+  // Probe only when needed; executable aliases do not reliably identify
+  // GCC/Clang.
+  const auto pch_driver = [&](const std::string &compiler) {
+    if (tools.msvc)
+      return std::string("msvc");
+
+    const auto output = capture({compiler, "--version"}, project.root);
+    if (output.status == 0 && output.text.find("clang") != std::string::npos)
+      return std::string("clang");
+
+    if (output.status == 0 &&
+        (output.text.find("Free Software Foundation") != std::string::npos ||
+         output.text.find("GCC") != std::string::npos))
+      return std::string("gcc");
+
+    throw std::runtime_error(
+        "PCH requires a recognized GCC, Clang or MSVC compiler");
+  };
+  if (!tools.cc.empty() && pch_c)
+    tools.c_pch = pch_driver(tools.cc);
+
+  if (!tools.cxx.empty() && pch_cpp)
+    tools.cpp_pch = pch_driver(tools.cxx);
 }
 
 /// Retain resolved executables for the next configuration of this profile.

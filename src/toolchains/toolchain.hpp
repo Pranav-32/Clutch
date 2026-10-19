@@ -24,10 +24,14 @@ struct Toolchain {
   std::string cc, cxx;
   bool msvc =
       false;  ///< Selects Microsoft-style flags, including clang-cl drivers.
+  std::string c_pch{},
+      cpp_pch{};  ///< Compiler identity for opt-in PCH generation.
 };
 
 /// Resolve C/C++ compiler drivers and verify compatible driver conventions.
 Toolchain resolve_toolchain(const Options &options, const Project &project);
+/// Identify PCH capabilities after all native and external headers are known.
+void resolve_pch_drivers(Toolchain &tools, const Project &project);
 /// Persist compiler selections independently of build-backend selection.
 void save_toolchain(const Toolchain &tools, const Project &project);
 }  // namespace clutch

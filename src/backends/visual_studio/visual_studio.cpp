@@ -12,17 +12,20 @@
  */
 
 #include "visual_studio.hpp"
+#include "core/pch/pch.hpp"
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
+#include "core/source_files.hpp"
 #include "core/targets/runtime.hpp"
 #include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iomanip>
@@ -260,6 +263,22 @@ void write_unit(std::ostream &out, const Unit &unit) {
   // std.
   for (size_t i = 1; i < unit.arguments.size(); ++i) {
     const auto &arg = unit.arguments[i];
+    if (arg.rfind("/Yc", 0) == 0 || arg.rfind("/Yu", 0) == 0) {
+      settings["PrecompiledHeader"] = arg[2] == 'c' ? "Create" : "Use";
+      settings["PrecompiledHeaderFile"] = arg.substr(3);
+      continue;
+    }
+
+    if (arg.rfind("/Fp", 0) == 0) {
+      settings["PrecompiledHeaderOutputFile"] = arg.substr(3);
+      continue;
+    }
+
+    if (arg.rfind("/FI", 0) == 0) {
+      settings["ForcedIncludeFiles"] = arg.substr(3);
+      continue;
+    }
+
     if (arg == unit.source.u8string() || arg == "/nologo" || arg == "/c" ||
         arg == "/showIncludes" || arg.rfind("/Fo", 0) == 0)
       continue;
@@ -403,6 +422,11 @@ void write_project(const Graph &graph,
            target.source_root.u8string());
   property(project, "LinkIncremental", "false");
   property(project, "TrackFileAccess", "true");
+  // MultiToolTask schedules files (including PCH prerequisites) across
+  // projects; a shared process budget avoids multiplying /m by independent /MP
+  // pools.
+  property(project, "UseMultiToolTask", "true");
+  property(project, "EnforceProcessCountAcrossBuilds", "true");
   // Pin the configured compiler/linker instead of inheriting an unrelated
   // toolset.
   property(project, "CLToolPath", compiler.parent_path().u8string());
@@ -458,6 +482,10 @@ void write_project(const Graph &graph,
       continue;
     }
 
+    // LinkIncremental already represents this graph policy as native metadata.
+    if (arg == "/INCREMENTAL:NO")
+      continue;
+
     if (linker_options && arg.rfind("/IMPLIB:", 0) != 0)
       link_options.push_back(arg);
   }
@@ -473,10 +501,29 @@ void write_project(const Graph &graph,
              "      ");
   }
   project << "    </" << task << ">\n  </ItemDefinitionGroup>\n  <ItemGroup>\n";
-  for (const auto &unit : target.units)
-    write_unit(project, unit);
+  for (const auto &prefix : target.precompiled_headers) {
+    auto creator = prefix.creator;
+    creator.object = prefix.companion_object;
+    write_unit(project, creator);
+  }
+
+  for (const auto &unit : target.units) {
+    auto native = unit;
+    native.arguments = pch::build_arguments(target, unit);
+    write_unit(project, native);
+  }
 
   project << "  </ItemGroup>\n  <ItemGroup>\n";
+  for (const auto &file : target.additional_files) {
+    const auto extension = file.extension().u8string();
+    const auto *const item = std::find(header_extensions.begin(),
+                                       header_extensions.end(),
+                                       extension) != header_extensions.end()
+                                 ? "ClInclude"
+                                 : "None";
+    project << "    <" << item << " Include=\"" << literal(file.u8string())
+            << "\" />\n";
+  }
   // Native project references schedule providers. Explicit link closure above
   // prevents MSBuild from absorbing private archive dependencies itself.
   for (const auto dependency : target.dependencies) {
@@ -613,6 +660,10 @@ visual_studio_build_command(const Graph &graph,
       "/p:Platform=" + platform(graph)};
   command.push_back(options.jobs > 0 ? "/m:" + std::to_string(options.jobs)
                                      : "/m");
+  if (options.jobs > 0) {
+    command.push_back("/p:MultiProcMaxCount=" + std::to_string(options.jobs));
+    command.push_back("/p:CL_MPCount=" + std::to_string(options.jobs));
+  }
   return command;
 }
 }  // namespace clutch

@@ -10,6 +10,7 @@
  */
 #include "manifest.hpp"
 
+#include "core/pch/headers.hpp"
 #include "core/project.hpp"
 #include "core/source_files.hpp"
 
@@ -79,7 +80,8 @@ target(const toml::table &table, const Project &project, const bool test) {
                                       "public_defines",
                                       "links",
                                       "public_links",
-                                      "default"};
+                                      "default",
+                                      "pch"};
   for (const auto &[key, value] : table) {
     (void)value;
     if (!allowed.count(std::string(key.str())))
@@ -109,16 +111,10 @@ target(const toml::table &table, const Project &project, const bool test) {
     result.build_by_default = value->as_boolean()->get();
   }
 
-  for (const auto &source : strings(table, "sources")) {
-    const auto path = fs::canonical(root / fs::u8path(source));
-    if (!fs::is_regular_file(path) ||
-        std::find(source_extensions.begin(),
-                  source_extensions.end(),
-                  path.extension().u8string()) == source_extensions.end())
-      throw std::runtime_error("unsupported target source: " + path.u8string());
-
-    result.sources.push_back(path);
-  }
+  auto selected =
+      expand_sources(root, strings(table, "sources"), project.build);
+  result.sources = std::move(selected.sources);
+  result.additional_files = std::move(selected.additional_files);
   // The project's executable may receive application defaults after automatic
   // discovery has excluded files owned by other explicit targets.
   if (result.sources.empty() &&
@@ -137,6 +133,9 @@ target(const toml::table &table, const Project &project, const bool test) {
   result.public_defines = strings(table, "public_defines");
   result.links = strings(table, "links");
   result.public_links = strings(table, "public_links");
+  const auto headers = pch::read(table.get("pch"), "target.pch");
+  result.pch_c = pch::paths(headers.c, root);
+  result.pch_cpp = pch::paths(headers.cpp, root);
   return result;
 }
 }  // namespace
@@ -198,6 +197,13 @@ void complete_application_target(const toml::table &document,
     found->sources.insert(found->sources.end(),
                           project.sources.begin(),
                           project.sources.end());
+    found->additional_files.insert(found->additional_files.end(),
+                                   project.additional_files.begin(),
+                                   project.additional_files.end());
+    std::sort(found->additional_files.begin(), found->additional_files.end());
+    found->additional_files.erase(std::unique(found->additional_files.begin(),
+                                              found->additional_files.end()),
+                                  found->additional_files.end());
     found->links.insert(found->links.end(), links.begin(), links.end());
     std::sort(found->sources.begin(), found->sources.end());
     found->sources.erase(
@@ -223,6 +229,7 @@ void complete_application_target(const toml::table &document,
   TargetSpec application;
   application.name = project.name;
   application.sources = project.sources;
+  application.additional_files = project.additional_files;
   application.links = links;
   project.targets.insert(project.targets.begin(), std::move(application));
 }

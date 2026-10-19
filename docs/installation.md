@@ -8,7 +8,8 @@ compiler. The header-only CLI11, toml++ and JSON dependencies are included in
 [dependency notes](../third_party/README.md) for versions and licenses.
 
 Projects built with Clutch also need a C/C++ compiler and the native build tool
-selected by their generator. Ninja is the default; see the
+selected by their generator. Install Git 2.29+ to configure
+[Git imports](dependencies.md). Ninja is the default; see the
 [generator requirements](usage.md#generators) for alternatives.
 
 Installation includes Clutch's license and the vendored-library notices under
@@ -79,6 +80,24 @@ Self-hosting remains deferred: build Clutch itself with CMake. Runnable Clutch
 projects live under [examples/](../examples/README.md), each with its own manifest.
 The normal CMake build does not publish a compilation database to the
 repository root.
+
+## Optional dependency adapters
+
+Ordinary local/header-only imports need no package manager. Git 2.29+ is required
+only for Git and source-catalog imports. The CMake adapter and discovery of
+installed CMake package targets need CMake 3.21+; Ninja is preferred for foreign
+libraries and their compilation databases. The explicit Makefile adapter needs
+GNU Make. Explicit installed header/library declarations need neither CMake nor
+Git. SDKs such as CUDA or the Windows SDK must already be available to the selected
+compiler. A supported named vcpkg source-catalog import uses Git metadata and
+does not install or invoke vcpkg. See [dependencies](dependencies.md).
+
+Try the [package examples](../examples/dependencies/README.md) after installation.
+The default example uses local directories and a bundled example installation
+prefix; GitHub examples need network access for their first configuration.
+The DirectX and CUDA examples consume SDKs already installed on the machine.
+The optional local-Git/catalog preparation helper uses Python; ordinary Clutch
+configuration, dependency resolution, compilation and testing remain native.
 
 ## Verify or contribute
 

@@ -34,6 +34,20 @@ void append_unique(std::vector<T> &destination, const std::vector<T> &source) {
         destination.end())
       destination.push_back(value);
 }
+
+/// Share each evaluated foreign interface once; argv entries inside a link
+/// interface keep their original order and multiplicity (including link
+/// groups).
+void append_usage(std::vector<DependencyUsage> &destination,
+                  const std::vector<DependencyUsage> &source) {
+  for (const auto &usage : source)
+    if (std::none_of(destination.begin(),
+                     destination.end(),
+                     [&](const DependencyUsage &entry) {
+                       return entry.id == usage.id;
+                     }))
+      destination.push_back(usage);
+}
 }  // namespace
 
 std::vector<ResolvedTarget> resolve_targets(const Project &project) {
@@ -42,6 +56,7 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
     TargetSpec application;
     application.name = project.name;
     application.sources = project.sources;
+    application.additional_files = project.additional_files;
     specs.push_back(std::move(application));
   }
 
@@ -99,6 +114,7 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
     auto &spec = resolved.spec;
     const auto local_defines = spec.defines;
     const auto public_defines = spec.public_defines;
+    resolved.public_usage = spec.dependency_usage;
     resolved.needs_cpp = std::any_of(spec.sources.begin(),
                                      spec.sources.end(),
                                      [](const fs::path &source) {
@@ -107,6 +123,7 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
     // Public interfaces include only public links, while private compile use
     // receives public requirements of every direct dependency.
     for (const auto dependency : exported[index]) {
+      append_usage(resolved.public_usage, result[dependency].public_usage);
       append_unique(spec.public_includes,
                     result[dependency].spec.public_includes);
       append_unique(spec.public_defines,
@@ -119,6 +136,7 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
     append_unique(spec.includes, spec.public_includes);
     append_unique(spec.defines, spec.public_defines);
     for (const auto dependency : resolved.dependencies) {
+      append_usage(spec.dependency_usage, result[dependency].public_usage);
       append_unique(spec.includes, result[dependency].spec.public_includes);
       append_unique(spec.defines, result[dependency].spec.public_defines);
       resolved.needs_cpp = resolved.needs_cpp || result[dependency].needs_cpp;
@@ -126,6 +144,11 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
     // Local settings are deliberate overrides; avoid competing -D or /D flags
     // when a member or target specializes a shared compile default.
     spec.defines = merge_defines(spec.defines, local_defines);
+    for (const auto &usage : spec.dependency_usage) {
+      append_unique(spec.includes, usage.includes);
+      spec.defines = merge_defines(spec.defines, usage.defines);
+      resolved.needs_cpp = resolved.needs_cpp || usage.needs_cpp;
+    }
 
     // Traverse private dependencies of archives: archives do not absorb their
     // dependencies. Shared libraries expose only their public link interface.

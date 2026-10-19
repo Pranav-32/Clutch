@@ -22,13 +22,21 @@ DIAMOND_BRANCH_COUNT = 2
 SHARED_API_VALUE = BASE_API_VALUE * DIAMOND_BRANCH_COUNT
 # Keep the sentinel shared by fixture creation and archive freshness assertions.
 REMOVED_SYMBOL = 'CLUTCH_REMOVED_SYMBOL_UNIQUE'
+# Advance a fixture prerequisite beyond whole-second backend timestamp precision.
+NANOSECONDS_PER_SECOND = 1_000_000_000
 
 
 class TargetTests(unittest.TestCase):
     """Exercise selection, link interfaces, runtime artifacts and archive freshness."""
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ')
+        # MSBuild excludes the system TEMP tree from header read tracking.
+        # Keep Windows fixtures in the ignored workspace area, like SDK tests.
+        work = None
+        if os.name == 'nt':
+            work = Path(__file__).resolve().parents[1] / 'work'
+            work.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix='clutch targets ', dir=work)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
         self.create_fixture()
@@ -511,6 +519,91 @@ links=["base"]
         result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
                           '--build-tool', OPTIONS.ninja, success=False)
         self.assertIn('conflict', result.stderr)
+
+    def test_recursive_source_patterns(self):
+        """Recursive suffix sets deduplicate units and expose uncompiled headers."""
+        (self.root / 'pattern lib/nested').mkdir(parents=True)
+        (self.root / 'headers').mkdir()
+        self.write('pattern lib/value.cpp', '#include "../headers/version.h"\n'
+                   'int value() { return SELECTED_VALUE; }\n')
+        self.write('pattern lib/value.h', '#error headers must not be compiled\n')
+        self.write('pattern lib/nested/value.c', 'int nested(void) { return 0; }\n')
+        self.write('pattern lib/nested/detail.hxx', '#pragma once\n')
+        self.write('pattern lib/nested/ignored.txt', 'not C++\n')
+        target = ('[[target]]\nname="library"\ntype="static"\n'
+                  'sources=["pattern lib/*.{cpp,c,h,hxx}", "headers/*.h", "pattern lib/value.cpp"]\n'
+                  '[[test]]\nname="pattern_test"\nsources=["checks/*.cpp"]\n'
+                  'links=["library"]\n')
+        self.write('checks/check.cpp', 'extern "C" int nested(void);\nint value();\n'
+                   'int main() { return value() + nested(); }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.write('headers/version.h', '#define SELECTED_VALUE 0\n')
+                self.manifest(generator, target)
+                self.configure(generator)
+                library = self.configured_targets['library']
+                compiled = [Path(unit['path']) for unit in library['sources']]
+                self.assertEqual(len(compiled), len(set(compiled)))
+                self.assertEqual(len(compiled), 2)
+                self.assertIn(self.root / 'pattern lib/nested/value.c', compiled)
+                self.assertEqual(set(map(Path, library['additionalFiles'])),
+                                 {self.root / 'pattern lib/value.h', self.root / 'pattern lib/nested/detail.hxx',
+                                  self.root / 'headers/version.h'})
+                self.cli('build')
+                self.cli('test')
+                self.write('headers/version.h', '#define SELECTED_VALUE 1\n')
+                stamp = max(path.stat().st_mtime_ns for name in ('library', 'pattern_test')
+                            for path in self.artifacts(name)) + NANOSECONDS_PER_SECOND
+                os.utime(self.root / 'headers/version.h', ns=(stamp, stamp))
+                result = self.cli('test', success=False)
+                self.assertIn('1 failed', result.stdout + result.stderr)
+                self.cli('clean')
+
+    def test_application_source_patterns_skip_generated_trees(self):
+        """Broad scans keep generated and version-control files out of builds."""
+        (self.root / 'sources/nested').mkdir(parents=True)
+        self.write('sources/main.cpp', 'int helper(); int main() { return helper(); }\n')
+        self.write('sources/nested/helper.cpp', 'int helper() { return 0; }\n')
+        self.write('sources/nested/value.hpp', '#pragma once\n')
+        self.write('sources/readme.txt', 'visible IDE file\n')
+        for directory, marker in (('generated', 'CMakeCache.txt'),
+                                  ('previous', '.clutch-build-owner'),
+                                  ('.clutch', None), ('.git', None)):
+            (self.root / 'sources' / directory).mkdir()
+            self.write(f'sources/{directory}/broken.cpp', '#error generated input\n')
+            if marker:
+                self.write(f'sources/{directory}/{marker}', '')
+        self.manifest(targets='', build_dir='sources/output')
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text(encoding='utf-8').replace(
+            '[build]', '[build]\nsources=["sources/*", "sources/**/*.cpp"]'))
+        self.configure()
+        app = self.configured_targets['target_probe']
+        self.assertEqual(len(app['sources']), 2)
+        self.assertEqual(set(map(Path, app['additionalFiles'])),
+                         {self.root / 'sources/nested/value.hpp', self.root / 'sources/readme.txt'})
+        self.cli('run')
+        location = json.loads(self.cli('locate').stdout)
+        database = json.loads(Path(location['paths']['compilationDatabase']).read_text(encoding='utf-8'))
+        self.assertEqual(len(database), 2)
+        self.write('sources/nested/new.cpp', 'int added() { return 1; }\n')
+        self.configure()
+        self.assertEqual(len(self.configured_targets['target_probe']['sources']), 3)
+        self.cli('build')
+
+    def test_invalid_source_patterns(self):
+        """Empty and malformed selections report the manifest pattern itself."""
+        for pattern, diagnostic in (('base/*.missing', 'matched no files'),
+                                    ('base/*.{cpp,}', 'empty source-pattern'),
+                                    ('base/*.{cpp,c', 'invalid source-pattern'),
+                                    ('base/*.{c,{cpp,h}}', 'invalid source-pattern'),
+                                    ('base/*/nested.cpp', 'wildcards belong'),
+                                    ('', 'must not be empty')):
+            with self.subTest(pattern=pattern):
+                self.manifest(targets='[[target]]\nname="library"\ntype="static"\n'
+                                     f'sources=[{json.dumps(pattern)}]\n')
+                result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                                  '--build-tool', OPTIONS.ninja, success=False)
+                self.assertIn(diagnostic, result.stderr)
 
     def test_entry_discovery_excludes_declared_target_sources(self):
         """Adding a library does not compile its discovered sources into the app."""

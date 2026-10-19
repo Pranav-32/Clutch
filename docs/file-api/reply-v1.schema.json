@@ -336,6 +336,82 @@
                   }
                 }
               }
+            },
+            "packages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "git",
+                  "revision",
+                  "version",
+                  "source",
+                  "dependencies"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "git": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "provider": {
+                    "enum": [
+                      "git",
+                      "path",
+                      "system"
+                    ]
+                  },
+                  "locator": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "foreignBuilds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "directory",
+                  "artifacts",
+                  "compilationDatabase"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "directory": {
+                    "type": "string"
+                  },
+                  "artifacts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "compilationDatabase": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         }
@@ -489,6 +565,64 @@
             },
             "sourceDirectory": {
               "type": "string"
+            },
+            "precompiledHeaders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "language",
+                  "headers",
+                  "textHeader",
+                  "managedByGenerator"
+                ],
+                "properties": {
+                  "language": {
+                    "enum": [
+                      "C",
+                      "CXX"
+                    ]
+                  },
+                  "headers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "textHeader": {
+                    "type": "string"
+                  },
+                  "managedByGenerator": {
+                    "type": "boolean"
+                  },
+                  "artifact": {
+                    "type": "string"
+                  },
+                  "prefixHeader": {
+                    "type": "string"
+                  },
+                  "create": {
+                    "$ref": "#/$defs/action"
+                  }
+                }
+              }
+            },
+            "additionalFiles": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Canonical noncompiled project files selected by source declarations."
+            },
+            "foreignDependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "linkInputs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "allOf": [

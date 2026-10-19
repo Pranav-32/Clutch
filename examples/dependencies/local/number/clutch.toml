@@ -1,0 +1,14 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# This same library can be consumed live with path= or pinned through Git.
+[project]
+name = "demo-number"
+version = "1.0.0"
+language = "cpp"
+std = 17
+
+[[target]]
+name = "number"
+type = "static"
+sources = ["src/*.{cpp,hpp}"]
+public_include_dirs = ["src"]

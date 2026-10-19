@@ -27,11 +27,15 @@ void append_project(Project &workspace, Project member) {
                              member.name);
 
   workspace.projects.push_back({member.name, member.version, member.root});
+  workspace.dependency_requests.insert(workspace.dependency_requests.end(),
+                                       member.dependency_requests.begin(),
+                                       member.dependency_requests.end());
   const auto prefix = member.name + "::";
   if (member.targets.empty()) {
     TargetSpec application;
     application.name = member.name;
     application.sources = member.sources;
+    application.additional_files = member.additional_files;
     member.targets.push_back(std::move(application));
   }
 
@@ -46,10 +50,18 @@ void append_project(Project &workspace, Project member) {
       spec.name = prefix + spec.local_name;
       spec.includes = merge_includes(member.includes, spec.includes);
       spec.defines = merge_defines(member.defines, spec.defines);
+      spec.pch_c = merge_includes(member.pch_c, spec.pch_c);
+      spec.pch_cpp = merge_includes(member.pch_cpp, spec.pch_cpp);
 
       for (auto *const links : {&spec.links, &spec.public_links})
         for (auto &link : *links)
-          if (link.find("::") == std::string::npos)
+          if (link.find("::") == std::string::npos ||
+              std::any_of(member.dependency_requests.begin(),
+                          member.dependency_requests.end(),
+                          [&](const dependencies::Request &request) {
+                            return link.rfind(request.requirement.alias + "::",
+                                              0) == 0;
+                          }))
             link.insert(0, prefix);
 
       workspace.sources.insert(workspace.sources.end(),
@@ -169,12 +181,15 @@ Project load_project(const Options &options) {
   workspace.generator = settings.generator;
   workspace.optimize = settings.optimize;
   workspace.warnings = settings.warnings;
+  workspace.runtime = settings.runtime;
   workspace.is_workspace = true;
   workspace.language = "mixed";
   // Root compile settings are shared defaults; paths were resolved against the
   // root manifest before members are loaded in their independent source roots.
   workspace.includes = settings.includes;
   workspace.defines = settings.defines;
+  workspace.pch_c = settings.pch_c;
+  workspace.pch_cpp = settings.pch_cpp;
 
   if (!virtual_root) {
     // The real root's [build] settings are already workspace defaults. Applying
@@ -182,6 +197,8 @@ Project load_project(const Options &options) {
     // library requirements and differ from standalone target resolution.
     settings.includes.clear();
     settings.defines.clear();
+    settings.pch_c.clear();
+    settings.pch_cpp.clear();
     append_project(workspace, std::move(settings));
   }
 
@@ -193,14 +210,18 @@ Project load_project(const Options &options) {
       throw std::runtime_error("nested workspaces are not supported: " +
                                input.u8string());
 
-    if (child.contains("profile") || child["build"]["generator"])
-      throw std::runtime_error("workspace root owns profiles and generator; "
-                               "remove member overrides: " +
-                               input.u8string());
+    if (child.contains("profile") || child["build"]["generator"] ||
+        child["build"]["runtime"])
+      throw std::runtime_error(
+          "workspace root owns profiles, generator and runtime; "
+          "remove member overrides: " +
+          input.u8string());
 
     auto member_options = options;
     member_options.root = path;
-    append_project(workspace, load_project_manifest(member_options, child));
+    append_project(
+        workspace,
+        load_project_manifest(member_options, child, false, workspace.build));
   }
 
   workspace.inputs = std::move(inputs);

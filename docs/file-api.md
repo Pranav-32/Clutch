@@ -3,6 +3,12 @@
 Audience: IDE integrators and contributors changing code-model output. This protocol
 reference is not required for general contributions.
 
+For an initial client, use the [runnable example](../examples/file-api/README.md),
+then follow [discovery and requests](#discover-and-request) and
+[snapshot reading](#read-an-immutable-snapshot). For an output change, check the
+[object schemas](#object-schemas), [compatibility rules](#compatibility) and
+`clutch.file-api` tests in [testing](testing.md#select-checks).
+
 Clutch provides a versioned JSON query/reply interface for IDEs and developer
 tools. Clients request build metadata; `clutch .` exports it from the same graph
 used by native generators and `compile_commands.json`. Configuration does not
@@ -205,6 +211,8 @@ Each target describes:
 - `directory`: compiler/linker working directory.
 - `sources`: source `path`, object path (`object`), `compileGroupIndex`, and the
   complete compiler `arguments` array, including its executable.
+- `additionalFiles` (optional): canonical header and other noncompiled paths
+  selected by source declarations. These files have no object or compiler action.
 - `compileGroups`: `language` (`C`/`CXX`), `standard`, `includes` with `path` and
   `isSystem`, and raw `defines` without `-D` or `/D` prefixes.
 - `link`: resolved linker/archiver arguments and working directory. Use the build
@@ -295,3 +303,31 @@ Readers must tolerate unknown fields. Compatible additive changes increase the
 object minor; incompatible semantics require a new major. Readers may request
 supported major alternatives and a minimum minor. The public JSON interface
 does not expose or stabilize Clutch's private `configuration.toml` cache.
+
+## Package and precompiled-header metadata
+
+The codemodel's optional `packages` array describes resolved imports with
+`id`, `git`, `revision`, `version`, `source` and direct package `dependencies`.
+These logical nodes include header-only imports; target dependencies continue to
+identify concrete native libraries. Git URLs may identify local repositories and
+must not be treated as executable commands.
+`provider` distinguishes `git`, live `path` and installed `system` sources;
+`locator` carries the non-Git identity. Git-only fields are empty for non-Git
+providers, and an installed package need not have a source directory. The lock
+records its discovered version, not the contents of the machine's SDK files.
+
+The optional `foreignBuilds` array describes upstream build boundaries with an
+`id`, absolute `directory`, library `artifacts`, and `compilationDatabase` path
+(empty for adapters without a database). Targets refer to these IDs in
+`foreignDependencies` and report imported artifact paths in `linkInputs`.
+Use the codemodel's Clutch build action to preserve upstream preparation and
+runtime staging. These records do not replace CMake's internal target graph.
+
+Target objects can contain `precompiledHeaders`, each with `language`, ordered
+`headers`, a `textHeader` for immediate IDE parsing, and `managedByGenerator`.
+For explicit creator actions, `artifact` identifies the binary PCH and `create`
+contains its argument array/directory. Xcode owns its binary prefix artifacts and
+instead reports `prefixHeader`. Clients should consume ordinary source argument
+arrays and the compilation database for editing: those commands deliberately use
+textual prefixes so binary PCH creation is unnecessary for code completion.
+The native build action schedules PCH creation and binary consumption.
