@@ -29,18 +29,18 @@
 namespace clutch {
 namespace {
 // Increment this version when persisted graph fields or semantics change.
-// Version 4 stores workspace projects, owning roots/standards and all input
-// fingerprints in addition to target kinds, requirements and dependency edges.
-constexpr auto configuration_schema_version = 4;
+// Version 5 stores UTF-8 paths and relocatable ELF shared-library commands.
+// Older host-encoded paths and link arguments require explicit reconfiguration.
+constexpr auto configuration_schema_version = 5;
 
-/// Serialize paths as host strings and preserve ordinary string argument
+/// Serialize paths as UTF-8 strings and preserve ordinary string argument
 /// values.
 template <class T>
 toml::array values(const std::vector<T> &items) {
   toml::array result;
   for (const auto &item : items) {
     if constexpr (std::is_same_v<T, fs::path>)
-      result.push_back(item.string());
+      result.push_back(item.u8string());
     else
       result.push_back(item);
   }
@@ -102,7 +102,7 @@ std::vector<fs::path> read_paths(const toml::table &table,
                                  const char *const key) {
   std::vector<fs::path> result;
   for (const auto &value : read_strings(table, key))
-    result.emplace_back(value);
+    result.push_back(fs::u8path(value));
 
   return result;
 }
@@ -116,9 +116,9 @@ void save_configuration(const Graph &graph, const Options &options) {
       {"schema", configuration_schema_version},
       {"profile", options.release ? "release" : "debug"},
       {"manifest", input_signature(project.root / layout::manifest)},
-      {"root", project.root.string()},
-      {"build", project.build.string()},
-      {"output", project.output.string()},
+      {"root", project.root.u8string()},
+      {"build", project.build.u8string()},
+      {"output", project.output.u8string()},
       {"name", project.name},
       {"language", project.language},
       {"c_std", project.c_standard},
@@ -138,12 +138,12 @@ void save_configuration(const Graph &graph, const Options &options) {
   toml::array inputs, projects;
   for (const auto &[path, signature] : project.inputs)
     inputs.push_back(
-        toml::table{{"path", path.string()}, {"signature", signature}});
+        toml::table{{"path", path.u8string()}, {"signature", signature}});
 
   for (const auto &[name, version, root] : project.projects)
     projects.push_back(toml::table{{"name", name},
                                    {"version", version},
-                                   {"root", root.string()}});
+                                   {"root", root.u8string()}});
 
   data.insert("inputs", std::move(inputs));
   data.insert("projects", std::move(projects));
@@ -153,8 +153,8 @@ void save_configuration(const Graph &graph, const Options &options) {
   for (const auto &target : graph.targets) {
     toml::array units;
     for (const auto &[source, object, arguments] : target.units)
-      units.push_back(toml::table{{"source", source.string()},
-                                  {"object", object.string()},
+      units.push_back(toml::table{{"source", source.u8string()},
+                                  {"object", object.u8string()},
                                   {"arguments", values(arguments)}});
 
     std::vector<std::string> dependencies, link_dependencies;
@@ -166,18 +166,18 @@ void save_configuration(const Graph &graph, const Options &options) {
         toml::table{{"name", target.name},
                     {"project", target.project_name},
                     {"local_name", target.local_name},
-                    {"source_root", target.source_root.string()},
+                    {"source_root", target.source_root.u8string()},
                     {"c_std", target.c_standard},
                     {"cpp_std", target.cxx_standard},
                     {"type", target_type_name(target.type)},
                     {"test", target.is_test},
                     {"default", target.build_by_default},
-                    {"import_library", target.import_library.string()},
+                    {"import_library", target.import_library.u8string()},
                     {"dependencies", values(dependencies)},
                     {"link_dependencies", values(link_dependencies)},
                     {"includes", values(target.includes)},
                     {"defines", values(target.defines)},
-                    {"output", target.output.string()},
+                    {"output", target.output.u8string()},
                     {"link", values(target.link)},
                     {"units", std::move(units)}});
   }
@@ -196,13 +196,13 @@ Graph load_configuration(const Options &options) {
   validate_build_directory(root, directory, true);
 
   const auto path = directory / layout::configuration;
-  const auto configure_hint = "run clutch \"" + root.string() + "\"" +
+  const auto configure_hint = "run clutch \"" + root.u8string() + "\"" +
                               (options.release ? " --release" : "");
   if (!fs::is_regular_file(path))
     throw std::runtime_error("project is not configured; " + configure_hint);
 
   // Reject stale formats/manifests before accepting any cached command vectors.
-  const auto data = toml::parse_file(path.string());
+  const auto data = toml::parse_file(path.u8string());
   if (data["schema"].value_or(0) != configuration_schema_version)
     throw std::runtime_error("saved configuration version is unsupported; " +
                              configure_hint);
@@ -219,8 +219,8 @@ Graph load_configuration(const Options &options) {
        read_nonempty_array(data.get("inputs"),
                            "saved configuration has no inputs")) {
     const auto &table = read_table(input, "invalid saved configuration input");
-    project.inputs.push_back(
-        {read_string(table, "path"), read_string(table, "signature")});
+    project.inputs.push_back({fs::u8path(read_string(table, "path")),
+                              read_string(table, "signature")});
   }
   validate_inputs(project.inputs);
 
@@ -231,17 +231,17 @@ Graph load_configuration(const Options &options) {
     const auto &table = read_table(record, "invalid saved project");
     project.projects.push_back({read_string(table, "name"),
                                 read_string(table, "version"),
-                                read_string(table, "root")});
+                                fs::u8path(read_string(table, "root"))});
   }
-  project.root = read_string(data, "root");
-  project.build = read_string(data, "build");
+  project.root = fs::u8path(read_string(data, "root"));
+  project.build = fs::u8path(read_string(data, "build"));
   if (project.root != root || project.build != directory ||
       read_string(data, "profile") != (options.release ? "release" : "debug"))
     throw std::runtime_error(
         "saved configuration belongs to another location/profile; " +
         configure_hint);
 
-  project.output = read_string(data, "output");
+  project.output = fs::u8path(read_string(data, "output"));
   project.name = read_string(data, "name");
   project.language = read_string(data, "language");
   project.c_standard = read_string(data, "c_std");
@@ -270,16 +270,16 @@ Graph load_configuration(const Options &options) {
     target.name = read_string(table, "name");
     target.project_name = read_string(table, "project");
     target.local_name = read_string(table, "local_name");
-    target.source_root = read_string(table, "source_root");
+    target.source_root = fs::u8path(read_string(table, "source_root"));
     target.c_standard = read_string(table, "c_std");
     target.cxx_standard = read_string(table, "cpp_std");
-    target.output = read_string(table, "output");
+    target.output = fs::u8path(read_string(table, "output"));
     target.type = parse_target_type(read_string(table, "type"));
     if (!table["test"].is_boolean() || !table["default"].is_boolean())
       throw std::runtime_error("invalid saved target selection flags");
     target.is_test = table["test"].value_or(false);
     target.build_by_default = table["default"].value_or(false);
-    target.import_library = read_string(table, "import_library");
+    target.import_library = fs::u8path(read_string(table, "import_library"));
     target.includes = read_paths(table, "includes");
     target.defines = read_strings(table, "defines");
     target.link = read_strings(table, "link");
@@ -291,8 +291,8 @@ Graph load_configuration(const Options &options) {
     for (const auto &unit : units) {
       const auto &record = read_table(unit, "invalid saved compilation unit");
 
-      Unit resolved{read_string(record, "source"),
-                    read_string(record, "object"),
+      Unit resolved{fs::u8path(read_string(record, "source")),
+                    fs::u8path(read_string(record, "object")),
                     read_strings(record, "arguments")};
       if (resolved.arguments.empty())
         throw std::runtime_error("saved compilation command is empty");

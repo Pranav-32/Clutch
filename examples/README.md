@@ -3,15 +3,15 @@
 Build or install Clutch first, then make its executable available on `PATH`.
 The application examples use Ninja and installed C/C++ compilers by default.
 
-| Directory | Demonstrates |
-| --- | --- |
-| [single-file](single-file/clutch.toml) | One C++ entry source |
-| [multi-file](multi-file/clutch.toml) | Multiple sources, arguments and executable tests |
-| [c-project](c-project/clutch.toml) | C11 application |
-| [mixed](mixed/clutch.toml) | C and C++ sources with separate standards |
-| [targets](targets/README.md) | Local libraries, public requirements and linked tests |
-| [workspace](workspace/README.md) | Member manifests, qualified links and a portable lock |
-| [file-api](file-api/README.md) | Developer-tool client for the native file API |
+| Directory                              | Demonstrates                                          |
+|----------------------------------------|-------------------------------------------------------|
+| [single-file](single-file/clutch.toml) | One C++ entry source                                  |
+| [multi-file](multi-file/clutch.toml)   | Multiple sources, arguments and executable tests      |
+| [c-project](c-project/clutch.toml)     | C11 application                                       |
+| [mixed](mixed/clutch.toml)             | C and C++ sources with separate standards             |
+| [targets](targets/README.md)           | Local libraries, public requirements and linked tests |
+| [workspace](workspace/README.md)       | Member manifests, qualified links and a portable lock |
+| [file-api](file-api/README.md)         | Developer-tool client for the native file API         |
 
 From the repository root:
 

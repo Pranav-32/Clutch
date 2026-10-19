@@ -19,21 +19,20 @@
 #include <string>
 #include <vector>
 
-namespace clutch
-{
-    struct Graph;
-    struct Options;
+namespace clutch {
+struct Graph;
+struct Options;
 
-    /// Write Makefile rules and compiler response files without compiling sources.
-    void generate_make(const Graph& graph,
-                       const Options& options,
-                       const fs::path& clutch_executable);
+/// Write Makefile rules and compiler response files without compiling sources.
+void generate_make(const Graph &graph,
+                   const Options &options,
+                   const fs::path &clutch_executable);
 
-    /// Create a backend invocation; launch it with the profile build directory as
+/// Create a backend invocation; launch it with the profile build directory as
 /// cwd. An empty selection builds the application; explicit indices select
 /// graph targets.
-    std::vector<std::string>
-    make_build_command(const Graph& graph,
-                       const Options& options,
-                       const std::vector<size_t>& target_indices);
-} // namespace clutch
+std::vector<std::string>
+make_build_command(const Graph &graph,
+                   const Options &options,
+                   const std::vector<size_t> &target_indices);
+}  // namespace clutch

@@ -11,24 +11,19 @@
  * selections.
  */
 
-#ifdef _MSC_VER
-// Microsoft's CRT opt-out requires this reserved macro spelling.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include "toolchain.hpp"
 
 #include "backends/backend.hpp"
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
+#include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 
@@ -41,9 +36,9 @@ std::string choose(const std::string &explicit_name,
                    const std::string &cached,
                    const std::vector<std::string> &defaults) {
   std::string requested = explicit_name;
-  if (const auto *environment = std::getenv(env);
-    requested.empty() && environment)
-    requested = environment;
+  if (const auto environment = environment_value(env);
+      requested.empty() && environment)
+    requested = *environment;
 
   if (requested.empty())
     requested = cached;
@@ -64,7 +59,7 @@ std::string choose(const std::string &explicit_name,
   throw std::runtime_error(std::string("tool not found; set ") + env +
                            " or the corresponding command-line option");
 }
-} // namespace
+}  // namespace
 
 /// Resolve only languages present in the application or tests, then check
 /// drivers.
@@ -72,7 +67,7 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
   const auto cache_path = project.build / layout::toolchain_cache;
   toml::table cache;
   if (fs::exists(cache_path))
-    cache = toml::parse_file(cache_path.string());
+    cache = toml::parse_file(cache_path.u8string());
 
   // A C application can still declare a C++ test, so inspect every target's
   // inputs.
@@ -81,33 +76,27 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
     sources.insert(sources.end(), test.sources.begin(), test.sources.end());
 
   const bool cpp =
-      std::any_of(sources.begin(),
-                  sources.end(),
-                  [](const fs::path &p) {
-                    return p.extension() != ".c";
-                  });
+      std::any_of(sources.begin(), sources.end(), [](const fs::path &p) {
+        return p.extension() != ".c";
+      });
   const bool c =
-      std::any_of(sources.begin(),
-                  sources.end(),
-                  [](const fs::path &p) {
-                    return p.extension() == ".c";
-                  });
+      std::any_of(sources.begin(), sources.end(), [](const fs::path &p) {
+        return p.extension() == ".c";
+      });
   Toolchain tools;
   const auto backend = normalize_backend_name(project.generator);
   // Native IDE formats constrain defaults; overrides still undergo driver
   // checks.
   const std::vector<std::string> cxx_defaults =
       backend == "visual-studio" || backend == "nmake" || backend == "jom"
-        ? std::vector<std::string>{"cl", "clang-cl"}
-        : backend == "xcode"
-        ? std::vector<std::string>{"/usr/bin/clang++"}
-        : std::vector<std::string>{"clang++", "g++", "cl"};
+          ? std::vector<std::string>{"cl", "clang-cl"}
+      : backend == "xcode" ? std::vector<std::string>{"/usr/bin/clang++"}
+                           : std::vector<std::string>{"clang++", "g++", "cl"};
   const std::vector<std::string> c_defaults =
       backend == "visual-studio" || backend == "nmake" || backend == "jom"
-        ? std::vector<std::string>{"cl", "clang-cl"}
-        : backend == "xcode"
-        ? std::vector<std::string>{"/usr/bin/clang"}
-        : std::vector<std::string>{"clang", "gcc", "cl"};
+          ? std::vector<std::string>{"cl", "clang-cl"}
+      : backend == "xcode" ? std::vector<std::string>{"/usr/bin/clang"}
+                           : std::vector<std::string>{"clang", "gcc", "cl"};
   if (cpp)
     tools.cxx = choose(options.cxx,
                        "CXX",
@@ -122,7 +111,7 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
 
   // Driver syntax comes from the selected executable, not the host OS alone.
   const auto msvc = [](const std::string &compiler) {
-    auto name = fs::path(compiler).stem().string();
+    auto name = fs::u8path(compiler).stem().u8string();
     std::transform(name.begin(),
                    name.end(),
                    name.begin(),
@@ -150,4 +139,4 @@ void save_toolchain(const Toolchain &tools, const Project &project) {
   text << cache << '\n';
   write_if_changed(project.build / layout::toolchain_cache, text.str());
 }
-} // namespace clutch
+}  // namespace clutch

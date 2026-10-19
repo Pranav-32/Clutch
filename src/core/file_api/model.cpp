@@ -112,7 +112,7 @@ Json toolchains_object(const Graph &graph) {
     result["toolchains"].push_back(
         {{"language", language},
          {"compiler",
-          {{"path", fs::path(compiler).generic_u8string()},
+          {{"path", fs::u8path(compiler).generic_u8string()},
            {"driverStyle", graph.toolchain.msvc ? "msvc" : "gnu"}}}});
   }
 
@@ -145,7 +145,7 @@ make_objects(const Graph &graph,
          {"generator",
           {{"name", graph.backend.name},
            {"executable",
-            fs::path(graph.backend.executable).generic_u8string()}}},
+            fs::u8path(graph.backend.executable).generic_u8string()}}},
          {"compilationDatabase",
           (project.build / layout::compilation_database).generic_u8string()},
          {"targets", Json::array()}});
@@ -159,7 +159,7 @@ make_objects(const Graph &graph,
       const auto filename = "target-" + std::to_string(index) + ".json";
       const auto &target = graph.targets[index];
       const auto reference =
-          (fs::path(generation_directory) / filename).generic_u8string();
+          (fs::u8path(generation_directory) / filename).generic_u8string();
       model["targets"].push_back({{"id", target_id(target)},
                                   {"name", target.name},
                                   {"jsonFile", reference}});

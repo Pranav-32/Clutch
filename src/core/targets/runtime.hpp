@@ -17,6 +17,9 @@
 namespace clutch {
 struct Graph;
 struct Options;
+/// Reject different shared libraries with the same loader filename in one
+/// runtime closure. Independent consumers may still use identical local names.
+void validate_runtime_dependencies(const Graph &graph);
 /// Return library-index/destination pairs, including private runtime
 /// dependencies. POSIX generators use embedded relative runtime search paths
 /// instead.

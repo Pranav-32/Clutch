@@ -45,7 +45,8 @@ fs::path resolve_build_directory(const Options &options,
   if (configured.empty())
     configured = layout::default_build_directory(options.release);
 
-  auto directory = fs::absolute(root / configured).lexically_normal();
+  auto directory =
+      fs::absolute(root / fs::u8path(configured)).lexically_normal();
   if (directory != directory.root_path() && directory.filename().empty())
     directory = directory.parent_path();
 
@@ -66,7 +67,7 @@ bool contains(const fs::path &parent, const fs::path &child) {
 /// discovery.
 fs::path build_directory(const Options &options) {
   const auto root = fs::canonical(options.root);
-  const auto doc = toml::parse_file((root / layout::manifest).string());
+  const auto doc = toml::parse_file((root / layout::manifest).u8string());
   return resolve_build_directory(options, root, doc);
 }
 
@@ -92,26 +93,25 @@ void validate_build_directory(const fs::path &root,
     if (fs::is_symlink(fs::symlink_status(current)) ||
         (fs::exists(current) && fs::canonical(current) != current))
       throw std::runtime_error("refusing redirected build path: " +
-                               current.string());
+                               current.u8string());
   }
 
   // The marker binds this output directory to the physical source root.
-  const auto marker = directory / layout::owner_marker;
-  if (fs::is_symlink(fs::symlink_status(marker)))
+  if (const auto marker = directory / layout::owner_marker;
+      fs::is_symlink(fs::symlink_status(marker))) {
     throw std::runtime_error("refusing redirected build ownership marker");
-
-  if (fs::exists(marker)) {
+  } else if (fs::exists(marker)) {
     std::ifstream input(marker, std::ios::binary);
     if (const std::string owner((std::istreambuf_iterator(input)), {});
-        !input || owner != root.generic_string() + "\n")
+        !input || owner != root.generic_u8string() + "\n")
       throw std::runtime_error(
           "build directory belongs to a different project: " +
-          directory.string());
+          directory.u8string());
   } else if (fs::exists(directory) &&
              (require_owner || (!fs::is_empty(directory) &&
                                 !file_api::query_only_directory(directory)))) {
     throw std::runtime_error("refusing unowned nonempty build directory: " +
-                             directory.string());
+                             directory.u8string());
   }
 }
 
@@ -124,7 +124,7 @@ void prepare_build_directory(const Project &project) {
     (void)signature;
     if (contains(project.build, path))
       throw std::runtime_error(
-          "build directory contains a workspace manifest: " + path.string());
+          "build directory contains a workspace manifest: " + path.u8string());
   }
 
   for (const auto &member : project.projects)
@@ -138,7 +138,7 @@ void prepare_build_directory(const Project &project) {
   for (const auto &source : project.sources)
     if (contains(project.build, source))
       throw std::runtime_error("build directory contains a project source: " +
-                               source.string());
+                               source.u8string());
 
   for (const auto &test : project.tests)
     for (const auto &source : test.sources)
@@ -149,7 +149,8 @@ void prepare_build_directory(const Project &project) {
   for (const auto &include : project.includes)
     if (contains(project.build, include))
       throw std::runtime_error(
-          "build directory contains an include directory: " + include.string());
+          "build directory contains an include directory: " +
+          include.u8string());
 
   for (const auto *specs : {&project.targets, &project.tests}) {
     for (const auto &target : *specs) {
@@ -159,7 +160,7 @@ void prepare_build_directory(const Project &project) {
               if (contains(project.build, include))
                 throw std::runtime_error(
                     "build directory contains target include directory: " +
-                    include.string());
+                    include.u8string());
           };
       validate_includes(target.includes);
       validate_includes(target.public_includes);
@@ -168,6 +169,6 @@ void prepare_build_directory(const Project &project) {
 
   fs::create_directories(project.build);
   write_if_changed(project.build / layout::owner_marker,
-                   project.root.generic_string() + "\n");
+                   project.root.generic_u8string() + "\n");
 }
 }  // namespace clutch

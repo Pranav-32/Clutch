@@ -6,12 +6,12 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import platform
 import shutil
 import subprocess
 import tempfile
 import tomllib
+from pathlib import Path
 
 from release import ROOT, TARGETS, package
 
@@ -90,12 +90,14 @@ def build(target, build_dir, output):
     # The actual compiler paths remain unchanged for Clutch integration tests.
     launcher = os.environ.get('CLUTCH_COMPILER_LAUNCHER')
     command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={require_tool(launcher) if launcher else ""}')
-    required = {'clutch.help', 'clutch.version', 'clutch.graph', 'clutch.file-api', 'clutch.targets', 'clutch.workspace'}
+    required = {'clutch.help', 'clutch.version', 'clutch.graph', 'clutch.file-api', 'clutch.targets',
+                'clutch.workspace'}
     if windows:
         command.append(f'-DCLUTCH_TEST_NINJA={ninja}')
         required.update(('clutch.standalone', 'clutch.integration'))
     else:
-        command.extend((f'-DCLUTCH_TEST_CC={cc}', f'-DCLUTCH_TEST_MAKE={require_tool("gmake" if platform.system() == "Darwin" else "make")}'))
+        command.extend((f'-DCLUTCH_TEST_CC={cc}',
+                        f'-DCLUTCH_TEST_MAKE={require_tool("gmake" if platform.system() == "Darwin" else "make")}'))
         required.add('clutch.posix-integration')
     run(*command)
     run('cmake', '--build', build_dir, '--parallel', build_jobs)

@@ -15,11 +15,10 @@
 #include <iostream>
 
 /// Use a small sample operand whose doubled value fits in int.
-int main()
-{
-    constexpr auto sample_value = 21;
-    std::cout << "Twice " << sample_value << " is " << double_value(sample_value)
-        << ".\n";
+int main() {
+  constexpr auto sample_value = 21;
+  std::cout << "Twice " << sample_value << " is " << double_value(sample_value)
+            << ".\n";
 
-    return 0;
+  return 0;
 }

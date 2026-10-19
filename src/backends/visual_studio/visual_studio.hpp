@@ -19,19 +19,18 @@
 #include <string>
 #include <vector>
 
-namespace clutch
-{
-    struct Graph;
-    struct Options;
+namespace clutch {
+struct Graph;
+struct Options;
 
-    /// Write one solution and native C++ project per application/test target.
-    void generate_visual_studio(const Graph& graph,
-                                const Options& options,
-                                const fs::path& clutch_executable);
+/// Write one solution and native C++ project per application/test target.
+void generate_visual_studio(const Graph &graph,
+                            const Options &options,
+                            const fs::path &clutch_executable);
 
-    /// Construct an MSBuild invocation restricted to the requested graph targets.
-    std::vector<std::string>
-    visual_studio_build_command(const Graph& graph,
-                                const Options& options,
-                                const std::vector<size_t>& target_indices);
-} // namespace clutch
+/// Construct an MSBuild invocation restricted to the requested graph targets.
+std::vector<std::string>
+visual_studio_build_command(const Graph &graph,
+                            const Options &options,
+                            const std::vector<size_t> &target_indices);
+}  // namespace clutch

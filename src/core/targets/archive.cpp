@@ -9,6 +9,7 @@
  * lines.
  */
 #include "archive.hpp"
+#include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
@@ -22,10 +23,10 @@ std::vector<std::string> archive_command(const Graph &graph,
                                          const Options &options,
                                          const fs::path &executable,
                                          const size_t index) {
-  std::vector<std::string> command{executable.string(),
+  std::vector<std::string> command{executable.u8string(),
                                    "__archive",
                                    "--project",
-                                   graph.project.root.string(),
+                                   graph.project.root.u8string(),
                                    "--target",
                                    graph.targets.at(index).name};
   if (options.release)
@@ -46,51 +47,35 @@ int archive_target(const Graph &graph, const size_t index) {
         "refusing archive output outside the owned build directory");
 
   std::vector<std::string> command;
-  const auto response = fs::path(target.output.string() + ".archive.rsp");
+  const auto response = fs::u8path(target.output.u8string() + ".archive.rsp");
   if (fs::is_symlink(response))
     throw std::runtime_error("refusing redirected archive response file");
 
 #ifdef __APPLE__
-  if (fs::path(target.link.front()).filename() == "libtool") {
+  if (fs::u8path(target.link.front()).filename() == "libtool") {
     std::string files;
     for (const auto &unit : target.units) {
-      if (unit.object.string().find_first_of("\r\n") != std::string::npos)
+      if (unit.object.u8string().find_first_of("\r\n") != std::string::npos)
         throw std::runtime_error(
             "newlines are not supported in archive file lists");
-      files += unit.object.string() + '\n';
+      files += unit.object.u8string() + '\n';
     }
     write_if_changed(response, files);
     command = {target.link.front(),
                "-static",
                "-o",
-               target.output.string(),
+               target.output.u8string(),
                "-filelist",
-               response.string()};
+               response.u8string()};
   } else
 #endif
   {
-    const std::vector arguments(target.link.begin() + 1, target.link.end());
-    std::string text;
-    if (graph.toolchain.msvc)
-      text = command_line(arguments);
-    else {
-      // GNU/LLVM response files use shell-like quoted words, independently of
-      // the host shell. llvm-ar receives --rsp-quoting=posix where needed.
-      for (const auto &argument : arguments) {
-        text += '"';
-        for (const char character : argument) {
-          if (character == '\\' || character == '"')
-            text += '\\';
-          text += character;
-        }
-        text += "\"\n";
-      }
-    }
-    write_if_changed(response, text);
+    write_if_changed(response,
+                     response_file(target.link, graph.toolchain.msvc));
     command = {target.link.front()};
-    if (fs::path(target.link.front()).stem() == "llvm-ar")
+    if (fs::u8path(target.link.front()).stem() == "llvm-ar")
       command.emplace_back("--rsp-quoting=posix");
-    command.push_back("@" + response.string());
+    command.push_back("@" + response.u8string());
   }
 
   // ar replaces listed members but keeps omitted ones, so recreate the archive.

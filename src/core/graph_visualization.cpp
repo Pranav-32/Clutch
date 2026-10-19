@@ -73,8 +73,8 @@ void write_graph_visualization(const Graph &graph) {
         if (inserted) {
           const auto relative = path.lexically_relative(graph.project.root);
           dot << "  n" << entry->second << " [label="
-              << quoted((relative.empty() ? path : relative).generic_string())
-              << ", tooltip=" << quoted(path.generic_string())
+              << quoted((relative.empty() ? path : relative).generic_u8string())
+              << ", tooltip=" << quoted(path.generic_u8string())
               << ", shape=" << shape << ", color=" << quoted(color) << "];\n";
         }
 

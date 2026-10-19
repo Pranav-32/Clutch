@@ -15,7 +15,6 @@
 
 #include <filesystem>
 
-namespace clutch
-{
-    namespace fs = std::filesystem;
-} // namespace clutch
+namespace clutch {
+namespace fs = std::filesystem;
+}  // namespace clutch

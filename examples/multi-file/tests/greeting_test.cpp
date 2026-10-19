@@ -15,24 +15,21 @@
 #include <iostream>
 
 /// Report failures through the process exit status consumed by clutch test.
-int main()
-{
-    if (const auto message = example::greet("Clutch");
-        message != "Hello, Clutch!")
-    {
-        std::cerr << "Unexpected greeting: " << message << '\n';
+int main() {
+  if (const auto message = example::greet("Clutch");
+      message != "Hello, Clutch!") {
+    std::cerr << "Unexpected greeting: " << message << '\n';
 
-        return 1;
-    }
+    return 1;
+  }
 
-    if (const auto message = example::greet(""); message != "Hello, !")
-    {
-        std::cerr << "Unexpected greeting for an empty name: " << message << '\n';
+  if (const auto message = example::greet(""); message != "Hello, !") {
+    std::cerr << "Unexpected greeting for an empty name: " << message << '\n';
 
-        return 1;
-    }
+    return 1;
+  }
 
-    std::cout << "Greeting tests passed.\n";
+  std::cout << "Greeting tests passed.\n";
 
-    return 0;
+  return 0;
 }

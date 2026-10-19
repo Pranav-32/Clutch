@@ -32,11 +32,11 @@ void create_project(const fs::path &directory,
                     const bool require_new) {
   const auto root = fs::absolute(directory).lexically_normal();
   if (require_new && fs::exists(root))
-    throw std::runtime_error("destination already exists: " + root.string());
+    throw std::runtime_error("destination already exists: " + root.u8string());
 
   // Restrict names to spellings usable as executable and native target names.
   const auto name =
-      requested_name.empty() ? root.filename().string() : requested_name;
+      requested_name.empty() ? root.filename().u8string() : requested_name;
   if (name.empty() ||
       !std::all_of(name.begin(), name.end(), [](const unsigned char v) {
         return (v >= 'a' && v <= 'z') || (v >= 'A' && v <= 'Z') ||
@@ -81,7 +81,7 @@ void create_project(const fs::path &directory,
                      std::string("/") + layout::environment + "/\n/" +
                          layout::build_prefix + "*/\n");
 
-  status("Created", name + " at " + root.string());
+  status("Created", name + " at " + root.u8string());
 }
 
 /// Remove only the owned profile after checking its root and every descendant.
@@ -97,9 +97,9 @@ void clean_project(const Options &options) {
 
   for (const auto &member : workspace_member_roots(
            root,
-           toml::parse_file((root / layout::manifest).string()))) {
-    const auto relative = member.lexically_relative(profile);
-    if (!relative.empty() && *relative.begin() != "..")
+           toml::parse_file((root / layout::manifest).u8string()))) {
+    if (const auto relative = member.lexically_relative(profile);
+        !relative.empty() && *relative.begin() != "..")
       throw std::runtime_error(
           "refusing to clean a build directory containing a workspace member");
   }
@@ -109,7 +109,7 @@ void clean_project(const Options &options) {
     for (const auto &entry : fs::recursive_directory_iterator(profile)) {
       if (entry.is_symlink() || fs::canonical(entry.path()) != entry.path())
         throw std::runtime_error("refusing to clean redirected build entry: " +
-                                 entry.path().string());
+                                 entry.path().u8string());
     }
 
     fs::remove_all(profile);

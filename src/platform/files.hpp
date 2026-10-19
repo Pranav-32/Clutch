@@ -17,10 +17,14 @@
 
 #include <string>
 
-namespace clutch
-{
-    /// Write generated text only when it differs, preserving unchanged output
+namespace clutch {
+/// Refuse a generated destination that redirects through a link or junction.
+/// Call before generating metadata or accepting compiler/linker output paths.
+void validate_generated_path(const fs::path &path);
+
+/// Write generated text only when it differs, preserving unchanged output
 /// timestamps. Callers validate output ownership before invoking this helper;
-/// the writer creates missing parent directories and reports stream failures.
-    void write_if_changed(const fs::path& path, const std::string& content);
-} // namespace clutch
+/// the writer rejects redirected paths, creates missing parent directories and
+/// reports write/close failures. It does not provide a multi-file transaction.
+void write_if_changed(const fs::path &path, const std::string &content);
+}  // namespace clutch

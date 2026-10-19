@@ -13,9 +13,8 @@
 #include <stdio.h>
 
 /// Print a greeting without requiring a C++ translation unit.
-int main(void)
-{
-    puts("Hello from Clutch and C!");
+int main(void) {
+  puts("Hello from Clutch and C!");
 
-    return 0;
+  return 0;
 }

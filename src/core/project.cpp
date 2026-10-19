@@ -69,7 +69,7 @@ bool supported_source(const fs::path &path) {
   return fs::is_regular_file(path) &&
          std::find(source_extensions.begin(),
                    source_extensions.end(),
-                   path.extension().string()) != source_extensions.end();
+                   path.extension().u8string()) != source_extensions.end();
 }
 
 /// Reject unknown keys explicitly so misspelled settings never fall back
@@ -207,11 +207,11 @@ Project load_project_manifest(const Options &options,
     // Prefer explicit sources; otherwise discover src/ and add any explicit
     // entry.
     array("sources", [&](const std::string &s) {
-      p.sources.push_back(fs::canonical(p.root / s));
+      p.sources.push_back(fs::canonical(p.root / fs::u8path(s)));
     });
     if (p.sources.empty() && fs::is_directory(p.root / "src")) {
       for (const auto &e : fs::recursive_directory_iterator(p.root / "src")) {
-        if (const auto ext = e.path().extension().string();
+        if (const auto ext = e.path().extension().u8string();
             e.is_regular_file() &&
             (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx"))
           p.sources.push_back(fs::canonical(e.path()));
@@ -219,8 +219,7 @@ Project load_project_manifest(const Options &options,
     }
 
     if (const auto entry = doc["project"]["entry"].value<std::string>())
-      p.sources.push_back(fs::canonical(p.root / *entry));
-
+      p.sources.push_back(fs::canonical(p.root / fs::u8path(*entry)));
   } else {
     for (const auto &target : p.targets)
       p.sources.insert(p.sources.end(),
@@ -238,7 +237,7 @@ Project load_project_manifest(const Options &options,
 
   for (const auto &source : p.sources) {
     if (!supported_source(source))
-      throw std::runtime_error("unsupported source file: " + source.string());
+      throw std::runtime_error("unsupported source file: " + source.u8string());
   }
 
   // Infer the application's languages independently from declared test sources.
@@ -310,7 +309,8 @@ Project load_project_manifest(const Options &options,
   // Resolve shared search paths and definitions once for application/test
   // units.
   array("include_dirs", [&](const std::string &s) {
-    if (const auto path = fs::canonical(p.root / s); fs::is_directory(path))
+    if (const auto path = fs::canonical(p.root / fs::u8path(s));
+        fs::is_directory(path))
       p.includes.push_back(path);
     else
       throw std::runtime_error("include directory is not a folder: " + s);

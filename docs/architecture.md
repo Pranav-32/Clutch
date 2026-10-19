@@ -65,6 +65,28 @@ preserve an obsolete archive or executable. Windows shared-library consumers
 use import libraries, and dependent runtime DLLs are staged beside test programs.
 Symbol sidecars have [separate limitations](manifest.md#debug-symbols).
 
+Generated metadata and graph output paths reject symlinks and redirected parent
+directories before writes or build execution. Writers also check stream close
+failures. These checks protect owned outputs from accidental redirection; they
+are not a filesystem sandbox against another process changing paths concurrently.
+
+Paths crossing CLI, environment, argument, TOML or JSON boundaries use UTF-8;
+filesystem operations keep native `std::filesystem::path` values. Windows CLI
+arguments are normalized from the wide command line. `platform/environment.*`
+copies native Unicode environment values, including compiler and executor paths.
+Use `fs::u8path` to decode text and `u8string`/`generic_u8string` to serialize it.
+
+`platform/arguments.*` separates command-line quoting from compiler response-file
+encoding. Microsoft response files carry a UTF-8 byte-order mark; GNU-style
+response files use their own escaping rules. NMake rules also carry the marker
+so prerequisite filenames are decoded correctly. Generators share these encoders
+instead of maintaining competing implementations.
+
+ELF shared libraries carry a loader filename so relative runtime paths remain
+effective after moving an artifact tree. Runtime closures reject distinct shared
+libraries with the same loader filename; independent consumers can still use
+repeated local names. Saved host configuration remains bound to its build path.
+
 ## Changing the implementation
 
 Resolve manifest semantics before generator output. Carry new values through

@@ -15,12 +15,11 @@
 
 #include "core/build_graph.hpp"
 
-namespace clutch
-{
-    struct Options;
+namespace clutch {
+struct Options;
 
-    /// Resolve a project and generate its backend files, IDE database and tool
+/// Resolve a project and generate its backend files, IDE database and tool
 /// caches.
 /// Throws on invalid inputs or output failures; no compilation is performed.
-    Graph configure(const Options& options, const fs::path& executable);
-} // namespace clutch
+Graph configure(const Options &options, const fs::path &executable);
+}  // namespace clutch

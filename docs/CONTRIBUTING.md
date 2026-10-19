@@ -34,6 +34,8 @@ the existing PR checks.
   and upstream notices belong in `third_party/`.
 - Follow [`.clang-format`](../.clang-format) and [`.clang-tidy`](../.clang-tidy).
   Use LLVM 22's tools for the checked-in configuration.
+- Keep CMake files consistent with their four-space indentation and separate
+  meaningful setup blocks with blank lines.
 - Use `const`/`constexpr` where appropriate, structured bindings for records,
   and C++17 `if` initializers for branch-scoped values.
 - Avoid redundant type qualifiers and template arguments where deduction is
@@ -47,6 +49,10 @@ the existing PR checks.
   Put each Doxygen command on its own line, using a bare `@file`.
 - Keep manifest resolution and the target graph independent of generators.
   Derive native rules, compiler databases and file-API data consistently.
+- Keep paths as filesystem values internally and use UTF-8 at text boundaries:
+  decode with `fs::u8path` and serialize with `u8string`/`generic_u8string`.
+  Read environment values with `platform/environment.hpp` so Windows paths
+  are not converted through the ANSI code page.
 - Update relevant reference guides and schemas when public behavior changes.
   Keep the README focused on installation and use.
 

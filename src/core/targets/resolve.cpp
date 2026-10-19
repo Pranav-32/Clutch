@@ -234,8 +234,8 @@ fs::path target_import_library(const fs::path &output,
 #ifdef _WIN32
   if (type == TargetType::SharedLibrary)
     return output.parent_path() /
-           (msvc ? output.stem().string() + ".lib"
-                 : "lib" + output.stem().string() + ".dll.a");
+           (msvc ? output.stem().u8string() + ".lib"
+                 : "lib" + output.stem().u8string() + ".dll.a");
 #else
   (void)output;
   (void)type;

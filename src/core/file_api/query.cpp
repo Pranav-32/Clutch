@@ -182,7 +182,7 @@ Queries read_queries(const fs::path &build) {
         throw std::runtime_error("file API query batch exceeds eight MiB");
     }
   };
-  const auto root = fs::path(api_directory) / "query";
+  const auto root = fs::u8path(api_directory) / "query";
   for (const auto &path : entries(build, root)) {
     const auto name = path.filename().u8string();
     if (fs::is_directory(build / path) && name.find("client-") == 0 &&

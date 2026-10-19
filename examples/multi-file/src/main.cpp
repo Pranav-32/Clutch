@@ -16,10 +16,9 @@
 #include <string_view>
 
 /// Greet the first supplied argument, or use Clutch as the default name.
-int main(const int argc, char* argv[])
-{
-    const auto name = std::string_view{argc > 1 ? argv[1] : "Clutch"};
-    std::cout << example::greet(name) << '\n';
+int main(const int argc, char *argv[]) {
+  const auto name = std::string_view{argc > 1 ? argv[1] : "Clutch"};
+  std::cout << example::greet(name) << '\n';
 
-    return 0;
+  return 0;
 }

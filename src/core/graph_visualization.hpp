@@ -13,11 +13,10 @@
 
 #pragma once
 
-namespace clutch
-{
-    struct Graph;
+namespace clutch {
+struct Graph;
 
-    /// Write a deterministic build-graph.dot in the profile directory without
+/// Write a deterministic build-graph.dot in the profile directory without
 /// invoking Graphviz.
-    void write_graph_visualization(const Graph& graph);
-} // namespace clutch
+void write_graph_visualization(const Graph &graph);
+}  // namespace clutch

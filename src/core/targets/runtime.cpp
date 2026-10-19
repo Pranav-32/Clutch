@@ -13,11 +13,52 @@
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <functional>
+#include <map>
 #include <set>
 #include <stdexcept>
 
 namespace clutch {
+void validate_runtime_dependencies(const Graph &graph) {
+  for (size_t consumer = 0; consumer < graph.targets.size(); ++consumer) {
+    if (graph.targets[consumer].type == TargetType::StaticLibrary)
+      continue;
+
+    std::map<std::string, size_t> filenames;
+    std::set<size_t> visited;
+    std::function<void(size_t)> visit = [&](const size_t index) {
+      if (!visited.insert(index).second)
+        return;
+
+      const auto &target = graph.targets.at(index);
+      if (target.type == TargetType::SharedLibrary) {
+        auto filename = target.output.filename().u8string();
+#ifdef _WIN32
+        std::transform(filename.begin(),
+                       filename.end(),
+                       filename.begin(),
+                       [](const unsigned char c) {
+                         return static_cast<char>(std::tolower(c));
+                       });
+#endif
+        if (const auto [entry, inserted] = filenames.emplace(filename, index);
+            !inserted && entry->second != index)
+          throw std::runtime_error(
+              "runtime library name collision: " +
+              graph.targets[entry->second].name + " and " + target.name +
+              " both load as " + filename +
+              "; give shared-library targets distinct names");
+      }
+
+      for (const auto dependency : target.dependencies)
+        visit(dependency);
+    };
+    visit(consumer);
+  }
+}
+
 std::vector<std::pair<size_t, fs::path>> runtime_copies(const Graph &graph,
                                                         const size_t consumer) {
   std::vector<std::pair<size_t, fs::path>> result;
@@ -52,10 +93,10 @@ std::vector<std::string> runtime_copy_command(const Graph &graph,
                                               const fs::path &executable,
                                               const size_t consumer,
                                               const size_t library) {
-  std::vector<std::string> result{executable.string(),
+  std::vector<std::string> result{executable.u8string(),
                                   "__copy-runtime",
                                   "--project",
-                                  graph.project.root.string(),
+                                  graph.project.root.u8string(),
                                   "--target",
                                   graph.targets.at(consumer).name,
                                   "--library",

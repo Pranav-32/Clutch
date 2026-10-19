@@ -13,11 +13,10 @@
 
 #pragma once
 
-namespace clutch
-{
-    struct Graph;
+namespace clutch {
+struct Graph;
 
-    /// Write build-local compile_commands.json using the graph's exact per-source
+/// Write build-local compile_commands.json using the graph's exact per-source
 /// arguments.
-    void write_compilation_database(const Graph& graph);
-} // namespace clutch
+void write_compilation_database(const Graph &graph);
+}  // namespace clutch

@@ -34,13 +34,13 @@ namespace {
 void write_new(const fs::path &path, const Json &value) {
   if (fs::exists(path))
     throw std::runtime_error("refusing existing file API reply: " +
-                             path.string());
+                             path.u8string());
 
   std::ofstream output(path, std::ios::binary);
   output << value.dump(json_indent) << '\n';
   output.close();
   if (!output)
-    throw std::runtime_error("cannot write file API reply: " + path.string());
+    throw std::runtime_error("cannot write file API reply: " + path.u8string());
 }
 
 /// Scan immutable indices AND incomplete generations so a crash cannot cause a
@@ -130,7 +130,7 @@ struct Session::State {
   }
 
   void commit(const Json &value) {
-    const auto relative = fs::path(api_directory) / "reply";
+    const auto relative = fs::u8path(api_directory) / "reply";
     const auto staged =
         relative / directory /
         ("index-" + value.at("status").get<std::string>() + ".json.tmp");
@@ -170,7 +170,7 @@ Session::~Session() = default;
 
 void Session::begin(const fs::path &build) {
   state_->build = build;
-  const auto api = fs::path(api_directory);
+  const auto api = fs::u8path(api_directory);
   validate_path(build, api / "query");
   validate_path(build, api / "reply");
   if (!fs::exists(build / api / "query") && !fs::exists(build / api / "reply"))
@@ -182,7 +182,7 @@ void Session::begin(const fs::path &build) {
   if (!fs::create_directory(lock))
     throw std::runtime_error(
         "file API writer is locked; wait for configure or inspect " +
-        lock.string());
+        lock.u8string());
 
   state_->lock = lock;
   fs::create_directories(build / api / "reply");
@@ -203,7 +203,7 @@ void Session::publish(const Graph &graph, const fs::path &executable) {
   if (!state_->active)
     return;
 
-  const auto directory = state_->directory.generic_string();
+  const auto directory = state_->directory.generic_u8string();
   const auto objects = make_objects(graph,
                                     state_->options,
                                     executable,
@@ -212,7 +212,7 @@ void Session::publish(const Graph &graph, const fs::path &executable) {
   auto index = state_->index("success");
   for (const auto &[filename, object] : objects) {
     const auto relative =
-        fs::path(api_directory) / "reply" / state_->directory / filename;
+        fs::u8path(api_directory) / "reply" / state_->directory / filename;
     validate_path(state_->build, relative);
     write_new(state_->build / relative, object);
     if (object["kind"] != "target") {

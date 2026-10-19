@@ -37,10 +37,11 @@ void write_compilation_database(const Graph &graph) {
       // An arguments array avoids shell parsing differences in IDE consumers.
       // The directory frame matches the working directory used by native
       // builds.
-      database << "  {\"directory\": " << json_string(graph.project.build.string())
-          << ", \"file\": " << json_string(source.string())
-          << ", \"output\": " << json_string(object.string())
-          << ", \"arguments\": [";
+      database << "  {\"directory\": "
+               << json_string(graph.project.build.u8string())
+               << ", \"file\": " << json_string(source.u8string())
+               << ", \"output\": " << json_string(object.u8string())
+               << ", \"arguments\": [";
       for (size_t i = 0; i < arguments.size(); ++i) {
         if (i)
           database << ", ";
@@ -56,4 +57,4 @@ void write_compilation_database(const Graph &graph) {
   write_if_changed(graph.project.build / layout::compilation_database,
                    database.str());
 }
-} // namespace clutch
+}  // namespace clutch

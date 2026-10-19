@@ -14,14 +14,13 @@
 
 #include "core/build_graph.hpp"
 
-namespace clutch
-{
-    struct Options;
+namespace clutch {
+struct Options;
 
-    /// Save the complete graph and the manifest signature in the profile directory.
-    void save_configuration(const Graph& graph, const Options& options);
+/// Save the complete graph and the manifest signature in the profile directory.
+void save_configuration(const Graph &graph, const Options &options);
 
-    /// Load an existing configuration; require explicit reconfiguration when stale.
+/// Load an existing configuration; require explicit reconfiguration when stale.
 /// Also reject incompatible schemas, moved roots and mismatched profile paths.
-    Graph load_configuration(const Options& options);
-} // namespace clutch
+Graph load_configuration(const Options &options);
+}  // namespace clutch

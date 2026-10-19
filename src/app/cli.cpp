@@ -48,7 +48,7 @@ int run_cli(const int argc, char *const *const argv) {
   app.require_subcommand(0, 1);
   Options options;
   std::string source_directory;
-  std::string root = fs::current_path().string();
+  std::string root = fs::current_path().u8string();
   app.add_option(
       "source",
       source_directory,
@@ -146,7 +146,10 @@ int run_cli(const int argc, char *const *const argv) {
                    filter,
                    "Run tests whose names contain this text");
   try {
-    app.parse(argc, argv);
+    // CLI11 owns normalized UTF-8 arguments reconstructed from Windows' wide
+    // command line; the native argv may already have lost Unicode characters.
+    auto *const arguments = app.ensure_utf8(const_cast<char **>(argv));
+    app.parse(argc, arguments);
     // Disallow ambiguous combinations before any filesystem or process action.
     const bool has_command = !app.get_subcommands().empty();
     if (has_command && !source_directory.empty())
@@ -174,16 +177,17 @@ int run_cli(const int argc, char *const *const argv) {
     }
 
     if (*create || *init) {
-      create_project(destination.empty() ? "." : destination,
+      create_project(fs::u8path(destination.empty() ? "." : destination),
                      project_name,
                      language == "c",
                      static_cast<bool>(*create));
       return 0;
     }
 
-    options.root = fs::absolute(has_command                ? root
+    options.root =
+        fs::absolute(fs::u8path(has_command                ? root
                                 : source_directory.empty() ? "."
-                                                           : source_directory);
+                                                           : source_directory));
     if (*locate) {
       std::cout << file_api::locate_json(options) << '\n';
       return 0;
@@ -201,13 +205,13 @@ int run_cli(const int argc, char *const *const argv) {
         return 0;
       }
 
-      if (const auto executable = current_executable(argv[0]);
+      if (const auto executable = current_executable(arguments[0]);
           !executable.empty()) {
         const auto graph = configure(options, executable);
         status("Configured",
                graph.project.name + " [" +
                    (options.release ? "release" : "debug") + "] -> " +
-                   graph.project.build.string());
+                   graph.project.build.u8string());
         return 0;
       }
 
@@ -270,14 +274,14 @@ int run_cli(const int argc, char *const *const argv) {
     status("Finished",
            (*test ? "test executables"
             : selected.size() == 1
-                ? graph.targets[selected.front()].output.string()
+                ? graph.targets[selected.front()].output.u8string()
                 : "selected targets") +
                " (" + duration.str() + "s)");
     // Forward program arguments as separate values and run from the source
     // root.
     if (*execute) {
       const auto &target = graph.targets[selected.front()];
-      std::vector invocation{target.output.string()};
+      std::vector invocation{target.output.u8string()};
       invocation.insert(invocation.end(),
                         runtime_args.begin(),
                         runtime_args.end());
@@ -293,7 +297,7 @@ int run_cli(const int argc, char *const *const argv) {
         const auto &target = graph.targets[index];
         status("Testing", target.name);
         if (const int code =
-                run({target.output.string()}, target.source_root)) {
+                run({target.output.u8string()}, target.source_root)) {
           ++failures;
           std::cerr << "failed: " << target.name << " (exit " << code << ")\n";
         }

@@ -1,8 +1,19 @@
 {
   "requests": [
-    { "kind": "codemodel", "version": 1 },
-    { "kind": "toolchains", "version": 1 },
-    { "kind": "inputs", "version": 1 }
+    {
+      "kind": "codemodel",
+      "version": 1
+    },
+    {
+      "kind": "toolchains",
+      "version": 1
+    },
+    {
+      "kind": "inputs",
+      "version": 1
+    }
   ],
-  "client": { "name": "example-ide" }
+  "client": {
+    "name": "example-ide"
+  }
 }

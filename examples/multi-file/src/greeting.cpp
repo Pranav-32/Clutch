@@ -12,11 +12,9 @@
 
 #include "greeting.hpp"
 
-namespace example
-{
-    /// Compose the greeting without retaining the caller's borrowed input.
-    std::string greet(const std::string_view name)
-    {
-        return "Hello, " + std::string{name} + "!";
-    }
-} // namespace example
+namespace example {
+/// Compose the greeting without retaining the caller's borrowed input.
+std::string greet(const std::string_view name) {
+  return "Hello, " + std::string{name} + "!";
+}
+}  // namespace example

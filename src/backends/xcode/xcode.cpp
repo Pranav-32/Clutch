@@ -166,12 +166,12 @@ bool apple_clang(const std::string &compiler) {
   if (compiler.empty())
     return true;
 
-  const fs::path path(compiler);
-  if (const auto name = path.filename().string();
+  const auto path = fs::u8path(compiler);
+  if (const auto name = path.filename().u8string();
       name != "clang" && name != "clang++")
     return false;
 
-  if (const auto parent = path.parent_path().generic_string();
+  if (const auto parent = path.parent_path().generic_u8string();
       parent == "/usr/bin") {
     return true;
   } else {
@@ -236,7 +236,8 @@ std::vector<std::string> compile_flags(const Unit &unit) {
 
     if (argument == "-c" || argument == "-MMD" || argument == "-MD" ||
         argument == "-MP" || argument == "-MG" ||
-        argument == unit.source.string() || argument == unit.object.string())
+        argument == unit.source.u8string() ||
+        argument == unit.object.u8string())
       continue;
 
     if (argument.rfind("-MF", 0) == 0 || argument.rfind("-MT", 0) == 0 ||
@@ -257,7 +258,7 @@ std::vector<std::string> link_flags(const Target &target) {
 
   std::set<std::string> objects;
   for (const auto &unit : target.units)
-    objects.insert(unit.object.string());
+    objects.insert(unit.object.u8string());
 
   std::vector<std::string> result;
   for (size_t i = 1; i < target.link.size(); ++i) {
@@ -297,13 +298,13 @@ void target_settings(std::ostream &out,
                      const Target &target,
                      const Options &options) {
   const auto &p = graph.project;
-  out << "\t\t\t\tPRODUCT_NAME = " << literal(target.output.filename().string())
-      << ";\n"
+  out << "\t\t\t\tPRODUCT_NAME = "
+      << literal(target.output.filename().u8string()) << ";\n"
       << "\t\t\t\tEXECUTABLE_NAME = \"$(PRODUCT_NAME)\";\n"
       << "\t\t\t\tEXECUTABLE_PREFIX = \"\";\n"
       << "\t\t\t\tEXECUTABLE_SUFFIX = \"\";\n"
       << "\t\t\t\tCONFIGURATION_BUILD_DIR = "
-      << literal(target.output.parent_path().generic_string()) << ";\n"
+      << literal(target.output.parent_path().generic_u8string()) << ";\n"
       << "\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "
       << literal("c++" + target.cxx_standard) << ";\n"
       << "\t\t\t\tCLANG_CXX_LIBRARY = \"libc++\";\n"
@@ -326,7 +327,7 @@ void target_settings(std::ostream &out,
   std::vector<std::string> includes;
   includes.reserve(target.includes.size());
   for (const auto &include : target.includes)
-    includes.push_back(include.generic_string());
+    includes.push_back(include.generic_u8string());
 
   list(out, "HEADER_SEARCH_PATHS", includes);
   list(out, "GCC_PREPROCESSOR_DEFINITIONS", target.defines);
@@ -353,10 +354,10 @@ std::string scheme(const Graph &graph,
   const auto reference =
       "<BuildableReference BuildableIdentifier=\"primary\" "
       "BlueprintIdentifier=\"" +
-      xml(id) + "\" BuildableName=\"" + xml(target.output.filename().string()) +
-      "\" BlueprintName=\"" + xml(target_name(target, index)) +
-      "\" ReferencedContainer=\"container:" +
-      xml(project_path(graph).filename().string()) + "\"/>";
+      xml(id) + "\" BuildableName=\"" +
+      xml(target.output.filename().u8string()) + "\" BlueprintName=\"" +
+      xml(target_name(target, index)) + "\" ReferencedContainer=\"container:" +
+      xml(project_path(graph).filename().u8string()) + "\"/>";
   std::ostringstream out;
   out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
       << "<Scheme LastUpgradeVersion=\"" << scheme_last_upgrade_version
@@ -379,7 +380,7 @@ std::string scheme(const Graph &graph,
            "selectedLauncherIdentifier=\"Xcode.IDEFoundation.Launcher.LLDB\" "
            "launchStyle=\"0\" useCustomWorkingDirectory=\"YES\" "
            "customWorkingDirectory=\""
-        << xml(target.source_root.generic_string()) << "\">\n"
+        << xml(target.source_root.generic_u8string()) << "\">\n"
         << "    <BuildableProductRunnable runnableDebuggingMode=\"0\">\n"
         << "      " << reference << "\n"
         << "    </BuildableProductRunnable>\n"
@@ -433,16 +434,16 @@ void generate_xcode(const Graph &graph,
           << " = { isa = PBXTargetDependency; target = "
           << ids.get(target_key(dependency)) << "; };\n";
     for (const auto &unit : target.units) {
-      const auto source_key = key + ":source:" + unit.source.generic_string();
+      const auto source_key = key + ":source:" + unit.source.generic_u8string();
       out << "\t\t" << ids.get(source_key + ":file") << " = {\n"
           << "\t\t\tisa = PBXFileReference;\n"
           << "\t\t\tlastKnownFileType = "
           << (unit.source.extension() == ".c" ? "sourcecode.c.c"
                                               : "sourcecode.cpp.cpp")
           << ";\n"
-          << "\t\t\tname = " << literal(unit.source.filename().string())
+          << "\t\t\tname = " << literal(unit.source.filename().u8string())
           << ";\n"
-          << "\t\t\tpath = " << literal(unit.source.generic_string()) << ";\n"
+          << "\t\t\tpath = " << literal(unit.source.generic_u8string()) << ";\n"
           << "\t\t\tsourceTree = \"<absolute>\";\n\t\t};\n"
           << "\t\t" << ids.get(source_key + ":build") << " = {\n"
           << "\t\t\tisa = PBXBuildFile;\n"
@@ -457,7 +458,8 @@ void generate_xcode(const Graph &graph,
         << "\t\t\tfiles = (\n";
     for (const auto &unit : target.units)
       out << "\t\t\t\t"
-          << ids.get(key + ":source:" + unit.source.generic_string() + ":build")
+          << ids.get(key + ":source:" + unit.source.generic_u8string() +
+                     ":build")
           << ",\n";
 
     out << "\t\t\t);\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n"
@@ -470,7 +472,8 @@ void generate_xcode(const Graph &graph,
         << "\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n";
     for (const auto &unit : target.units)
       out << "\t\t\t\t"
-          << ids.get(key + ":source:" + unit.source.generic_string() + ":file")
+          << ids.get(key + ":source:" + unit.source.generic_u8string() +
+                     ":file")
           << ",\n";
 
     out << "\t\t\t);\n\t\t\tname = " << literal(target_name(target, index))
@@ -479,7 +482,7 @@ void generate_xcode(const Graph &graph,
         << "\t\t\tisa = PBXFileReference;\n"
         << "\t\t\texplicitFileType = " << quoted(file_type) << ";\n"
         << "\t\t\tincludeInIndex = 0;\n"
-        << "\t\t\tpath = " << literal(target.output.filename().string())
+        << "\t\t\tpath = " << literal(target.output.filename().u8string())
         << ";\n\t\t\tsourceTree = BUILT_PRODUCTS_DIR;\n\t\t};\n"
         << "\t\t" << ids.get(key) << " = {\n"
         << "\t\t\tisa = PBXNativeTarget;\n"
@@ -490,7 +493,8 @@ void generate_xcode(const Graph &graph,
     for (const auto dependency : target.dependencies)
       out << ids.get(key + ":dependency:" + std::to_string(dependency)) << ',';
     out << ");\n\t\t\tname = " << literal(target_name(target, index)) << ";\n"
-        << "\t\t\tproductName = " << literal(target.output.filename().string())
+        << "\t\t\tproductName = "
+        << literal(target.output.filename().u8string())
         << ";\n\t\t\tproductReference = " << ids.get(key + ":product")
         << ";\n\t\t\tproductType = " << quoted(product_type) << ";\n\t\t};\n"
         << "\t\t" << ids.get(key + ":config") << " = {\n"
@@ -531,9 +535,9 @@ void generate_xcode(const Graph &graph,
       << "\t\t\t\tALWAYS_SEARCH_USER_PATHS = NO;\n"
       << "\t\t\t\tUSE_HEADERMAP = NO;\n"
       << "\t\t\t\tCLANG_ENABLE_MODULES = NO;\n"
-      << "\t\t\t\tSYMROOT = " << literal(graph.project.build.generic_string())
+      << "\t\t\t\tSYMROOT = " << literal(graph.project.build.generic_u8string())
       << ";\n\t\t\t\tOBJROOT = "
-      << literal((graph.project.build / "xcode-obj").generic_string())
+      << literal((graph.project.build / "xcode-obj").generic_u8string())
       << ";\n\t\t\t};\n\t\t\tname = " << quoted(configuration) << ";\n\t\t};\n"
       << "\t\t" << ids.get("project:config-list") << " = {\n"
       << "\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = ("
@@ -552,7 +556,7 @@ void generate_xcode(const Graph &graph,
       << "\t\t\tmainGroup = " << main_group << ";\n"
       << "\t\t\tproductRefGroup = " << products << ";\n"
       << "\t\t\tprojectDirPath = "
-      << literal(graph.project.root.generic_string())
+      << literal(graph.project.root.generic_u8string())
       << ";\n\t\t\tprojectRoot = \"\";\n\t\t\ttargets = (\n";
   for (size_t index = 0; index < graph.targets.size(); ++index)
     out << "\t\t\t\t" << ids.get(target_key(index)) << ",\n";
@@ -586,7 +590,7 @@ xcode_build_command(const Graph &graph,
 
   std::vector<std::string> arguments{graph.backend.executable,
                                      "-project",
-                                     project_path(graph).string(),
+                                     project_path(graph).u8string(),
                                      "-configuration",
                                      options.release ? "Release" : "Debug"};
   std::set<size_t> selected;

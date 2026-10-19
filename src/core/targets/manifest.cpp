@@ -110,8 +110,8 @@ target(const toml::table &table, const fs::path &root, const bool test) {
     if (!fs::is_regular_file(path) ||
         std::find(source_extensions.begin(),
                   source_extensions.end(),
-                  path.extension().string()) == source_extensions.end())
-      throw std::runtime_error("unsupported target source: " + path.string());
+                  path.extension().u8string()) == source_extensions.end())
+      throw std::runtime_error("unsupported target source: " + path.u8string());
 
     result.sources.push_back(path);
   }
