@@ -207,11 +207,12 @@ class DependencyTests(unittest.TestCase):
         headers = self.repo('headers')
         self.write(headers, 'include/prefix.hpp', '#pragma once\n#include <vector>\n#define ANSWER 42\n')
         self.tag(headers, 'v1.0.0')
-        self.write(self.app, 'main.cpp', 'int main() { std::vector<int> v{ANSWER}; return v[0] == 42 ? 0 : 1; }\n')
+        program = 'int main() { std::vector<int> v{ANSWER}; return v[0] == 42 ? 0 : 1; }\n'
         self.write(self.app, 'local.hpp', '#pragma once\n#define LOCAL_VALUE 7\n')
         self.write(self.app, 'additional.hpp', '#pragma once\n#define ADDITIONAL_VALUE 9\n')
         for generator in self.generators():
             with self.subTest(generator=generator):
+                self.write(self.app, 'main.cpp', program)
                 if (self.app / 'out').exists():
                     shutil.rmtree(self.app / 'out')
                 self.manifest({'headers': self.dependency(headers, tag='v1.0.0', pch=['include/prefix.hpp'])},
@@ -240,6 +241,7 @@ class DependencyTests(unittest.TestCase):
                 manifest = self.app / 'clutch.toml'
                 manifest.write_text(manifest.read_text().replace('pch=["local.hpp"]',
                                     'pch=["local.hpp", "additional.hpp"]'))
+                self.write(self.app, 'main.cpp', '#ifndef ADDITIONAL_VALUE\n#error missing extended prefix\n#endif\n' + program)
                 self.configure(generator)
                 self.cli('build', '--jobs', '2')
                 self.assertTrue(any(file.stat().st_mtime_ns != stamp for file, stamp in before.items()),

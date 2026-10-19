@@ -20,6 +20,12 @@ Installation includes Clutch's license and the vendored-library notices under
 
 Install CMake and a C++17 compiler such as GCC or Clang; on macOS, install Apple's
 command-line development tools. Install Ninja to follow the quick-start workflow.
+
+Clutch's Make generator requires GNU Make 4 or newer and prefers `gmake` during
+discovery. On macOS, `brew install make` supplies `gmake`; the older system Make
+does not reliably track rapid object/PCH changes. Explicit executor selections
+must meet the same version requirement.
+
 From the checkout root:
 
 ```sh

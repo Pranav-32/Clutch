@@ -245,8 +245,20 @@ class Snapshot {
             "bundle exclusions must be relative archive paths");
       exclusions.push_back(path);
     }
+    const auto is_excluded = [&](const fs::path &path) {
+      return std::any_of(exclusions.begin(),
+                         exclusions.end(),
+                         [&](const fs::path &exclude) {
+                           return contains(exclude, path);
+                         });
+    };
     std::map<std::string, ZipEntry> entries;
-    for (const auto &[source, target] : roots_)
+    for (const auto &[source, target] : roots_) {
+      if (!target.empty()) {
+        const auto key = target.generic_u8string() + "/";
+        if (!is_excluded(target))
+          entries.emplace(key, ZipEntry{key, {}, {}});
+      }
       for (auto it = fs::recursive_directory_iterator(source);
            it != fs::recursive_directory_iterator();
            ++it) {
@@ -258,11 +270,7 @@ class Snapshot {
             path == output || name == ".git" || name == ".hg" ||
             name == ".svn" || name == layout::environment ||
             name == layout::lock_file || name == layout::lock_writer ||
-            std::any_of(exclusions.begin(),
-                        exclusions.end(),
-                        [&](const fs::path &exclude) {
-                          return contains(exclude, archive_path);
-                        });
+            is_excluded(archive_path);
         if (omitted) {
           it.disable_recursion_pending();
           continue;
@@ -288,6 +296,7 @@ class Snapshot {
           throw std::runtime_error(
               "bundle exceeds the classic ZIP member limit");
       }
+    }
     return entries;
   }
 
@@ -334,10 +343,38 @@ fs::path bundle_project(const Options &options,
     found->second.source.clear();
     found->second.content = snapshot.manifest(root, owner);
   }
-  for (const auto &source : project.sources)
-    if (!entries.count(snapshot.destination(source).generic_u8string()))
-      throw std::runtime_error("bundle excludes a required source: " +
-                               source.u8string());
+  const auto require_path = [&](const fs::path &source) {
+    const auto target = snapshot.destination(source);
+    if (target.empty())
+      return;
+    const auto key =
+        target.generic_u8string() + (fs::is_directory(source) ? "/" : "");
+    if (!entries.count(key))
+      throw std::runtime_error(
+          "bundle excludes a required source or include: " + source.u8string());
+  };
+  const auto require_paths = [&](const std::vector<fs::path> &paths) {
+    for (const auto &path : paths)
+      require_path(path);
+  };
+  for (const auto *const paths : {&project.sources,
+                                  &project.additional_files,
+                                  &project.includes,
+                                  &project.pch_c,
+                                  &project.pch_cpp})
+    require_paths(*paths);
+  for (const auto *const targets : {&project.targets, &project.tests})
+    for (const auto &target : *targets)
+      for (const auto *const paths : {&target.sources,
+                                      &target.additional_files,
+                                      &target.includes,
+                                      &target.public_includes,
+                                      &target.pch_c,
+                                      &target.pch_cpp})
+        require_paths(*paths);
+  for (const auto &package : project.packages)
+    if (!package.source.empty())
+      require_path(package.source);
 
   toml::array packages;
   for (const auto &package : project.packages) {

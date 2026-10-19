@@ -245,7 +245,7 @@ for that target's compilation; only declared public requirements are exported.
 | `generator` | Native output | Requirements |
 | --- | --- | --- |
 | `"ninja"` | `build.ninja` | Ninja 1.10+ and a compatible host compiler |
-| `"make"` | GNU `Makefile` | GNU Make, including compatible MinGW/MSYS variants |
+| `"make"` | GNU `Makefile` | GNU Make 4+, including compatible MinGW/MSYS variants; discovery prefers `gmake` |
 | `"nmake"` | NMake `Makefile` | Windows, NMake and initialized Microsoft compiler/SDK environment |
 | `"jom"` | JOM `Makefile` | Windows, JOM and initialized Microsoft compiler/SDK environment |
 | `"visual-studio"` | `clutch.sln`, native `.vcxproj` files, `clutch.proj` | Windows, MSBuild C++ tools and MSVC `cl` |

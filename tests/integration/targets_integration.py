@@ -520,6 +520,39 @@ links=["base"]
                           '--build-tool', OPTIONS.ninja, success=False)
         self.assertIn('conflict', result.stderr)
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX executable-script fixture')
+    def test_make_prefers_explicit_gnu_executable(self):
+        """An installed gmake takes precedence over a host's legacy system make."""
+        executable = shutil.which('gmake') or shutil.which('make')
+        if not executable:
+            self.skipTest('GNU Make is not installed')
+        tools = self.root / 'tool bin'
+        tools.mkdir()
+        wrapper = tools / 'gmake'
+        wrapper.write_text(f'#!{sys.executable}\nimport os,sys\n'
+                           f'os.execv({executable!r}, [{executable!r}, *sys.argv[1:]])\n', encoding='utf-8')
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        self.manifest('make')
+        with mock.patch.dict(os.environ, {'PATH': str(tools) + os.pathsep + os.environ['PATH']}):
+            os.environ.pop('MAKE', None)
+            os.environ.pop('CLUTCH_BUILD_TOOL', None)
+            self.configure('make')
+        cache = self.build_path('app').parent / 'backend.toml'
+        self.assertIn(str(wrapper), cache.read_text(encoding='utf-8'))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX executable-script fixture')
+    def test_legacy_make_is_rejected_before_generating_rules(self):
+        """Unsupported timestamp precision must fail instead of hiding rebuilds."""
+        fake = self.root / 'legacy-make'
+        fake.write_text(f'#!{sys.executable}\nimport sys\n'
+                        'assert sys.argv[1:] == ["--version"]\nprint("GNU Make 3.81")\n', encoding='utf-8')
+        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+        self.manifest('make')
+        result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                          '--build-tool', str(fake), success=False)
+        self.assertIn('requires GNU Make 4 or newer', result.stderr)
+        self.assertFalse(list(self.root.rglob('Makefile')))
+
     def test_recursive_source_patterns(self):
         """Recursive suffix sets deduplicate units and expose uncompiled headers."""
         (self.root / 'pattern lib/nested').mkdir(parents=True)

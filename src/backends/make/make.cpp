@@ -21,6 +21,8 @@
 #include "core/project_layout.hpp"
 #include "core/targets/archive.hpp"
 #include "core/targets/runtime.hpp"
+#include "core/workspace/inputs.hpp"
+#include "platform/capture.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
@@ -35,6 +37,23 @@
 
 namespace clutch {
 namespace {
+/// Older GNU Make versions truncate prerequisite timestamps to whole seconds.
+/// Refuse those executors rather than silently reusing stale archives or PCH.
+void validate_gnu_make(const std::string &executable,
+                       const fs::path &directory) {
+  constexpr auto minimum_make_major = 4U;
+  const auto result = capture({executable, "--version"}, directory);
+  std::istringstream version(result.text);
+  std::string vendor, program;
+  unsigned major = 0;
+  version >> vendor >> program >> major;
+  if (result.status || vendor != "GNU" || program != "Make" ||
+      major < minimum_make_major)
+    throw std::runtime_error(
+        "the Make generator requires GNU Make 4 or newer; configure with "
+        "--build-tool gmake or select Ninja");
+}
+
 /// Removing a generated result is safe only at its physical, owned location.
 void invalidate_output(const fs::path &output) {
   if (fs::is_symlink(fs::symlink_status(output)) ||
@@ -223,6 +242,9 @@ void generate_make(const Graph &graph,
                    const Options &options,
                    const fs::path &clutch_executable) {
   const bool gnu = graph.backend.name == "make";
+  if (gnu)
+    validate_gnu_make(graph.backend.executable, graph.project.root);
+
   const auto &build = graph.project.build;
   // Reverse edges let an altered compile/archive/link command invalidate every
   // consuming output, independent of graph order and timestamp precision.
@@ -353,6 +375,19 @@ void generate_make(const Graph &graph,
     for (const auto &prefix : target.precompiled_headers) {
       const auto &creator = prefix.creator;
       fs::create_directories(creator.object.parent_path());
+      // A changed prefix list can be written within the old PCH's timestamp
+      // tick. Track its bytes explicitly and remove affected products before
+      // Make parses prerequisites; unchanged configuration retains every
+      // output.
+      write_response(fs::u8path(creator.object.u8string() + ".make.prefix"),
+                     input_signature(prefix.header),
+                     creator.object,
+                     [&] {
+                       for (const auto &unit : units)
+                         if (pch::for_unit(target, unit) == &prefix)
+                           invalidate_output(unit.object);
+                       invalidate_target(index);
+                     });
       const auto response = fs::u8path(creator.object.u8string() + ".make.rsp");
       auto arguments = creator.arguments;
       if (gnu && !graph.toolchain.msvc)
@@ -520,6 +555,9 @@ make_build_command(const Graph &graph,
                    const Options &options,
                    const std::vector<size_t> &target_indices) {
   const bool gnu = graph.backend.name == "make";
+  if (gnu)
+    validate_gnu_make(graph.backend.executable, graph.project.root);
+
   std::vector arguments{graph.backend.executable};
 
   if (gnu)

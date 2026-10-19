@@ -200,6 +200,28 @@ class BundleTests(unittest.TestCase):
         archive, _ = self.bundle(success=False)
         self.assertFalse(archive.exists())
 
+    def test_empty_external_dependency_directory_survives_extraction(self):
+        """Even a header package with no files must keep its declared root."""
+        (self.root / 'empty package').mkdir()
+        with (self.app / 'clutch.toml').open('a', encoding='utf-8') as stream:
+            stream.write('[dependencies]\nempty={path="../empty package",build_system="header-only"}\n')
+        archive, _ = self.bundle()
+        relocated = self.extract(archive)
+        self.configure(relocated)
+        self.assertIn('snapshot works', self.cli('run', root=relocated))
+
+    def test_exclusions_cannot_remove_test_or_pch_inputs(self):
+        """A snapshot must retain inputs of all declared targets and tests."""
+        self.write(self.app, 'prefix.hpp', '#pragma once\n')
+        self.write(self.app, 'checks/check.cpp', 'int main() { return 0; }\n')
+        with (self.app / 'clutch.toml').open('a', encoding='utf-8') as stream:
+            stream.write('[build]\npch=["prefix.hpp"]\n'
+                         '[[test]]\nname="check"\nsources=["checks/check.cpp"]\n')
+        for exclusion in ('prefix.hpp', 'checks/check.cpp'):
+            archive, message = self.bundle('failed.zip', '--exclude', exclusion, success=False)
+            self.assertIn('required source or include', message)
+            self.assertFalse(archive.exists())
+
     def test_external_installed_prefix_requires_portable_discovery(self):
         """SDK installations are prerequisites, not implicit redistribution roots."""
         sdk = self.root / 'installed sdk'

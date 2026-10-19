@@ -174,6 +174,12 @@ Directory listings are reused across brace alternatives and repeated patterns
 within one expansion, preserving the scan bound without repeated filesystem walks.
 Changing pattern membership requires reconfiguration.
 
+The GNU Make backend selects `gmake` before `make` and requires version 4 or
+newer, including when executing saved configurations. Prefix-list bytes also
+have a private content signature: changing them invalidates the PCH, its compile
+units and consuming products before Make parses rules, independent of timestamp
+precision. Unchanged prefixes retain their artifacts.
+
 ## Source snapshots
 
 `core/bundle/` resolves cached dependency pins, maps physical source roots into

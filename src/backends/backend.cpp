@@ -103,7 +103,7 @@ const std::vector<BackendDriver> &drivers() {
        "GNU Make (Unix, MinGW and MSYS)",
        Host::Any,
        "MAKE",
-       {"make", "gmake", "mingw32-make"},
+       {"gmake", "make", "mingw32-make"},
        generate_make,
        make_build_command},
       {"nmake",
