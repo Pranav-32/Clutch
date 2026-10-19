@@ -111,6 +111,15 @@ membership/version/link changes.
 
 ## Submit a change
 
+Report suspected vulnerabilities through the private channel in the
+[security policy](../.github/SECURITY.md). Keep sensitive reproductions out of
+public issues and pull requests.
+
+GitHub-managed CodeQL default setup scans C/C++, Python and workflow actions.
+Dependabot proposes grouped weekly updates to pinned GitHub Actions. Vendored
+C++ headers still need upstream advisory review when updating them; see the
+[dependency notes](../third_party/README.md).
+
 Create a branch in your fork and open a pull request. Describe the problem and
 resulting behavior, include a small reproduction for bugs, and list checks run
 with any host limitations. Windows generators require Windows; Xcode requires

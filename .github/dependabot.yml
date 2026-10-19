@@ -1,0 +1,15 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Keep pinned workflow actions current through reviewable, grouped PRs.
+# Vendored C++ headers are reviewed separately; no package manifest manages them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      workflow-actions:
+        patterns:
+          - '*'

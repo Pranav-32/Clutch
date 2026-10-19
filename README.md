@@ -167,6 +167,8 @@ formatting and review checks. The [development-container guide](docs/development
 provides a shared Docker environment for Linux, macOS and Windows hosts.
 Implementation details live in the [architecture guide](docs/architecture.md).
 
+Report vulnerabilities privately through the [security policy](.github/SECURITY.md).
+
 ## License
 
 Clutch is licensed under [BSD 3-Clause](LICENSE).
