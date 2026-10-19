@@ -25,7 +25,7 @@ Json diagnostic_message(const std::string &message) {
 
 Json capabilities() {
   auto kinds = Json::array();
-  for (const auto *kind : object_kinds)
+  for (const auto *const kind : object_kinds)
     kinds.push_back({{"kind", kind}, {"version", schema_version()}});
 
   return {{"clutch", {{"version", version}}},

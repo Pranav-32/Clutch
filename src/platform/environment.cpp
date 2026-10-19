@@ -23,10 +23,10 @@ std::optional<std::string> environment_value(const char *const name) {
   // Unicode compiler/install paths and must not pass through the ANSI CRT.
   const std::string key(name);
   const std::wstring wide_key(key.begin(), key.end());
-  if (const auto *value = _wgetenv(wide_key.c_str()))
+  if (const auto *const value = _wgetenv(wide_key.c_str()))
     return fs::path(value).u8string();
 #else
-  if (const auto *value = std::getenv(name))
+  if (const auto *const value = std::getenv(name))
     return std::string(value);
 #endif
   return std::nullopt;

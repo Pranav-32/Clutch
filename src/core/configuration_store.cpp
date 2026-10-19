@@ -29,9 +29,10 @@
 namespace clutch {
 namespace {
 // Increment this version when persisted graph fields or semantics change.
-// Version 5 stores UTF-8 paths and relocatable ELF shared-library commands.
-// Older host-encoded paths and link arguments require explicit reconfiguration.
-constexpr auto configuration_schema_version = 5;
+// Version 6 normalizes application shorthand beside explicit targets and
+// applies workspace compile defaults with deterministic local overrides.
+// Older resolved commands require explicit reconfiguration.
+constexpr auto configuration_schema_version = 6;
 
 /// Serialize paths as UTF-8 strings and preserve ordinary string argument
 /// values.
@@ -49,7 +50,7 @@ toml::array values(const std::vector<T> &items) {
 }
 
 /// Read a required saved string, reporting the corrupt field by name.
-std::string read_string(const toml::table &table, const char *key) {
+std::string read_string(const toml::table &table, const char *const key) {
   if (const auto value = table[key].value<std::string>(); value)
     return *value;
 
@@ -60,7 +61,7 @@ std::string read_string(const toml::table &table, const char *key) {
 /// Copy an argument/string array and reject any unexpected element type.
 std::vector<std::string> read_strings(const toml::table &table,
                                       const char *const key) {
-  if (const auto *array = table[key].as_array(); array) {
+  if (const auto *const array = table[key].as_array(); array) {
     std::vector<std::string> result;
     for (const auto &item : *array) {
       if (const auto value = item.value<std::string>(); value)
@@ -81,7 +82,7 @@ std::vector<std::string> read_strings(const toml::table &table,
 /// the returned reference. No reference to the diagnostic text escapes.
 const toml::array &read_nonempty_array(const toml::node *const value,
                                        const std::string_view error) {
-  if (const auto *array = value ? value->as_array() : nullptr;
+  if (const auto *const array = value ? value->as_array() : nullptr;
       array && !array->empty())
     return *array;
 
@@ -90,8 +91,9 @@ const toml::array &read_nonempty_array(const toml::node *const value,
 
 /// Require a saved target/unit record before interpreting its individual
 /// fields.
-const toml::table &read_table(const toml::node &value, const char *error) {
-  if (const auto *table = value.as_table(); table)
+const toml::table &read_table(const toml::node &value,
+                              const char *const error) {
+  if (const auto *const table = value.as_table(); table)
     return *table;
 
   throw std::runtime_error(error);
@@ -306,7 +308,8 @@ Graph load_configuration(const Options &options) {
   size_t target_index = 0;
   for (const auto &value : targets) {
     const auto &table = read_table(value, "invalid saved target");
-    const auto restore = [&](const char *key, std::vector<size_t> &indices) {
+    const auto restore = [&](const char *const key,
+                             std::vector<size_t> &indices) {
       for (const auto &name : read_strings(table, key)) {
         const auto found = std::find_if(graph.targets.begin(),
                                         graph.targets.end(),

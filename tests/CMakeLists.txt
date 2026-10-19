@@ -27,6 +27,7 @@ add_executable(clutch_graph_tests
         unit/graph_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/core/build_graph.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/resolve.cpp"
+        "${PROJECT_SOURCE_DIR}/src/core/targets/requirements.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/target.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/runtime.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/graph_visualization.cpp"

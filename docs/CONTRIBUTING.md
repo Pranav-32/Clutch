@@ -1,5 +1,47 @@
 # Contributing to Clutch
 
+Audience: contributors. Start here; reference guides are available when needed.
+
+Documentation fixes, examples, tests and bug reports are welcome alongside C/C++
+changes. You do not need to understand every backend to make a useful contribution.
+Please follow the [code of conduct](../.github/CODE_OF_CONDUCT.md).
+
+## Your first pull request
+
+1. Fork the repository and create a branch for one focused change. Browse
+   [good first issues](https://github.com/Pranav-32/Clutch/labels/good%20first%20issue),
+   or ask a question on an issue before starting a larger change.
+2. Use the [development container](development-container.md) or the native build
+   commands below. For a prose-only correction, edit the text and check its links;
+   a compiler setup is not required.
+3. Make the change and run relevant [tests](testing.md). Format changed C/C++ files.
+   For an example change, configure, build and run that example. State any checks
+   you could not run and why.
+4. Open a PR with a Conventional Commit title such as `docs: clarify compiler
+   selection` or `fix: preserve target include order`. Explain the problem and
+   resulting behavior, and link the issue if there is one. Draft PRs are welcome.
+5. Respond to review on the same branch. GitHub runs the platform checks described
+   in [versions and CI](releases.md#continuous-verification); you do not need every
+   operating system locally, and you do not create a release tag.
+
+For a small first change, correct an unclear sentence in the README or add a
+missing example explanation, verify the relevant links/commands, and open a
+focused `docs:` PR. Avoid unrelated formatting changes.
+
+## Get help and work with reviewers
+
+Use [GitHub issues](https://github.com/Pranav-32/Clutch/issues/new/choose) for setup
+questions, bugs and feature proposals. Search existing issues first. Include your
+Clutch version, platform, compiler/generator and a small manifest or command when
+relevant. Say what you tried; it is fine to ask before you have a proposed fix.
+Security reports use the [private reporting channel](../.github/SECURITY.md).
+
+Maintainers triage reports, request missing reproductions and identify scoped
+`good first issue` or `help wanted` work. Review focuses on behavior, compatibility,
+clarity and relevant checks. Explain disagreements with examples and evidence;
+address the code rather than the person. Review is volunteer work with no promised
+response deadline. A passing CI run does not guarantee acceptance of a proposal.
+
 Develop Clutch with its CMake project. Keep changes focused, demonstrate the
 resulting behavior with appropriate checks, and update affected documentation
 and examples.
@@ -85,7 +127,7 @@ For a compilation database with the actual compiler settings:
 cmake -S . -B build-tidy -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build build-tidy --parallel 2
 clang-tidy --config-file=.clang-tidy --verify-config
-clang-tidy -p build-tidy src/main.cpp
+python tests/scripts/tidy.py --database build-tidy --scope src --scope tests/unit
 ```
 
 Select the desired compiler on initial configuration. Keep the database in its
@@ -93,6 +135,23 @@ build directory. The advisory baseline covers analyzer, bug-prone, performance,
 portability and selected modernization/readability checks. Analyze owned sources
 only, review findings before applying fixes, and justify narrowly scoped
 `NOLINT` suppressions. Passing build tests does not establish clean analysis.
+
+The analysis runner fails if any source in its selected scope lacks a compilation
+command, validates the clang-tidy configuration, and treats enabled diagnostics
+as errors. Omit `--scope` to cover `src/`, `tests/unit/` and all examples; supply
+every configured example database with another `--database` argument. To extend
+the command above with just the flexible example, configure it and add both
+`--scope examples/flexible` and `--database examples/flexible/Clutch-build-debug`. Use
+`--jobs 2` for limited parallel analysis. Each database must describe the current
+host; headers are analyzed through the units that include them, and inactive
+platform branches need checks on their own host.
+
+LLVM 22's const-correctness check does not catch every deduced `auto` pointer or
+parameter binding. Review these explicitly: `const auto *const node` makes both
+the pointee and binding immutable; `auto *const node` keeps the pointee mutable.
+Qualify unchanged parameter bindings in definitions where useful, keeping
+redundant top-level `const` out of declarations. A clean analysis run does not
+replace that review.
 
 ## Tests and behavior changes
 

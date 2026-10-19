@@ -79,7 +79,7 @@ void validate_build_directory(const fs::path &root,
     throw std::runtime_error(
         "build directory cannot be the project root or its ancestor");
 
-  for (const auto *reserved :
+  for (const auto *const reserved :
        {"src", "include", ".git", ".idea", layout::environment})
     if (contains(root / reserved, directory))
       throw std::runtime_error("build directory cannot be inside " +
@@ -128,7 +128,7 @@ void prepare_build_directory(const Project &project) {
   }
 
   for (const auto &member : project.projects)
-    for (const auto *reserved :
+    for (const auto *const reserved :
          {"src", "include", ".git", ".idea", layout::environment})
       if (contains(member.root / reserved, project.build))
         throw std::runtime_error(
@@ -152,7 +152,7 @@ void prepare_build_directory(const Project &project) {
           "build directory contains an include directory: " +
           include.u8string());
 
-  for (const auto *specs : {&project.targets, &project.tests}) {
+  for (const auto *const specs : {&project.targets, &project.tests}) {
     for (const auto &target : *specs) {
       const auto validate_includes =
           [&](const std::vector<fs::path> &includes) {

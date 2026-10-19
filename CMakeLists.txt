@@ -45,6 +45,7 @@ add_executable(clutch
     src/core/project.cpp
     src/core/targets/archive.cpp
     src/core/targets/manifest.cpp
+    src/core/targets/requirements.cpp
     src/core/targets/resolve.cpp
     src/core/targets/runtime.cpp
     src/core/targets/target.cpp

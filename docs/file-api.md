@@ -1,5 +1,8 @@
 # Clutch file API v1
 
+Audience: IDE integrators and contributors changing code-model output. This protocol
+reference is not required for general contributions.
+
 Clutch provides a versioned JSON query/reply interface for IDEs and developer
 tools. Clients request build metadata; `clutch .` exports it from the same graph
 used by native generators and `compile_commands.json`. Configuration does not
@@ -44,11 +47,28 @@ Under the reported query directory, create a client-owned query:
 ```json
 {
   "requests": [
-    { "kind": "codemodel", "version": 1 },
-    { "kind": "toolchains", "version": [2, { "major": 1, "minor": 0 }] },
-    { "kind": "inputs", "version": 1 }
+    {
+      "kind": "codemodel",
+      "version": 1
+    },
+    {
+      "kind": "toolchains",
+      "version": [
+        2,
+        {
+          "major": 1,
+          "minor": 0
+        }
+      ]
+    },
+    {
+      "kind": "inputs",
+      "version": 1
+    }
   ],
-  "client": { "requestId": "my-ide-42" }
+  "client": {
+    "requestId": "my-ide-42"
+  }
 }
 ```
 
@@ -65,15 +85,15 @@ and [query schema](file-api/query-v1.schema.json) are included.
 Each client uses a distinct `client-<name>` directory and may manage only its own
 query files. Clutch reads queries without modifying them. Supported forms are:
 
-| Location under `query/` | Form |
-| --- | --- |
-| `codemodel-v1`, `toolchains-v1`, `inputs-v1` | Empty shared stateless request |
-| `client-<name>/<kind>-v<major>` | Empty client-owned stateless request |
-| `client-<name>/query.json` | Stateful JSON request with a `requests` array |
+| Location under `query/`                      | Form                                          |
+|----------------------------------------------|-----------------------------------------------|
+| `codemodel-v1`, `toolchains-v1`, `inputs-v1` | Empty shared stateless request                |
+| `client-<name>/<kind>-v<major>`              | Empty client-owned stateless request          |
+| `client-<name>/query.json`                   | Stateful JSON request with a `requests` array |
 
 A stateless major version is an unsigned decimal integer with no leading zeros.
-Stateful versions accept a nonnegative integer major, a `{major, minor}` object
-(minor defaults to zero), or an ordered nonempty array of either form. A version
+Stateful versions accept a nonnegative integer major, a `{major, minor}` object (minor defaults to zero), or an ordered
+nonempty array of either form. A version
 object specifies the minimum required minor. Clutch selects a supported major
 and its current minor; currently every supported object is version 1.0. Floats,
 strings, booleans, negative versions and nested version arrays are invalid.
@@ -132,17 +152,17 @@ the file API does not translate compiler environments or paths across hosts.
 
 The index contains:
 
-| Field | Meaning |
-| --- | --- |
-| `api` | File-layout `{major, minor}` version |
-| `clutch.version` | Producing Clutch executable's release/Git identity |
-| `generation` | Monotonically increasing, zero-padded decimal snapshot identifier |
-| `status` | `success` or `error` |
-| `profile`, `paths.source`, `paths.build` | Snapshot identity |
-| `manifest` | Successful snapshot's FNV-1a manifest byte fingerprint |
-| `objects` | References to the unique requested top-level objects |
-| `reply` | Query-directory structure, per-request responses and diagnostics |
-| `error` | Configuration failure code/message when status is `error` |
+| Field                                    | Meaning                                                           |
+|------------------------------------------|-------------------------------------------------------------------|
+| `api`                                    | File-layout `{major, minor}` version                              |
+| `clutch.version`                         | Producing Clutch executable's release/Git identity                |
+| `generation`                             | Monotonically increasing, zero-padded decimal snapshot identifier |
+| `status`                                 | `success` or `error`                                              |
+| `profile`, `paths.source`, `paths.build` | Snapshot identity                                                 |
+| `manifest`                               | Successful snapshot's FNV-1a manifest byte fingerprint            |
+| `objects`                                | References to the unique requested top-level objects              |
+| `reply`                                  | Query-directory structure, per-request responses and diagnostics  |
+| `error`                                  | Configuration failure code/message when status is `error`         |
 
 Each successful object reference has `kind`, `{major, minor}` `version`, and
 `jsonFile`. Client query replies contain `requests`, ordered `responses` and any
@@ -264,6 +284,11 @@ they must not prune reply files. Metadata storage grows with configurations whil
 the API is active, so normal profile cleanup also reclaims historical replies.
 
 ## Compatibility
+
+Default applications created from project entry/source settings are ordinary
+targets in the code model. Source arguments include inherited workspace compile
+defaults and local overrides, using the same graph as the compilation database
+and native builds. This does not introduce a separate target kind.
 
 Layout major, object major/minor and Clutch release versions are independent.
 Readers must tolerate unknown fields. Compatible additive changes increase the

@@ -1,0 +1,11 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Keep blank issues available and route sensitive reports privately.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Pranav-32/Clutch/security/advisories/new
+    about: Keep security details out of public issues and pull requests.
+  - name: Contributor quick start
+    url: https://github.com/Pranav-32/Clutch/blob/main/docs/CONTRIBUTING.md#your-first-pull-request
+    about: Find setup, first-PR steps and ways to ask for help.

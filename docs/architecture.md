@@ -1,5 +1,8 @@
 # Architecture
 
+Audience: Contributors changing internals. Start with CONTRIBUTING.md for setup and a
+first PR.
+
 Clutch configures C/C++ projects from `clutch.toml`, resolves a target graph,
 and generates native build files and IDE metadata. CMake builds Clutch itself;
 it is not Clutch's configuration engine.
@@ -36,6 +39,13 @@ and dependency edges. Public requirements propagate through declared library
 links. Workspace targets use qualified identities and retain their owning
 project's paths and standards. Duplicate output producers and dependency cycles
 are rejected before generation and after loading saved state.
+
+Application shorthand is normalized alongside explicit targets before resolving
+links. Root workspace include directories and definitions provide defaults for
+all members. `core/targets/requirements.*` applies local include precedence and
+merges definitions by macro identifier, so native rules, saved commands and IDE
+metadata share one resolved policy. Public library interfaces stay separate from
+private project defaults.
 
 `build`, `run` and `test` load the saved graph and invoke the selected backend.
 They reject changed manifests or locks using content fingerprints. Source/header

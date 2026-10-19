@@ -1,5 +1,7 @@
 # Testing Clutch
 
+Audience: Contributors choosing and running checks for their changes.
+
 Run commands from the checkout root. These checks develop Clutch itself;
 tests in projects built by Clutch use the [project workflow](usage.md#project-workflows).
 
@@ -77,6 +79,11 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.targets` | Library/application links, public requirements, target selection, archive replacement, import libraries and DLL staging |
 | `clutch.workspace` | Qualified links, member boundaries/standards, locks, stale inputs, relocation and native regeneration |
 
+`tests/scripts/tidy.py` checks enabled clang-tidy diagnostics and compilation
+database coverage for owned sources. See [static analysis](CONTRIBUTING.md#static-analysis)
+for native database setup and example coverage. Tooling tests exercise missing
+commands, generated-source exclusion and invalid database records without LLVM.
+
 Generator tests run available host tools: Ninja/GNU Make on POSIX, Ninja/NMake/
 Visual Studio on Windows, and Xcode on macOS. JOM and Windows GNU Make are
 exercised when present. Report what ran and any skips. Python powers test
@@ -90,6 +97,13 @@ Workspace checks distinguish harmless repeated local
 names from conflicting shared-library loader names. Linux target checks move
 an artifact tree and execute its shared-library consumer to catch absolute
 `DT_NEEDED` paths. Moving saved configuration itself still requires reconfiguration.
+
+Flexible-manifest regressions combine root application shorthand, explicit
+libraries and member manifests. They compile local macro/header overrides,
+verify discovery excludes sources owned by explicit targets, reject invalid
+application links and name conflicts, and compare file-API source commands with
+the compilation database. Shared compile settings preserve project-level lock
+resolution and are checked with each available native generator.
 
 Tooling tests use disposable repositories and install trees to check source
 identity, release-only CI classification, package notices/checksums and failure

@@ -16,4 +16,8 @@ struct Project;
 /// Resolve target-local paths, reject ambiguous declarations and duplicate
 /// names.
 void load_manifest_targets(const toml::table &document, Project &project);
+
+/// Apply project.entry/build.sources and build.links to the project's named
+/// application, creating it beside explicit targets when requested.
+void complete_application_target(const toml::table &document, Project &project);
 }  // namespace clutch

@@ -1,5 +1,7 @@
 # Development container
 
+Audience: Contributors using the shared Linux development environment.
+
 The checked-in container provides a shared Ubuntu development environment on
 Linux, macOS and Windows hosts. It includes CMake, Ninja, GNU Make, GCC, LLVM 22,
 Graphviz, Git, GitHub CLI, debugging tools and Python for tests. Windows and

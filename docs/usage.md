@@ -1,5 +1,7 @@
 # Using Clutch
 
+Audience: Users configuring, building and testing C/C++ projects with Clutch.
+
 Configure and build C and C++ projects with Clutch. For your first project, see
 the [quick start](../README.md#quick-start); for every manifest field, see the
 [manifest reference](manifest.md).
@@ -118,6 +120,12 @@ an `include/` directory is optional and added automatically when present.
 `project.entry` can add an entry source. Without explicit targets, application
 sources form one executable. `version` is metadata. Use `[[target]]` for multiple
 executables and static/shared libraries; see the [target reference](manifest.md#target).
+
+Application shorthand can coexist with library targets: keep `project.entry` or
+`build.sources`, then use `build.links` for the application's libraries. Workspace
+roots may share include directories and definitions with members, which can
+override them locally. The [flexible example](../examples/flexible/README.md)
+combines these forms in one runnable project.
 
 `warnings = "none"` suppresses compiler warnings with `-w` on GCC/Clang or
 `/W0` on MSVC-style drivers. Errors remain errors. `default` enables `-Wall`

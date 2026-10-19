@@ -18,7 +18,6 @@ Checks: >-
   -portability-restrict-system-includes,
   misc-const-correctness,
   modernize-use-auto,
-  modernize-use-ctad,
   modernize-redundant-void-arg,
   modernize-use-equals-default,
   modernize-use-equals-delete,
@@ -27,13 +26,14 @@ Checks: >-
   modernize-use-using,
   readability-redundant-control-flow,
   readability-qualified-auto,
+  readability-non-const-parameter,
   readability-avoid-const-params-in-decls,
   readability-redundant-declaration
 WarningsAsErrors: ''
 
 # Main source files are always diagnosed. Restrict additional header diagnostics
-# to src/; vendor headers and generated build-tree files are outside that tree.
-HeaderFilterRegex: '(^|[/\\])src[/\\]'
+# to owned code; examples and test headers receive the same checks as src/.
+HeaderFilterRegex: '(^|[/\\])(src|examples|tests[/\\]unit)[/\\]'
 SystemHeaders: false
 
 # Explicitly requested fixes use the existing formatting rules. This setting
@@ -42,6 +42,8 @@ FormatStyle: file
 
 # Check both the pointee and the pointer binding when a local pointer can be const.
 CheckOptions:
+  misc-const-correctness.AnalyzePointers: true
+  misc-const-correctness.WarnPointersAsPointers: true
   misc-const-correctness.WarnPointersAsValues: true
   misc-const-correctness.TransformPointersAsValues: true
 ...

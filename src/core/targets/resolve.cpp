@@ -11,6 +11,7 @@
 #include "resolve.hpp"
 
 #include "core/build_graph.hpp"
+#include "core/targets/requirements.hpp"
 
 #include <algorithm>
 #include <array>
@@ -96,6 +97,8 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
 
     auto &resolved = result[index];
     auto &spec = resolved.spec;
+    const auto local_defines = spec.defines;
+    const auto public_defines = spec.public_defines;
     resolved.needs_cpp = std::any_of(spec.sources.begin(),
                                      spec.sources.end(),
                                      [](const fs::path &source) {
@@ -109,6 +112,10 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
       append_unique(spec.public_defines,
                     result[dependency].spec.public_defines);
     }
+    // A target's own public interface overrides inherited defaults. Keep the
+    // exported definitions independent of private member/target settings.
+    spec.public_defines = merge_defines(spec.public_defines, public_defines);
+
     append_unique(spec.includes, spec.public_includes);
     append_unique(spec.defines, spec.public_defines);
     for (const auto dependency : resolved.dependencies) {
@@ -116,6 +123,9 @@ std::vector<ResolvedTarget> resolve_targets(const Project &project) {
       append_unique(spec.defines, result[dependency].spec.public_defines);
       resolved.needs_cpp = resolved.needs_cpp || result[dependency].needs_cpp;
     }
+    // Local settings are deliberate overrides; avoid competing -D or /D flags
+    // when a member or target specializes a shared compile default.
+    spec.defines = merge_defines(spec.defines, local_defines);
 
     // Traverse private dependencies of archives: archives do not absorb their
     // dependencies. Shared libraries expose only their public link interface.

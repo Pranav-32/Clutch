@@ -8,6 +8,7 @@
 
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
+#include "core/targets/requirements.hpp"
 #include <algorithm>
 #include <set>
 #include <stdexcept>
@@ -43,14 +44,10 @@ void append_project(Project &workspace, Project member) {
       spec.c_standard = member.c_standard;
       spec.cxx_standard = member.cxx_standard;
       spec.name = prefix + spec.local_name;
-      spec.includes.insert(spec.includes.begin(),
-                           member.includes.begin(),
-                           member.includes.end());
-      spec.defines.insert(spec.defines.begin(),
-                          member.defines.begin(),
-                          member.defines.end());
+      spec.includes = merge_includes(member.includes, spec.includes);
+      spec.defines = merge_defines(member.defines, spec.defines);
 
-      for (auto *links : {&spec.links, &spec.public_links})
+      for (auto *const links : {&spec.links, &spec.public_links})
         for (auto &link : *links)
           if (link.find("::") == std::string::npos)
             link.insert(0, prefix);
@@ -70,8 +67,8 @@ void append_project(Project &workspace, Project member) {
 std::vector<fs::path> workspace_member_roots(const fs::path &root,
                                              const toml::table &document) {
   std::vector<fs::path> result;
-  if (const auto *node = document.get("workspace")) {
-    const auto *table = node->as_table();
+  if (const auto *const node = document.get("workspace")) {
+    const auto *const table = node->as_table();
     if (!table)
       throw std::runtime_error("workspace must be a table");
 
@@ -82,7 +79,7 @@ std::vector<fs::path> workspace_member_roots(const fs::path &root,
                                  std::string(key.str()));
     }
 
-    const auto *members = (*table)["members"].as_array();
+    const auto *const members = (*table)["members"].as_array();
     if (!members || members->empty())
       throw std::runtime_error(
           "workspace.members must be a nonempty array of directory paths");
@@ -155,12 +152,12 @@ Project load_project(const Options &options) {
       throw std::runtime_error(
           "virtual workspace targets belong in a member or a root [project]");
 
-    if (const auto *build = document["build"].as_table())
+    if (const auto *const build = document["build"].as_table())
       for (const auto &[key, value] : *build) {
         (void)value;
-        if (key.str() != "generator")
-          throw std::runtime_error(
-              "virtual workspace build settings support only generator");
+        if (key.str() == "sources" || key.str() == "links")
+          throw std::runtime_error("workspace sources and application links "
+                                   "require a root [project]");
       }
   }
 
@@ -174,9 +171,19 @@ Project load_project(const Options &options) {
   workspace.warnings = settings.warnings;
   workspace.is_workspace = true;
   workspace.language = "mixed";
+  // Root compile settings are shared defaults; paths were resolved against the
+  // root manifest before members are loaded in their independent source roots.
+  workspace.includes = settings.includes;
+  workspace.defines = settings.defines;
 
-  if (!virtual_root)
+  if (!virtual_root) {
+    // The real root's [build] settings are already workspace defaults. Applying
+    // them again as member-local settings would incorrectly override public
+    // library requirements and differ from standalone target resolution.
+    settings.includes.clear();
+    settings.defines.clear();
     append_project(workspace, std::move(settings));
+  }
 
   for (const auto &path : members) {
     const auto input = path / layout::manifest;

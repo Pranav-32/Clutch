@@ -40,7 +40,7 @@ constexpr std::array c_standards{"99", "11", "17", "23"};
 /// returned reference; report invalid node types with the supplied context.
 const toml::table &require_table(const toml::node *const node,
                                  const char *const error) {
-  if (const auto *table = node ? node->as_table() : nullptr; table)
+  if (const auto *const table = node ? node->as_table() : nullptr; table)
     return *table;
 
   throw std::runtime_error(error);
@@ -50,7 +50,7 @@ const toml::table &require_table(const toml::node *const node,
 /// reference. The diagnostic text is never retained.
 const toml::array &require_array(const toml::node *const node,
                                  const std::string_view error) {
-  if (const auto *array = node ? node->as_array() : nullptr; array)
+  if (const auto *const array = node ? node->as_array() : nullptr; array)
     return *array;
 
   throw std::runtime_error(std::string(error));
@@ -91,7 +91,7 @@ std::string standard(const toml::node *const node, const std::string &context) {
   if (const auto value = node->value<std::string>())
     return *value;
 
-  if (const auto *value = node->as_integer(); value)
+  if (const auto *const value = node->as_integer(); value)
     return std::to_string(value->get());
 
   throw std::runtime_error(context +
@@ -137,7 +137,7 @@ Project load_project_manifest(const Options &options,
                                " must be a string");
   }
 
-  if (const auto *node = doc.get("build")) {
+  if (const auto *const node = doc.get("build")) {
     const auto &build = require_table(node, "build must be a table");
 
     if (build.contains("toolchain"))
@@ -145,13 +145,15 @@ Project load_project_manifest(const Options &options,
           "build.toolchain was renamed to build.generator; select the build "
           "generator with generator = \"ninja\" under [build]");
 
-    keys(build, {"sources", "include_dirs", "defines", "generator"}, "build");
-    if (const auto *value = build.get("generator");
+    keys(build,
+         {"sources", "include_dirs", "defines", "generator", "links"},
+         "build");
+    if (const auto *const value = build.get("generator");
         value && !value->is_string())
       throw std::runtime_error("build.generator must be a string");
   }
 
-  if (const auto *node = doc.get("profile")) {
+  if (const auto *const node = doc.get("profile")) {
     const auto &profiles = require_table(node, "profile must be a table");
 
     keys(profiles, {"debug", "release"}, "profile");
@@ -185,10 +187,11 @@ Project load_project_manifest(const Options &options,
     throw std::runtime_error("project.version must be a nonempty string");
 
   if (doc.contains("dependencies"))
-    throw std::runtime_error("dependencies are not supported in Phase I");
+    throw std::runtime_error(
+        "dependency imports are not supported yet; use local targets or workspace members");
 
   // Apply one checked array-of-strings reader to sources, includes and defines.
-  const auto array = [&](const char *key, const auto &append) {
+  const auto array = [&](const char *const key, const auto &append) {
     if (const auto node = doc["build"][key]; node) {
       const auto &values = require_array(node.node(),
                                          std::string("build.") + key +
@@ -200,10 +203,12 @@ Project load_project_manifest(const Options &options,
     }
   };
 
-  if (!virtual_workspace)
-    load_manifest_targets(doc, p);
-
-  if (!virtual_workspace && p.targets.empty()) {
+  const bool application_sources =
+      doc["project"]["entry"] || doc["build"]["sources"];
+  std::set<fs::path> discovered_sources;
+  fs::path explicit_entry;
+  if (!virtual_workspace && (!doc.contains("target") || application_sources ||
+                             doc["build"]["links"])) {
     // Prefer explicit sources; otherwise discover src/ and add any explicit
     // entry.
     array("sources", [&](const std::string &s) {
@@ -214,13 +219,53 @@ Project load_project_manifest(const Options &options,
         if (const auto ext = e.path().extension().u8string();
             e.is_regular_file() &&
             (ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx"))
-          p.sources.push_back(fs::canonical(e.path()));
+          discovered_sources.insert(fs::canonical(e.path()));
       }
+      p.sources.insert(p.sources.end(),
+                       discovered_sources.begin(),
+                       discovered_sources.end());
     }
 
-    if (const auto entry = doc["project"]["entry"].value<std::string>())
-      p.sources.push_back(fs::canonical(p.root / fs::u8path(*entry)));
-  } else {
+    if (const auto entry = doc["project"]["entry"].value<std::string>()) {
+      explicit_entry = fs::canonical(p.root / fs::u8path(*entry));
+      p.sources.push_back(explicit_entry);
+    }
+  }
+
+  if (!virtual_workspace) {
+    // Normalize before target parsing: a matching application may omit sources
+    // when the project already supplies them through entry or discovery.
+    std::sort(p.sources.begin(), p.sources.end());
+    p.sources.erase(std::unique(p.sources.begin(), p.sources.end()),
+                    p.sources.end());
+    load_manifest_targets(doc, p);
+
+    // Explicit targets own their discovered files. Deliberately listed build
+    // sources and the entry remain in the application even if another target
+    // also compiles them; only automatic discovery yields ownership.
+    p.sources.erase(
+        std::remove_if(p.sources.begin(),
+                       p.sources.end(),
+                       [&](const fs::path &source) {
+                         return source != explicit_entry &&
+                                discovered_sources.count(source) &&
+                                std::any_of(p.targets.begin(),
+                                            p.targets.end(),
+                                            [&](const TargetSpec &target) {
+                                              return target.name != p.name &&
+                                                     std::find(
+                                                         target.sources.begin(),
+                                                         target.sources.end(),
+                                                         source) !=
+                                                         target.sources.end();
+                                            });
+                       }),
+        p.sources.end());
+    complete_application_target(doc, p);
+  }
+
+  if (!p.targets.empty()) {
+    p.sources.clear();
     for (const auto &target : p.targets)
       p.sources.insert(p.sources.end(),
                        target.sources.begin(),
@@ -268,13 +313,13 @@ Project load_project_manifest(const Options &options,
 
   // Mixed projects need separate standards; single-language projects accept a
   // scalar. Unspecified values retain the C11/C++17 defaults in Project.
-  if (const auto *node = project.get("std")) {
-    if (const auto *standards = node->as_table()) {
+  if (const auto *const node = project.get("std")) {
+    if (const auto *const standards = node->as_table()) {
       keys(*standards, {"c", "cpp"}, "project.std");
-      if (const auto *value = standards->get("c"))
+      if (const auto *const value = standards->get("c"))
         p.c_standard = standard(value, "project.std.c");
 
-      if (const auto *value = standards->get("cpp"))
+      if (const auto *const value = standards->get("cpp"))
         p.cxx_standard = standard(value, "project.std.cpp");
     } else {
       if (p.language == "mixed")

@@ -1,5 +1,7 @@
 # Installing Clutch
 
+Audience: Users installing Clutch, and contributors preparing a native build.
+
 Build Clutch from a source checkout with CMake 3.20 or newer and a C++17
 compiler. The header-only CLI11, toml++ and JSON dependencies are included in
 `third_party/`, so building Clutch requires no dependency downloads. See the

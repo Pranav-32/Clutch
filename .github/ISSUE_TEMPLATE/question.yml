@@ -1,0 +1,24 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Welcome setup and first-contribution questions without a required fix.
+name: Help or contribution question
+description: Ask about setup, usage, or where to start contributing.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions are welcome. Start with the [contributor quick start](https://github.com/Pranav-32/Clutch/blob/main/docs/CONTRIBUTING.md#your-first-pull-request)
+        or [usage guide](https://github.com/Pranav-32/Clutch/blob/main/docs/usage.md).
+  - type: textarea
+    id: question
+    attributes:
+      label: What would you like help with?
+      description: Explain your goal and where you are stuck. Include what you have tried, if anything.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Relevant environment or example
+      description: For build questions, include Clutch version, OS, compiler, generator and a minimal manifest.

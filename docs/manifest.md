@@ -1,5 +1,8 @@
 # clutch.toml reference
 
+Audience: Users writing clutch.toml files. Start with the runnable examples for a
+smaller introduction.
+
 `clutch.toml` describes C/C++ executable and library targets and optional
 test executables. This reference covers the fields currently implemented by
 Clutch. Configure the directory containing the manifest before building:
@@ -29,7 +32,7 @@ C and mixed-language projects using these fields.
 | Table | Required | Purpose |
 | --- | --- | --- |
 | `[project]` | Yes, except a virtual workspace root | Project name/version, language, standards and optional entry source |
-| `[build]` | No | Generator, application sources, include directories and definitions |
+| `[build]` | No | Generator, application sources/links, include directories and definitions |
 | `[profile.debug]` | No | Debug build directory, optimization and warnings |
 | `[profile.release]` | No | Release build directory, optimization and warnings |
 | `[workspace]` | No | Compose explicit member projects; a virtual root may omit `[project]` |
@@ -59,8 +62,10 @@ strings (`'D:\code\headers'`) or escape each backslash in a basic quoted string
 
 Workspace roots coordinate profiles and generator selection. A root with no
 `[project]` is virtual and declares no sources/targets/tests of its own; its
-`[build]` permits only `generator`. A root with `[project]` participates as a real
-project. Members retain their own language/standards and source-relative paths,
+`[build]` accepts `generator`, shared `include_dirs` and shared `defines`. A root
+with `[project]` participates as a real project and may also declare application
+sources and links. Root include directories and definitions are shared with
+members in either layout. Members retain their own language/standards and source-relative paths,
 but cannot override `[profile]` or `build.generator`. Unknown workspace fields,
 duplicate directories/project names, escaping/redirected paths and nested
 workspaces are rejected. Globs/exclusions and automatic upward discovery are
@@ -78,7 +83,7 @@ manifest fields and host-specific `backend.toml`/`configuration.toml` caches.
 
 | Field | Type | Required/default | Behavior |
 | --- | --- | --- | --- |
-| `name` | String | Required | Nonempty name containing letters, digits, `_` or `-`. Names the implicit application when no `[[target]]` is declared, with `.exe` appended on Windows. |
+| `name` | String | Required | Nonempty name containing letters, digits, `_` or `-`. Also names the default application created from project source settings, with `.exe` appended on Windows. |
 | `version` | String | Required | Nonempty project metadata, recorded in `clutch.lock`. Not checked as semantic versioning or added as a compiler macro. |
 | `language` | String | `"auto"` | `"c"`, `"cpp"`, `"c++"`, `"mixed"` or `"auto"`; `"c++"` is an alias for `"cpp"`. |
 | `std` | Integer, string or table | C `11`; C++ `17` | Select language standards; see the rules below. |
@@ -143,8 +148,9 @@ Clutch validates both standard values even if a language is currently unused.
 | --- | --- | --- | --- |
 | `generator` | String | `"ninja"` | Native build-file format and executor family; the configuration CLI's `--generator` overrides it. |
 | `sources` | Array of string paths | Discover recursively under `src/` | Application compilation units; a nonempty array replaces discovery. An empty array also triggers discovery. |
-| `include_dirs` | Array of string paths | Empty, plus an existing root `include/` | Existing directories added to every application's and test's header search paths. |
-| `defines` | Array of strings | Empty | Preprocessor definitions added to every application/test unit. |
+| `include_dirs` | Array of string paths | Empty, plus an existing root `include/` | Existing directories added to every target/test in the project; workspace-root directories are shared with members. |
+| `defines` | Array of strings | Empty | Preprocessor definitions for every target/test in the project; workspace-root definitions are shared with members. |
+| `links` | Array of target names | Empty | Private library dependencies of the default application named by `project.name`; accepts qualified workspace names. |
 
 ```toml
 [build]
@@ -171,6 +177,19 @@ For a single file outside `src/`, either specify `sources = ["main.cpp"]` under
 `[build]` or `entry = "main.cpp"` under `[project]`. `entry` alone still includes
 any sources found under `src/`.
 
+With explicit targets, `project.entry`, `build.sources` or nonempty `build.links`
+enables the default application. It coexists with the declared libraries/executables. Files
+found automatically under `src/` are excluded from that application when another
+explicit target owns them. Explicitly listed sources and the entry file remain
+deliberate selections; Clutch does not remove them. Each target compiles each of
+its sources only once.
+
+`build.links` attaches libraries to the default application. If there is already
+an explicit executable with the project's name, it receives these links and
+the project source defaults instead of creating a second target. The library
+and application must have different names. A virtual workspace root needs
+`[project]` before it can declare application sources or links.
+
 Header directories can be colocated with sources. An existing root `include/`
 directory is automatically added, but that directory layout is optional. Headers
 do not need to be listed as sources. Include paths become `-I<path>` or
@@ -178,6 +197,15 @@ do not need to be listed as sources. Include paths become `-I<path>` or
 definition, without these flag prefixes. Each definition is one argument; an
 equals sign gives it a value, while a bare name defines the macro without an
 explicit value in the command line.
+
+Target/member include directories precede inherited workspace directories;
+repeated paths are emitted once. Definitions are merged by macro name, with
+later definitions replacing earlier ones: workspace defaults, then member
+defaults, then target definitions. This avoids duplicate macro arguments when a
+member overrides a shared value. Public requirements from linked libraries are
+applied during target resolution; prefer consistent public macro values across
+providers. Local member/target definitions override inherited public requirements
+for that target's compilation; only declared public requirements are exported.
 
 ### Generators and compiler selection
 
@@ -289,10 +317,30 @@ Reconfigure after cleaning or moving the project.
 ## Target
 
 Use repeatable `[[target]]` tables for multiple executables or local libraries.
-Explicit targets replace implicit application discovery: omit `build.sources`
-and `project.entry`. The project name remains metadata; it does not create an
-additional executable. All targets inherit project language standards and the
-active profile. Global `build.include_dirs` and `build.defines` apply to all units.
+Without `build.sources`, `project.entry` or nonempty `build.links`, explicit
+targets supply the project's source lists and do not create an additional executable. You can also keep the
+application shorthand and add explicit libraries:
+
+```toml
+[project]
+name = "calculator"
+version = "0.1.0"
+entry = "app/main.cpp"
+
+[build]
+links = ["math"]
+
+[[target]]
+name = "math"
+type = "static"
+sources = ["math/math.cpp"]
+public_include_dirs = ["math"]
+```
+
+This creates `calculator` and `math`. An explicit executable named `calculator`
+can add settings to the default application and may omit `sources` when project
+source defaults supply them. All targets inherit project language standards and
+the active profile. `build.include_dirs` and `build.defines` apply to all units.
 
 Names must also avoid platform device names and generated metadata locations.
 
@@ -300,7 +348,7 @@ Names must also avoid platform device names and generated metadata locations.
 | --- | --- | --- | --- |
 | `name` | String | Required | Letters, digits, `_`, `-`; unique across all targets and tests |
 | `type` | String | `"executable"` | `"executable"`, `"static"` or `"shared"` |
-| `sources` | Nonempty array of string paths | Required | Complete source list; no discovery or globs |
+| `sources` | Array of string paths | Required except for the executable matching `project.name` with project source defaults | Explicit compilation units; matching application defaults are merged and deduplicated; no globs |
 | `include_dirs` | Array of string paths | Empty | Private header search directories |
 | `public_include_dirs` | Array of string paths | Empty | Header directories used here and by consumers |
 | `defines` | Array of strings | Empty | Private preprocessor definitions |

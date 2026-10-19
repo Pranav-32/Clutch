@@ -14,6 +14,7 @@
 #include "build_graph.hpp"
 
 #include "core/options.hpp"
+#include "core/targets/requirements.hpp"
 #include "core/targets/resolve.hpp"
 #include "core/targets/runtime.hpp"
 #include "platform/files.hpp"
@@ -175,14 +176,8 @@ Graph make_build_graph(Project project,
     target.build_by_default = spec.build_by_default;
     target.dependencies = resolved.dependencies;
     target.link_dependencies = resolved.link_dependencies;
-    target.includes = p.includes;
-    target.defines = p.defines;
-    target.includes.insert(target.includes.end(),
-                           spec.includes.begin(),
-                           spec.includes.end());
-    target.defines.insert(target.defines.end(),
-                          spec.defines.begin(),
-                          spec.defines.end());
+    target.includes = merge_includes(p.includes, spec.includes);
+    target.defines = merge_defines(p.defines, spec.defines);
     target.output = target_output(p, spec, toolchain.msvc);
     target.import_library =
         target_import_library(target.output, spec.type, toolchain.msvc);

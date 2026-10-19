@@ -231,7 +231,7 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
   }
 
   // Search ordinary executable names before optional IDE-bundled installations.
-  for (const auto *candidate : driver.executable_names) {
+  for (const auto *const candidate : driver.executable_names) {
     if (const auto executable = find_program(candidate); !executable.empty())
       return {driver.name, executable};
   }

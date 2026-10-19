@@ -11,6 +11,7 @@ The application examples use Ninja and installed C/C++ compilers by default.
 | [mixed](mixed/clutch.toml)             | C and C++ sources with separate standards             |
 | [targets](targets/README.md)           | Local libraries, public requirements and linked tests |
 | [workspace](workspace/README.md)       | Member manifests, qualified links and a portable lock |
+| [flexible](flexible/README.md)         | Root application, libraries, members and compile overrides |
 | [file-api](file-api/README.md)         | Developer-tool client for the native file API         |
 
 From the repository root:

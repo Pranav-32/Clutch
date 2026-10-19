@@ -102,12 +102,12 @@ std::string existing(const fs::path &path) {
                                std::string(key.str()));
   }
 
-  const auto *projects = document["project"].as_array();
+  const auto *const projects = document["project"].as_array();
   if (!projects || projects->empty())
     throw std::runtime_error("clutch.lock requires project records");
 
   for (const auto &value : *projects) {
-    const auto *record = value.as_table();
+    const auto *const record = value.as_table();
     if (!record)
       throw std::runtime_error("invalid clutch.lock project record");
 
@@ -123,12 +123,12 @@ std::string existing(const fs::path &path) {
       }
     }
 
-    for (const auto *key : {"name", "version", "path"})
+    for (const auto *const key : {"name", "version", "path"})
       if (!(*record)[key].is_string())
         throw std::runtime_error(
             "clutch.lock project is missing a string field");
 
-    if (const auto *dependencies = (*record)["dependencies"].as_array()) {
+    if (const auto *const dependencies = (*record)["dependencies"].as_array()) {
       for (const auto &dependency : *dependencies)
         if (!dependency.is_string())
           throw std::runtime_error(

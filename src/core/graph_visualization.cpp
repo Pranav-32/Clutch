@@ -67,19 +67,20 @@ void write_graph_visualization(const Graph &graph) {
   std::map<fs::path, size_t> nodes;
   // Intern shared paths once; relative labels stay readable and tooltips stay
   // exact.
-  const auto node =
-      [&](const fs::path &path, const char *shape, const char *color) {
-        const auto [entry, inserted] = nodes.emplace(path, nodes.size());
-        if (inserted) {
-          const auto relative = path.lexically_relative(graph.project.root);
-          dot << "  n" << entry->second << " [label="
-              << quoted((relative.empty() ? path : relative).generic_u8string())
-              << ", tooltip=" << quoted(path.generic_u8string())
-              << ", shape=" << shape << ", color=" << quoted(color) << "];\n";
-        }
+  const auto node = [&](const fs::path &path,
+                        const char *const shape,
+                        const char *const color) {
+    const auto [entry, inserted] = nodes.emplace(path, nodes.size());
+    if (inserted) {
+      const auto relative = path.lexically_relative(graph.project.root);
+      dot << "  n" << entry->second << " [label="
+          << quoted((relative.empty() ? path : relative).generic_u8string())
+          << ", tooltip=" << quoted(path.generic_u8string())
+          << ", shape=" << shape << ", color=" << quoted(color) << "];\n";
+    }
 
-        return entry->second;
-      };
+    return entry->second;
+  };
 
   // Inputs point to their produced objects, which point to the linked
   // executable.

@@ -1,3 +1,4 @@
+# Audience: maintainers and contributors changing CI/release automation.
 # Conventional Commits update a reviewable version/changelog PR on main.
 # Release publication remains in release.yml after an explicit version tag.
 name: Version proposal

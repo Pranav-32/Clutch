@@ -1,5 +1,7 @@
 # Lock files
 
+Audience: Users reviewing and committing project resolution.
+
 Configuration creates `clutch.lock` beside the selected root `clutch.toml` for
 standalone projects and workspaces. Commit it with your source manifests.
 It records resolution shared across debug/release profiles and developer machines.
@@ -59,6 +61,10 @@ declared versions and cross-project links; it does not freeze local source bytes
 pin compilers, or guarantee identical binaries. Source/header edits still build
 incrementally without updating the lock. Target/source list changes require
 reconfiguration, even when they leave this project-level resolution unchanged.
+Root application `build.links` contributes cross-project edges just like explicit
+target links. Shared include directories and macro overrides do not change this
+project-level resolution, so an existing matching lock remains valid with
+`--locked` after reconfiguring those compile settings.
 
 Git downloads and external dependency resolution are not implemented. The current
 lock contains no Git revision pins.

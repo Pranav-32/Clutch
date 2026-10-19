@@ -1,0 +1,16 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+[project]
+name = "greeting"
+version = "0.1.0"
+std = 17
+
+# Extend root defaults while specializing this member's macro value.
+[build]
+defines = ["EXAMPLE_SCOPE=2"]
+
+[[target]]
+name = "greeting"
+type = "static"
+sources = ["greeting.cpp"]
+public_include_dirs = ["."]

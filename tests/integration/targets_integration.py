@@ -350,7 +350,7 @@ links = ["shared"]
             self.assertFalse(output.exists())
 
     def test_invalid_graphs(self):
-        """Reject unknown targets, executable links, cycles and ambiguous source modes."""
+        """Reject invalid dependency graphs, target identities and field types."""
         invalid = [self.targets.replace('links = ["shared"]', 'links = ["missing"]'),
                    self.targets.replace('links = ["shared"]', 'links = ["optional"]'),
                    self.targets.replace('defines = ["BASE_PRIVATE"]', 'links = ["left"]'),
@@ -422,6 +422,111 @@ links=["base"]
 ''')
         self.configure()
         self.cli('run', '-t', 'direct')
+
+    def test_project_application_defaults_with_explicit_libraries(self):
+        """Project entry/sources coexist with libraries and feed a named application."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.write('entry.cpp', '#include "base.h"\nint extra();\n'
+                   'int main() { return base() == BASE_API && extra() == 1 ? 0 : 1; }\n')
+        self.write('extra.cpp', 'int extra() { return 1; }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator, library)
+                text = (self.root / 'clutch.toml').read_text()
+                text = text.replace('[build]', 'entry="entry.cpp"\n[build]\n'
+                                    'sources=["extra.cpp"]\nlinks=["base"]')
+                self.write('clutch.toml', text)
+                self.configure(generator)
+                self.cli('run', '-t', 'target_probe')
+                self.assertIn('target_probe', self.configured_targets)
+                self.assertEqual(len(self.configured_targets['target_probe']['sources']), 2)
+                self.cli('clean')
+
+                # An explicit executable with the project name can omit sources
+                # and use the project entry while adding target-local settings.
+                self.write('clutch.toml', text + '\n[[target]]\nname="target_probe"\n')
+                self.configure(generator)
+                self.cli('run', '-t', 'target_probe')
+                self.cli('clean')
+
+    def test_build_links_enables_discovery_beside_library_targets(self):
+        """Application links opt into discovery without requiring an entry path."""
+        (self.root / 'src').mkdir()
+        self.write('src/main.cpp', '#include "base.h"\nint main() { return base() == BASE_API ? 0 : 1; }\n')
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library)
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', '[build]\nlinks=["base"]'))
+        self.configure()
+        self.cli('run', '-t', 'target_probe')
+
+    def test_application_links_and_source_defaults_are_validated(self):
+        """Mixing declarations preserves type, dependency and empty-source checks."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library)
+        original = (self.root / 'clutch.toml').read_text()
+        for setting, diagnostic in (
+                ('links="base"', 'array'),
+                ('links=[42]', 'strings'),
+                ('links=["missing"]', 'unknown linked target'),
+                ('links=["base"]', 'sources')):
+            with self.subTest(setting=setting):
+                manifest = original.replace('[build]', '[build]\n' + setting)
+                if 'missing' in setting:
+                    manifest = manifest.replace('[build]', 'entry="apps/optional.cpp"\n[build]')
+                self.write('clutch.toml', manifest)
+                result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                                  '--build-tool', OPTIONS.ninja, success=False)
+                self.assertIn(diagnostic, result.stderr)
+
+    def test_local_compile_overrides_and_public_interfaces(self):
+        """Targets specialize defaults without duplicate definitions or lost exports."""
+        for folder, value in (('defaults', 1), ('local', 2)):
+            (self.root / folder).mkdir()
+            self.write(folder + '/config.h', f'#define HEADER_VALUE {value}\n')
+        self.write('entry.cpp', '#include <config.h>\n'
+                   '#if VALUE != 3 || HEADER_VALUE != 2\n'
+                   '#error incorrect compile overrides\n#endif\nint main() { return 0; }\n')
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator, '[[target]]\nname="target_probe"\n'
+                              'include_dirs=["local"]\ndefines=["VALUE=3"]\n'
+                              'public_defines=["VALUE=2"]\n')
+                self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+                    '[build]', 'entry="entry.cpp"\n[build]\ninclude_dirs=["defaults", "local"]\n'
+                    'defines=["VALUE=1"]'))
+                self.configure(generator)
+                self.cli('run')
+                arguments = self.configured_targets['target_probe']['sources'][0]['arguments']
+                self.assertEqual(sum(arg.startswith(('-DVALUE=', '/DVALUE='))
+                                     for arg in arguments), 1)
+                self.cli('clean')
+
+    def test_application_defaults_reject_real_name_conflicts(self):
+        """An executable and a library still need distinct target identities."""
+        library = self.targets.split('[[target]]\nname = "left"')[0]
+        self.manifest(targets=library.replace('name = "base"', 'name = "target_probe"'))
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', 'entry="apps/optional.cpp"\n[build]'))
+        result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                          '--build-tool', OPTIONS.ninja, success=False)
+        self.assertIn('conflict', result.stderr)
+
+    def test_entry_discovery_excludes_declared_target_sources(self):
+        """Adding a library does not compile its discovered sources into the app."""
+        (self.root / 'src').mkdir()
+        self.write('src/main.cpp', 'int helper();\nint main() { return helper(); }\n')
+        self.write('src/helper.cpp', 'int helper() { return 0; }\n')
+        self.manifest(targets='[[target]]\nname="helper"\ntype="static"\n'
+                             'sources=["src/helper.cpp"]\n')
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '[build]', 'entry="src/main.cpp"\n[build]\nlinks=["helper"]'))
+        self.configure()
+        self.cli('run', '-t', 'target_probe')
+        self.assertEqual(len(self.configured_targets['target_probe']['sources']), 1)
+        location = json.loads(self.cli('locate').stdout)
+        database = json.loads(Path(location['paths']['compilationDatabase']).read_text())
+        self.assertEqual(sum(Path(unit['file']) == self.root / 'src/helper.cpp' for unit in database), 1)
 
 
 if __name__ == '__main__':

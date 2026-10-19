@@ -12,13 +12,17 @@ Clutch generates native build files and an IDE compilation database.
 shared-library and test targets with local dependencies. Git dependencies, external-library build-system
 adapters and self-hosting are planned; full CMake feature coverage is future work.
 
+This README describes the checked-out source; published releases may have fewer
+features. Check the [changelog](docs/CHANGELOG.md) for release-specific changes.
+
 ## What you can do
 
 - Build C, C++ and mixed-language projects with explicit language standards.
 - Declare multiple targets, link local libraries and propagate public headers
   and definitions. Select individual builds with `--target <name>`.
 - Organize projects with `[workspace].members`, scoped member manifests and
-  qualified cross-project target links.
+  qualified cross-project target links. Share workspace include directories and
+  definitions while allowing member overrides.
 - Generate a portable `clutch.lock` and verify local resolution with `--locked`.
 - Use Ninja, GNU Make, NMake, JOM, Visual Studio/MSBuild or Xcode, depending on
   your operating system and installed tools.
@@ -102,7 +106,10 @@ sources under `src/`. Select compilers during configuration, for example
 generators and `clutch --help` for commands.
 
 For local libraries and multiple executables, use explicit `[[target]]` entries.
+Keep `project.entry` or `build.sources` for the default application and use
+`build.links` to link it to those libraries; the two styles can coexist.
 See the [library example](examples/targets/README.md) and
+[flexible workspace example](examples/flexible/README.md), or the
 [target reference](docs/manifest.md#target). The optional file-API sample uses
 Python; Clutch itself serves IDE metadata directly in native C++.
 
@@ -129,6 +136,8 @@ Each member defines its project and targets. Use `links = ["greeting::greeting"]
 to consume a library from another member. Source paths and standards belong to
 each member; profiles and generator selection belong to the root. Configuration
 produces one build graph, compilation database and file-API model for the workspace.
+Root `build.include_dirs` and `build.defines` supply shared compile defaults.
+Member and target settings can override them.
 
 ```sh
 clutch .
@@ -166,10 +175,26 @@ Try the [workspace example](examples/workspace/README.md), or read the
 
 ## Contribute
 
-See [Contributing](docs/CONTRIBUTING.md) for development setup, code conventions,
-formatting and review checks. The [development-container guide](docs/development-container.md)
-provides a shared Docker environment for Linux, macOS and Windows hosts.
-Implementation details live in the [architecture guide](docs/architecture.md).
+New contributors are welcome. Start with a small docs, example, test or bug fix:
+
+1. Fork the repository and create a focused branch.
+2. Build and run relevant checks using the [first-PR guide](docs/CONTRIBUTING.md#your-first-pull-request).
+   Prose-only fixes need link checks rather than a compiler setup.
+3. Open a PR with a Conventional Commit title and explain what changed and why.
+
+Browse [good first issues](https://github.com/Pranav-32/Clutch/labels/good%20first%20issue)
+or [ask for help](https://github.com/Pranav-32/Clutch/issues/new/choose).
+Follow the [code of conduct](.github/CODE_OF_CONDUCT.md).
+The [contributor guide](docs/CONTRIBUTING.md) covers conventions and review;
+the [architecture guide](docs/architecture.md) is useful when changing internals.
+
+## Feature status
+
+The current source supports native generators, library targets, workspaces,
+portable local locks and the file API. Flexible root/member manifests and shared
+compile defaults are part of the unreleased development work.
+Git dependency resolution and updates, foreign-library build-system adapters,
+self-hosting, PCH and portable bundles are planned without committed delivery dates.
 
 Report vulnerabilities privately through the [security policy](.github/SECURITY.md).
 
