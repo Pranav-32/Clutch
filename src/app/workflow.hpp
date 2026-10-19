@@ -17,17 +17,16 @@
 
 #include <string>
 
-namespace clutch
-{
-    struct Options;
+namespace clutch {
+struct Options;
 
-    /// Create a new manifest and optional entry source without replacing existing
+/// Create a new manifest and optional entry source without replacing existing
 /// project files.
-    void create_project(const fs::path& directory,
-                        const std::string& requested_name,
-                        bool c,
-                        bool require_new);
-    /// Remove only the active profile's owned build directory after checking for
+void create_project(const fs::path &directory,
+                    const std::string &requested_name,
+                    bool c,
+                    bool require_new);
+/// Remove only the active profile's owned build directory after checking for
 /// redirected entries.
-    void clean_project(const Options& options);
-} // namespace clutch
+void clean_project(const Options &options);
+}  // namespace clutch

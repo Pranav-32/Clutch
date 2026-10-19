@@ -3,7 +3,7 @@
 name: Version proposal
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:

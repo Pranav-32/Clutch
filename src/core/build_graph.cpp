@@ -15,6 +15,8 @@
 
 #include "core/options.hpp"
 #include "core/targets/resolve.hpp"
+#include "core/targets/runtime.hpp"
+#include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <algorithm>
@@ -30,7 +32,7 @@ namespace {
 /// Windows artifact identity is case-insensitive even when manifest names
 /// differ.
 fs::path artifact_key(const fs::path &path) {
-  auto value = path.lexically_normal().generic_string();
+  auto value = path.lexically_normal().generic_u8string();
 #ifdef _WIN32
   std::transform(value.begin(),
                  value.end(),
@@ -39,9 +41,9 @@ fs::path artifact_key(const fs::path &path) {
                    return static_cast<char>(std::tolower(c));
                  });
 #endif
-  return fs::path(value);
+  return fs::u8path(value);
 }
-} // namespace
+}  // namespace
 
 /// Validate artifact ownership and detect cycles using a topological traversal.
 void validate_build_graph(const Graph &graph) {
@@ -56,9 +58,11 @@ void validate_build_graph(const Graph &graph) {
     if (path.empty() || !path.is_absolute())
       throw std::runtime_error("build artifact must have an absolute path");
 
+    validate_generated_path(path);
+
     if (!outputs.insert(artifact_key(path)).second)
       throw std::runtime_error("multiple build commands produce " +
-                               path.string());
+                               path.u8string());
   };
 
   // Record prerequisite-to-output edges and their incoming dependency counts.
@@ -130,9 +134,11 @@ void validate_build_graph(const Graph &graph) {
       if (count != 0)
         throw std::runtime_error(
             "build graph contains a dependency cycle involving " +
-            path.string());
+            path.u8string());
     }
   }
+
+  validate_runtime_dependencies(graph);
 }
 
 /// Translate portable settings into exact compiler/linker argument vectors.
@@ -184,10 +190,10 @@ Graph make_build_graph(Project project,
     // Per-target objects let an application and tests share a source safely.
     const auto objects =
         graph.project.is_workspace
-          ? p.build / "obj" / target.project_name / target.local_name
-          : graph.project.targets.empty() && target_index == 0
-          ? p.build / "obj"
-          : p.build / "obj" / ((spec.is_test ? "test-" : "target-") + name);
+            ? p.build / "obj" / target.project_name / target.local_name
+        : graph.project.targets.empty() && target_index == 0
+            ? p.build / "obj"
+            : p.build / "obj" / ((spec.is_test ? "test-" : "target-") + name);
     for (size_t index = 0; index < sources.size(); ++index) {
       Unit u;
       u.source = sources[index];
@@ -208,44 +214,36 @@ Graph make_build_graph(Project project,
           throw std::runtime_error(
               "MSVC-style drivers require C++ std 14 or newer");
 
-        a.push_back(c
-                      ? "/std:c" + target.c_standard
+        a.push_back(c ? "/std:c" + target.c_standard
                       : "/std:c++" + (target.cxx_standard == "23"
-                                        ? std::string("latest")
-                                        : target.cxx_standard));
+                                          ? std::string("latest")
+                                          : target.cxx_standard));
         if (!c)
           a.emplace_back("/EHsc");
 
-        a.emplace_back(p.optimize == "speed"
-                         ? "/O2"
-                         : p.optimize == "size"
-                         ? "/O1"
-                         : "/Od");
+        a.emplace_back(p.optimize == "speed"  ? "/O2"
+                       : p.optimize == "size" ? "/O1"
+                                              : "/Od");
         if (!options.release)
           a.emplace_back("/Z7");
 
-        a.emplace_back(p.warnings == "extra"
-                         ? "/W4"
-                         : p.warnings == "none"
-                         ? "/W0"
-                         : "/W3");
+        a.emplace_back(p.warnings == "extra"  ? "/W4"
+                       : p.warnings == "none" ? "/W0"
+                                              : "/W3");
         for (const auto &inc : target.includes)
-          a.push_back("/I" + inc.string());
+          a.push_back("/I" + inc.u8string());
 
         for (const auto &def : target.defines)
           a.push_back("/D" + def);
 
-        a.push_back(u.source.string());
-        a.push_back("/Fo" + u.object.string());
+        a.push_back(u.source.u8string());
+        a.push_back("/Fo" + u.object.u8string());
       } else {
-        a.push_back(std::string("-std=") + (c
-                                              ? "c" + target.c_standard
+        a.push_back(std::string("-std=") + (c ? "c" + target.c_standard
                                               : "c++" + target.cxx_standard));
-        a.emplace_back(p.optimize == "speed"
-                         ? "-O3"
-                         : p.optimize == "size"
-                         ? "-Os"
-                         : "-O0");
+        a.emplace_back(p.optimize == "speed"  ? "-O3"
+                       : p.optimize == "size" ? "-Os"
+                                              : "-O0");
         if (!options.release)
           a.emplace_back("-g");
 
@@ -258,7 +256,7 @@ Graph make_build_graph(Project project,
           a.emplace_back("-Wextra");
 
         for (const auto &inc : target.includes)
-          a.push_back("-I" + inc.string());
+          a.push_back("-I" + inc.u8string());
 
         for (const auto &def : target.defines)
           a.push_back("-D" + def);
@@ -271,11 +269,11 @@ Graph make_build_graph(Project project,
         a.insert(a.end(),
                  {"-MMD",
                   "-MF",
-                  u.object.string() + ".d",
+                  u.object.u8string() + ".d",
                   "-c",
-                  u.source.string(),
+                  u.source.u8string(),
                   "-o",
-                  u.object.string()});
+                  u.object.u8string()});
       }
 
       target.units.push_back(std::move(u));
@@ -286,12 +284,12 @@ Graph make_build_graph(Project project,
       std::vector<std::string> candidates;
       if (toolchain.msvc)
         candidates = {
-            (fs::path(target_linker).parent_path() / "lib.exe").string(),
+            (fs::u8path(target_linker).parent_path() / "lib.exe").u8string(),
             "llvm-lib",
             "lib"};
       else
         candidates = {
-            (fs::path(target_linker).parent_path() / "llvm-ar").string(),
+            (fs::u8path(target_linker).parent_path() / "llvm-ar").u8string(),
             "llvm-ar",
             "ar"};
 #ifdef __APPLE__
@@ -307,22 +305,22 @@ Graph make_build_graph(Project project,
       }
       if (archiver.empty())
         throw std::runtime_error("static target requires an installed "
-            "ar/llvm-ar or lib/llvm-lib archiver");
+                                 "ar/llvm-ar or lib/llvm-lib archiver");
 
       target.link =
           toolchain.msvc
-            ? std::vector<std::string>{archiver,
-                                       "/NOLOGO",
-                                       "/OUT:" + target.output.string()}
-            : fs::path(archiver).filename() == "libtool"
-            ? std::vector<std::string>{archiver,
-                                       "-static",
-                                       "-o",
-                                       target.output.string()}
-            : std::vector<std::string>{archiver,
-                                       "rcs",
-                                       target.output.string()};
-      if (fs::path(archiver).stem() == "llvm-ar")
+              ? std::vector<std::string>{archiver,
+                                         "/NOLOGO",
+                                         "/OUT:" + target.output.u8string()}
+          : fs::u8path(archiver).filename() == "libtool"
+              ? std::vector<std::string>{archiver,
+                                         "-static",
+                                         "-o",
+                                         target.output.u8string()}
+              : std::vector<std::string>{archiver,
+                                         "rcs",
+                                         target.output.u8string()};
+      if (fs::u8path(archiver).stem() == "llvm-ar")
         target.link.insert(target.link.begin() + 1, "--rsp-quoting=posix");
     } else {
       target.link = {target_linker};
@@ -330,7 +328,7 @@ Graph make_build_graph(Project project,
         target.link.insert(target.link.end(), {"/nologo", "/MT"});
     }
     for (const auto &unit : target.units)
-      target.link.push_back(unit.object.string());
+      target.link.push_back(unit.object.u8string());
 
     if (spec.type != TargetType::StaticLibrary) {
       for (const auto dependency : resolved.link_dependencies) {
@@ -340,32 +338,37 @@ Graph make_build_graph(Project project,
         const auto import = target_import_library(output,
                                                   specs[dependency].spec.type,
                                                   toolchain.msvc);
-        target.link.push_back((import.empty() ? output : import).string());
+        target.link.push_back((import.empty() ? output : import).u8string());
       }
       if (toolchain.msvc) {
         if (spec.type == TargetType::SharedLibrary)
           target.link.emplace_back("/LD");
-        target.link.push_back("/Fe" + target.output.string());
+        target.link.push_back("/Fe" + target.output.u8string());
         target.link.emplace_back("/link");
         if (!options.release)
           target.link.emplace_back("/DEBUG");
         if (!target.import_library.empty())
-          target.link.push_back("/IMPLIB:" + target.import_library.string());
+          target.link.push_back("/IMPLIB:" + target.import_library.u8string());
       } else {
         if (spec.type == TargetType::SharedLibrary) {
 #ifdef __APPLE__
           target.link.insert(target.link.end(),
                              {"-dynamiclib",
                               "-Wl,-install_name,@rpath/" +
-                              target.output.filename().string()});
+                                  target.output.filename().u8string()});
 #else
-          target.link.emplace_back("-shared");
+          // A loader filename avoids embedding the build directory in ELF
+          // DT_NEEDED entries, allowing the existing $ORIGIN paths to work.
+          target.link.insert(
+              target.link.end(),
+              {"-shared",
+               "-Wl,-soname," + target.output.filename().u8string()});
 #endif
         }
 #ifdef _WIN32
         if (!target.import_library.empty())
           target.link.push_back("-Wl,--out-implib," +
-                                target.import_library.string());
+                                target.import_library.u8string());
 #elif defined(__APPLE__)
         target.link.insert(
             target.link.end(),
@@ -384,19 +387,19 @@ Graph make_build_graph(Project project,
 
           const auto library =
               target_output(p, specs[dependency].spec, toolchain.msvc);
-          const auto relative = library.parent_path().lexically_relative(
-              target.output.parent_path());
-          if (runtime_directories.insert(relative).second)
+          if (const auto relative = library.parent_path().lexically_relative(
+                  target.output.parent_path());
+              runtime_directories.insert(relative).second)
 #ifdef __APPLE__
-        target.link.push_back("-Wl,-rpath,@loader_path/" +
-                              relative.generic_string());
+            target.link.push_back("-Wl,-rpath,@loader_path/" +
+                                  relative.generic_u8string());
 #else
-        target.link.push_back("-Wl,-rpath,$ORIGIN/" +
-                              relative.generic_string());
+            target.link.push_back("-Wl,-rpath,$ORIGIN/" +
+                                  relative.generic_u8string());
 #endif
         }
 #endif
-        target.link.insert(target.link.end(), {"-o", target.output.string()});
+        target.link.insert(target.link.end(), {"-o", target.output.u8string()});
       }
     }
 
@@ -410,9 +413,9 @@ Graph make_build_graph(Project project,
         return target.type == TargetType::Executable && !target.is_test;
       });
   graph.project.output = runnable == graph.targets.end()
-                           ? graph.targets.front().output
-                           : runnable->output;
+                             ? graph.targets.front().output
+                             : runnable->output;
   validate_build_graph(graph);
   return graph;
 }
-} // namespace clutch
+}  // namespace clutch

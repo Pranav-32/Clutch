@@ -9,10 +9,10 @@ No command received from a reply is executed by this reader.
 
 import argparse
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 
 def invoke(arguments):
@@ -69,7 +69,7 @@ def read_snapshot(location):
     if index.get('status') != 'success':
         raise RuntimeError('configuration failed: ' + index.get('error', {}).get('message', 'unknown error'))
     if index.get('profile') != location['profile'] or index.get('paths') != {
-            'source': location['paths']['source'], 'build': location['paths']['build']}:
+        'source': location['paths']['source'], 'build': location['paths']['build']}:
         raise RuntimeError('reply belongs to another project/profile')
     if index.get('manifest') != signature(Path(location['paths']['source']) / 'clutch.toml'):
         raise RuntimeError('manifest changed; configure again before reading the model')
@@ -115,7 +115,8 @@ def main():
         query = Path(location['paths']['query']) / 'client-reference/query.json'
         query.parent.mkdir(parents=True, exist_ok=True)
         query.write_text(json.dumps({'requests': [{'kind': kind, 'version': 1}
-                         for kind in ('codemodel', 'toolchains', 'inputs')]}, indent=2) + '\n', encoding='utf-8')
+                                                  for kind in ('codemodel', 'toolchains', 'inputs')]}, indent=2) + '\n',
+                         encoding='utf-8')
         command = [args.clutch, location['paths']['source'], *profile]
         for flag, value in (('--cc', args.cc), ('--cxx', args.cxx), ('--build-tool', args.build_tool)):
             if value:

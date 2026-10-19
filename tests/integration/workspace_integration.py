@@ -291,6 +291,22 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(snapshot, (moved / 'clutch.lock').read_bytes())
         self.cli('run', '-t', 'app::value')
 
+    def test_shared_loader_name_collisions_are_rejected(self):
+        """Repeated local names are valid until distinct shared modules must coexist."""
+        (self.root / 'other').mkdir()
+        self.write('other/clutch.toml', '[project]\nname="other"\nversion="1"\n'
+                   '[[target]]\nname="api"\ntype="shared"\nsources=["api.cpp"]\n')
+        self.write('other/api.cpp', 'int other() { return 0; }\n')
+        self.write('clutch.toml', (self.root / 'clutch.toml').read_text().replace(
+            '"bridge",', '"bridge", "other",'))
+        self.configure()
+        self.write('app/clutch.toml', self.app_manifest.replace(
+            '"local", "bridge::api"', '"local", "bridge::api", "other::api"'))
+        result = self.configure(success=False)
+        self.assertIn('runtime library name collision', result.stderr)
+        self.assertIn('bridge::api', result.stderr)
+        self.assertIn('other::api', result.stderr)
+
     @unittest.skipIf(os.name == 'nt', 'POSIX symlink check')
     def test_redirected_member_and_lock_are_rejected(self):
         (self.root / 'alias').symlink_to(self.root / 'base', target_is_directory=True)

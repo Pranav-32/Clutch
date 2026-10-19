@@ -10,14 +10,9 @@
  * @brief Print concise build status messages with terminal-aware ANSI colors.
  */
 
-#ifdef _MSC_VER
-// Microsoft's CRT opt-out requires this reserved macro spelling.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include "terminal.hpp"
+#include "platform/environment.hpp"
 
-#include <cstdlib>
 #include <iostream>
 
 #ifdef _WIN32
@@ -37,7 +32,7 @@ namespace {
 // output.
 constexpr auto status_color = "\033[1;32m";
 constexpr auto reset_color = "\033[0m";
-} // namespace
+}  // namespace
 
 /// Emit a concise status line, respecting terminal capabilities and NO_COLOR.
 void status(const std::string &action, const std::string &message) {
@@ -53,8 +48,8 @@ void status(const std::string &action, const std::string &message) {
   bool color = isatty(STDOUT_FILENO);
 #endif
   // Redirected logs remain plain text; an explicit NO_COLOR disables ANSI too.
-  color = color && !std::getenv("NO_COLOR");
+  color = color && !environment_value("NO_COLOR");
   std::cout << (color ? status_color : "") << action
-      << (color ? reset_color : "") << " " << message << '\n';
+            << (color ? reset_color : "") << " " << message << '\n';
 }
-} // namespace clutch
+}  // namespace clutch

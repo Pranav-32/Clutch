@@ -2,7 +2,7 @@
 name: Release
 on:
   push:
-    tags: ['v*']
+    tags: [ 'v*' ]
   workflow_dispatch:
     inputs:
       tag:
@@ -42,7 +42,7 @@ jobs:
     with:
       ref: ${{ needs.validate.outputs.commit }}
   publish:
-    needs: [validate, native]
+    needs: [ validate, native ]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

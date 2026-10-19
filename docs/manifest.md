@@ -356,6 +356,11 @@ produce an import library. Export/import DLL symbols in your own headers using
 `__declspec(dllexport)`/`__declspec(dllimport)` and private build definitions.
 Clutch stages dependent DLLs beside test executables; POSIX targets use relative
 runtime search paths. No system installation or global environment changes occur.
+Distinct shared libraries consumed by the same executable or shared library must
+have different filenames. Clutch rejects loader-name collisions during graph
+validation, including names differing only by case on Windows. Qualified workspace
+identities do not change the operating system's library filenames. Repeated local
+names remain valid for static libraries and independent runtime closures.
 Header-only interface targets, imported binary targets, custom output naming,
 per-target standards and installation rules are future work.
 

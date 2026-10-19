@@ -11,24 +11,20 @@
  * graph, including response files and regeneration.
  */
 
-#ifdef _MSC_VER
-// Microsoft's CRT opt-out requires this reserved macro spelling.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include "ninja.hpp"
+#include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
 #include "core/targets/archive.hpp"
 #include "core/targets/runtime.hpp"
+#include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -60,7 +56,7 @@ std::vector<fs::path> installation_directories(const fs::path &root) {
 std::string bundled_ninja(const fs::path &directory) {
   const auto executable = directory / "ninja.exe";
   if (std::error_code error; fs::is_regular_file(executable, error))
-    return fs::absolute(executable).string();
+    return fs::absolute(executable).u8string();
 
   return {};
 }
@@ -86,7 +82,7 @@ std::string ninja_value(const std::string &value) {
 /// Encode a path token using Ninja's dollar escapes for spaces and separators.
 std::string path(const fs::path &p) {
   std::string result;
-  for (const char c : p.generic_string()) {
+  for (const char c : p.generic_u8string()) {
     if (c == '\n' || c == '\r')
       throw std::runtime_error("newlines are not supported in paths");
 
@@ -99,42 +95,6 @@ std::string path(const fs::path &p) {
   return result;
 }
 
-// GNU drivers treat backslashes as escapes; MSVC uses Windows quoting rules.
-std::string response(const std::vector<std::string> &args, const bool msvc) {
-  std::string out;
-  for (size_t i = 1; i < args.size(); ++i) {
-    if (!msvc) {
-      out += '"';
-      for (const char c : args[i]) {
-        if (c == '\\' || c == '"')
-          out += '\\';
-
-        out += c;
-      }
-
-      out += "\" ";
-      continue;
-    }
-
-    out += '"';
-    size_t slashes = 0;
-    for (const char c : args[i]) {
-      if (c == '\\') {
-        ++slashes;
-        continue;
-      }
-
-      out.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
-      slashes = 0;
-      out += c;
-    }
-
-    out.append(slashes * 2, '\\');
-    out += "\" ";
-  }
-
-  return out;
-}
 }  // namespace
 
 /// Probe Windows IDE bundles only after normal executor resolution has failed.
@@ -143,15 +103,15 @@ std::string discover_ninja() {
   // Visual Studio installs CMake and Ninja in adjacent package directories.
   const fs::path visual_studio_ninja =
       "Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja";
-  if (const auto *installation = std::getenv("VSINSTALLDIR")) {
+  if (const auto installation = environment_value("VSINSTALLDIR")) {
     if (const auto executable =
-            bundled_ninja(fs::path(installation) / visual_studio_ninja);
+            bundled_ninja(fs::u8path(*installation) / visual_studio_ninja);
         !executable.empty())
       return executable;
   }
 
   if (const auto cmake = find_program("cmake"); !cmake.empty()) {
-    const auto directory = fs::path(cmake).parent_path();
+    const auto directory = fs::u8path(cmake).parent_path();
     for (const auto &candidate :
          {directory, directory.parent_path().parent_path() / "Ninja"}) {
       if (const auto executable = bundled_ninja(candidate); !executable.empty())
@@ -165,9 +125,9 @@ std::string discover_ninja() {
   constexpr std::array clion_ninja_paths{"bin/ninja/win/x64",
                                          "bin/ninja/win/aarch64"};
   for (const auto *variable : installation_roots) {
-    if (const auto *root = std::getenv(variable)) {
+    if (const auto root = environment_value(variable)) {
       for (const auto &version : installation_directories(
-               fs::path(root) / "Microsoft Visual Studio")) {
+               fs::u8path(*root) / "Microsoft Visual Studio")) {
         for (const auto &edition : installation_directories(version)) {
           if (const auto executable =
                   bundled_ninja(edition / visual_studio_ninja);
@@ -177,8 +137,8 @@ std::string discover_ninja() {
       }
 
       for (const auto &installation :
-           installation_directories(fs::path(root) / "JetBrains")) {
-        if (installation.filename().string().rfind("CLion", 0) != 0)
+           installation_directories(fs::u8path(*root) / "JetBrains")) {
+        if (installation.filename().u8string().rfind("CLion", 0) != 0)
           continue;
 
         for (const auto *relative : clion_ninja_paths) {
@@ -240,7 +200,8 @@ void generate_ninja(const Graph &graph,
       ninja << "build " << path(object) << ": compile " << path(source)
             << "\n  compiler = "
             << ninja_value(command_line({arguments.front()})) << "\n  args = "
-            << ninja_value(response(arguments, graph.toolchain.msvc)) << "\n";
+            << ninja_value(response_file(arguments, graph.toolchain.msvc))
+            << "\n";
     }
 
     const auto copies = runtime_copies(graph, target_index);
@@ -299,10 +260,11 @@ void generate_ninja(const Graph &graph,
                    archive_command(graph, options, executable, target_index)))
             << "\n";
     else
-      ninja << "  artifact = " << ninja_value(target.output.string())
+      ninja << "  artifact = " << ninja_value(target.output.u8string())
             << "\n  compiler = "
             << ninja_value(command_line({target.link.front()})) << "\n  args = "
-            << ninja_value(response(target.link, graph.toolchain.msvc)) << "\n";
+            << ninja_value(response_file(target.link, graph.toolchain.msvc))
+            << "\n";
   }
 
   // Tests are opt-in; the default goal below remains the application
@@ -316,8 +278,8 @@ void generate_ninja(const Graph &graph,
 
   // Direct Ninja builds can refresh a changed manifest using these exact tools.
   // Source-list discovery still requires an explicit configuration pass.
-  std::vector<std::string> regenerate{executable.string(),
-                                      p.root.string(),
+  std::vector<std::string> regenerate{executable.u8string(),
+                                      p.root.u8string(),
                                       "--build-tool",
                                       graph.backend.executable,
                                       "--generator",

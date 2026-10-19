@@ -19,22 +19,21 @@
 #include <string>
 #include <vector>
 
-namespace clutch
-{
-    struct Graph;
-    struct Options;
+namespace clutch {
+struct Graph;
+struct Options;
 
-    /// Write a native command-line-tool project and shared schemes for the active
+/// Write a native command-line-tool project and shared schemes for the active
 /// profile. Xcode requires Apple's Clang drivers and a full macOS Xcode
 /// install.
-    void generate_xcode(const Graph& graph,
-                        const Options& options,
-                        const fs::path& clutch_executable);
+void generate_xcode(const Graph &graph,
+                    const Options &options,
+                    const fs::path &clutch_executable);
 
-    /// Build exactly the selected graph targets using the configured xcodebuild.
+/// Build exactly the selected graph targets using the configured xcodebuild.
 /// Test targets are standalone executables; Clutch runs them after building.
-    std::vector<std::string>
-    xcode_build_command(const Graph& graph,
-                        const Options& options,
-                        const std::vector<size_t>& target_indices);
-} // namespace clutch
+std::vector<std::string>
+xcode_build_command(const Graph &graph,
+                    const Options &options,
+                    const std::vector<size_t> &target_indices);
+}  // namespace clutch

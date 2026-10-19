@@ -11,24 +11,20 @@
  * dependency tracking, per-source settings, and deterministic solution IDs.
  */
 
-#ifdef _MSC_VER
-// Microsoft's CRT opt-out requires this reserved macro spelling.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include "visual_studio.hpp"
+#include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
 #include "core/targets/runtime.hpp"
+#include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <array>
 #include <cstdint>
-#include <cstdlib>
 #include <iomanip>
 #include <map>
 #include <sstream>
@@ -132,7 +128,7 @@ std::string latest_windows_sdk_version(const fs::path &includes) {
   std::string latest;
   std::vector<unsigned long> latest_parts;
   for (const auto &entry : fs::directory_iterator(includes, error)) {
-    const auto name = entry.path().filename().string();
+    const auto name = entry.path().filename().u8string();
     if (name.empty() ||
         name.find_first_not_of("0123456789.") != std::string::npos)
       continue;
@@ -160,8 +156,8 @@ std::string latest_windows_sdk_version(const fs::path &includes) {
 
 /// Honor the developer terminal's SDK, then inspect the standard installation.
 std::string windows_sdk_version() {
-  if (const auto *selected = std::getenv("WindowsSDKVersion")) {
-    auto version = std::string(selected);
+  if (const auto selected = environment_value("WindowsSDKVersion")) {
+    auto version = *selected;
     while (!version.empty() &&
            (version.back() == '\\' || version.back() == '/'))
       version.pop_back();
@@ -172,9 +168,9 @@ std::string windows_sdk_version() {
 
   // Keep the selected Windows headers and libraries stable for this
   // configuration.
-  if (const auto *program_files = std::getenv("ProgramFiles(x86)"))
-    return latest_windows_sdk_version(fs::path(program_files) / "Windows Kits" /
-                                      "10" / "Include");
+  if (const auto program_files = environment_value("ProgramFiles(x86)"))
+    return latest_windows_sdk_version(fs::u8path(*program_files) /
+                                      "Windows Kits" / "10" / "Include");
 
   return "10.0";
 }
@@ -183,16 +179,15 @@ std::string windows_sdk_version() {
 std::string platform(const Graph &graph) {
   const auto &compiler =
       graph.toolchain.cxx.empty() ? graph.toolchain.cc : graph.toolchain.cxx;
-  const auto architecture =
-      fs::path(compiler).parent_path().filename().string();
-  if (architecture == "x86")
+  if (const auto architecture =
+          fs::u8path(compiler).parent_path().filename().u8string();
+      architecture == "x86")
     return "Win32";
-
-  if (architecture == "arm64" || architecture == "ARM64")
+  else if (architecture == "arm64" || architecture == "ARM64")
     return "ARM64";
 
 #if defined(_M_ARM64) || defined(__aarch64__)
-  if (architecture != "x64")
+  else if (architecture != "x64")
     return "ARM64";
 #endif
 
@@ -256,7 +251,7 @@ void write_unit(std::ostream &out, const Unit &unit) {
        unit.source.extension() == ".c" ? "CompileAsC" : "CompileAsCpp"},
       {"DebugInformationFormat", ""},
       {"ExceptionHandling", "false"},
-      {"ObjectFileName", unit.object.string()},
+      {"ObjectFileName", unit.object.u8string()},
       {"PrecompiledHeader", "NotUsing"},
       {"RuntimeLibrary", "MultiThreaded"}};
 
@@ -265,7 +260,7 @@ void write_unit(std::ostream &out, const Unit &unit) {
   // std.
   for (size_t i = 1; i < unit.arguments.size(); ++i) {
     const auto &arg = unit.arguments[i];
-    if (arg == unit.source.string() || arg == "/nologo" || arg == "/c" ||
+    if (arg == unit.source.u8string() || arg == "/nologo" || arg == "/c" ||
         arg == "/showIncludes" || arg.rfind("/Fo", 0) == 0)
       continue;
 
@@ -326,7 +321,7 @@ void write_unit(std::ostream &out, const Unit &unit) {
     extra.push_back(arg);
   }
 
-  out << "    <ClCompile Include=\"" << literal(unit.source.string())
+  out << "    <ClCompile Include=\"" << literal(unit.source.u8string())
       << "\">\n";
   for (const auto &[name, value] : settings)
     property(out, name, value, "      ");
@@ -346,7 +341,7 @@ void write_project(const Graph &graph,
                    const std::string &id) {
   const auto config = configuration(options);
   const auto arch = platform(graph);
-  const fs::path compiler(target.units.front().arguments.front());
+  const auto compiler = fs::u8path(target.units.front().arguments.front());
   const auto intermediate =
       graph.project.build / "msbuild" / project_name(index);
   fs::create_directories(intermediate);
@@ -399,25 +394,25 @@ void write_project(const Graph &graph,
              "  <ImportGroup Label=\"PropertySheets\" />\n"
              "  <PropertyGroup Label=\"UserMacros\" />\n"
              "  <PropertyGroup>\n";
-  property(project, "OutDir", target.output.parent_path().string() + "\\");
-  property(project, "IntDir", intermediate.string() + "\\");
-  property(project, "TargetName", target.output.stem().string());
-  property(project, "TargetExt", target.output.extension().string());
+  property(project, "OutDir", target.output.parent_path().u8string() + "\\");
+  property(project, "IntDir", intermediate.u8string() + "\\");
+  property(project, "TargetName", target.output.stem().u8string());
+  property(project, "TargetExt", target.output.extension().u8string());
   property(project,
            "LocalDebuggerWorkingDirectory",
-           target.source_root.string());
+           target.source_root.u8string());
   property(project, "LinkIncremental", "false");
   property(project, "TrackFileAccess", "true");
   // Pin the configured compiler/linker instead of inheriting an unrelated
   // toolset.
-  property(project, "CLToolPath", compiler.parent_path().string());
-  property(project, "CLToolExe", compiler.filename().string());
-  property(project, "LinkToolPath", compiler.parent_path().string());
+  property(project, "CLToolPath", compiler.parent_path().u8string());
+  property(project, "CLToolExe", compiler.filename().u8string());
+  property(project, "LinkToolPath", compiler.parent_path().u8string());
   property(project, "LinkToolExe", "link.exe");
   if (target.type == TargetType::StaticLibrary) {
-    const fs::path archiver(target.link.front());
-    property(project, "LibToolPath", archiver.parent_path().string());
-    property(project, "LibToolExe", archiver.filename().string());
+    const auto archiver = fs::u8path(target.link.front());
+    property(project, "LibToolPath", archiver.parent_path().u8string());
+    property(project, "LibToolExe", archiver.filename().u8string());
   }
   const auto *const task =
       target.type == TargetType::StaticLibrary ? "Lib" : "Link";
@@ -431,7 +426,7 @@ void write_project(const Graph &graph,
       libraries.push_back((library.import_library.empty()
                                ? library.output
                                : library.import_library)
-                              .string());
+                              .u8string());
     }
     // Preserve SDK/toolset dependencies, keeping only this controlled metadata
     // expression unescaped. All manifest-derived paths remain literal.
@@ -442,10 +437,10 @@ void write_project(const Graph &graph,
     if (!target.import_library.empty())
       property(project,
                "ImportLibrary",
-               target.import_library.string(),
+               target.import_library.u8string(),
                "      ");
   }
-  property(project, "OutputFile", target.output.string(), "      ");
+  property(project, "OutputFile", target.output.u8string(), "      ");
 
   // CL's /link separates linker-only options from driver and object arguments.
   std::vector<std::string> link_options;
@@ -489,7 +484,7 @@ void write_project(const Graph &graph,
             << ".vcxproj\">\n";
     property(project,
              "Project",
-             guid(graph.project.root.generic_string() + ":" +
+             guid(graph.project.root.generic_u8string() + ":" +
                   project_name(dependency)),
              "      ");
     property(project, "LinkLibraryDependencies", "false", "      ");
@@ -499,14 +494,13 @@ void write_project(const Graph &graph,
   project
       << "  </ItemGroup>\n"
          "  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.targets\" />\n";
-  const auto copies = runtime_copies(graph, index);
-  if (!copies.empty()) {
+  if (const auto copies = runtime_copies(graph, index); !copies.empty()) {
     project
         << "  <Target Name=\"ClutchStageRuntime\" AfterTargets=\"Build\">\n";
     for (const auto &[library, destination] : copies)
       project << "    <Copy SourceFiles=\""
-              << literal(graph.targets[library].output.string())
-              << "\" DestinationFiles=\"" << literal(destination.string())
+              << literal(graph.targets[library].output.u8string())
+              << "\" DestinationFiles=\"" << literal(destination.u8string())
               << "\" SkipUnchangedFiles=\"true\" />\n";
     project << "  </Target>\n";
   }
@@ -540,7 +534,7 @@ void generate_visual_studio(const Graph &graph,
           "Visual Studio target has no compilation units: " + target.name);
 
     ids.push_back(
-        guid(graph.project.root.generic_string() + ":" + project_name(i)));
+        guid(graph.project.root.generic_u8string() + ":" + project_name(i)));
     write_project(graph, options, target, i, ids.back());
     solution << "Project(\"{BC8A1FFA-BEE3-4634-8014-F334798102B3}\") = \""
              << project_name(i) << "\", \"" << project_name(i)
@@ -611,7 +605,7 @@ visual_studio_build_command(const Graph &graph,
 
   std::vector<std::string> command{
       graph.backend.executable,
-      (graph.project.build / "clutch.proj").string(),
+      (graph.project.build / "clutch.proj").u8string(),
       "/nologo",
       "/verbosity:minimal",
       "/t:" + targets,

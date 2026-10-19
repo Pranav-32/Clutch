@@ -26,11 +26,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-22.04, target: linux-x86_64-gcc, cc: gcc, cxx: g++}
-          - {os: ubuntu-22.04, target: linux-x86_64-clang, cc: clang, cxx: clang++}
-          - {os: windows-2022, target: windows-x86_64-msvc, cc: cl, cxx: cl}
-          - {os: macos-14, target: macos-arm64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++}
-          - {os: macos-15-intel, target: macos-x86_64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++}
+          - { os: ubuntu-22.04, target: linux-x86_64-gcc, cc: gcc, cxx: g++ }
+          - { os: ubuntu-22.04, target: linux-x86_64-clang, cc: clang, cxx: clang++ }
+          - { os: windows-2022, target: windows-x86_64-msvc, cc: cl, cxx: cl }
+          - { os: macos-14, target: macos-arm64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++ }
+          - { os: macos-15-intel, target: macos-x86_64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++ }
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}

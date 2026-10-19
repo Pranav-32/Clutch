@@ -90,7 +90,7 @@ std::string existing(const fs::path &path) {
     throw std::runtime_error(
         "clutch.lock must be a regular metadata file of at most one MiB");
 
-  const auto document = toml::parse_file(path.string());
+  const auto document = toml::parse_file(path.u8string());
   if (document["version"].value_or(0) != lock_schema_version)
     throw std::runtime_error(
         "unsupported clutch.lock version; use a compatible Clutch release");
@@ -158,8 +158,8 @@ void validate_lock_file(const Graph &graph, const bool locked) {
     throw std::runtime_error(
         "project resolution exceeds the one MiB lock-file limit");
 
-  const auto old = existing(graph.project.root / layout::lock_file);
-  if (locked && !same_resolution(old, expected))
+  if (const auto old = existing(graph.project.root / layout::lock_file);
+      locked && !same_resolution(old, expected))
     throw std::runtime_error("clutch.lock is missing or outdated; configure "
                              "without --locked to update it");
 }
@@ -168,17 +168,17 @@ void update_lock_file(Graph &graph, const bool locked) {
   const auto path = graph.project.root / layout::lock_file;
   const auto expected = contents(graph);
   validate_lock_file(graph, locked);
-  const auto old = existing(path);
   // Frozen configuration preserves bytes. A normal run also migrates existing
   // locks to canonical double-quoted output without changing their resolution.
-  if (!same_resolution(old, expected) || (!locked && old != expected)) {
+  if (const auto old = existing(path);
+      !same_resolution(old, expected) || (!locked && old != expected)) {
     // The writer is shared across profiles and kept beside the destination so
     // replacement remains on the same filesystem, even with external build
     // dirs.
     const auto writer = graph.project.root / layout::lock_writer;
     if (!fs::create_directory(writer))
       throw std::runtime_error(
-          "clutch.lock writer is active; wait or inspect " + writer.string());
+          "clutch.lock writer is active; wait or inspect " + writer.u8string());
 
     // The process owns exactly this new directory and temporary file. A failed
     // writer leaves the previously published lock intact, without recursive

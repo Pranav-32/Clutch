@@ -334,7 +334,7 @@ links = ["shared"]
         listing = self.cli('targets').stdout
         self.assertIn('base  static', listing)
         self.assertIn('check  executable (test)', listing)
-        self.cli('test')  # Restores schema-4 configuration in a separate process.
+        self.cli('test')  # Restores saved configuration in a separate process.
 
     def test_external_profile_directory(self):
         """Target checks also work when the configured output is outside sources."""
@@ -388,6 +388,26 @@ sources=["apps/optional.cpp"]
         self.assertTrue(self.build_path('second').exists())
         self.cli('run', success=False)
         self.cli('run', '-t', 'second')
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'ELF loader regression')
+    def test_shared_runtime_survives_build_tree_relocation(self):
+        """ELF dependencies use loader names and relative rpaths, not build paths."""
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.manifest(generator)
+                self.configure(generator)
+                self.cli('build', '-t', 'app', '-j', '1')
+                application = self.build_path('app')
+                original = application.parent
+                moved = self.root / 'relocated artifacts'
+                original.rename(moved)
+                try:
+                    result = subprocess.run([str(moved / application.name)], cwd=self.root,
+                                            capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                finally:
+                    moved.rename(original)
+                self.cli('clean')
 
     def test_c_executable_with_cpp_archive(self):
         """A C consumer inherits headers/macros and gets a C++ runtime at final link."""

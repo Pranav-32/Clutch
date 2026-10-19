@@ -18,4 +18,4 @@ namespace clutch {
 /// Print a build status line; use ANSI colors only on supported interactive
 /// terminals.
 void status(const std::string &action, const std::string &message);
-} // namespace clutch
+}  // namespace clutch

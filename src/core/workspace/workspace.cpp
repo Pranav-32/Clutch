@@ -106,7 +106,8 @@ std::vector<fs::path> workspace_member_roots(const fs::path &root,
 
       if (!fs::is_directory(path) || fs::canonical(path) != path)
         throw std::runtime_error(
-            "workspace member must be a physical directory: " + path.string());
+            "workspace member must be a physical directory: " +
+            path.u8string());
 
       // Inspect every component, including symlinks that resolve back inside.
       auto component = root;
@@ -114,18 +115,18 @@ std::vector<fs::path> workspace_member_roots(const fs::path &root,
         component /= part;
         if (fs::is_symlink(component) || fs::canonical(component) != component)
           throw std::runtime_error("redirected workspace member: " +
-                                   component.string());
+                                   component.u8string());
       }
 
       if (!seen.insert(path).second)
         throw std::runtime_error("duplicate workspace member: " +
-                                 path.string());
+                                 path.u8string());
 
       if (!fs::is_regular_file(path / layout::manifest) ||
           fs::is_symlink(path / layout::manifest))
         throw std::runtime_error(
             "workspace member requires a regular clutch.toml: " +
-            path.string());
+            path.u8string());
 
       result.push_back(path);
     }
@@ -138,7 +139,7 @@ Project load_project(const Options &options) {
   const auto root = fs::canonical(options.root);
   const auto manifest = root / layout::manifest;
   std::vector<ConfigurationInput> inputs{{manifest, input_signature(manifest)}};
-  const auto document = toml::parse_file(manifest.string());
+  const auto document = toml::parse_file(manifest.u8string());
   if (!document.contains("workspace")) {
     auto project = load_project_manifest(options, document);
     project.projects.push_back({project.name, project.version, project.root});
@@ -180,15 +181,15 @@ Project load_project(const Options &options) {
   for (const auto &path : members) {
     const auto input = path / layout::manifest;
     inputs.push_back({input, input_signature(input)});
-    const auto child = toml::parse_file(input.string());
+    const auto child = toml::parse_file(input.u8string());
     if (child.contains("workspace"))
       throw std::runtime_error("nested workspaces are not supported: " +
-                               input.string());
+                               input.u8string());
 
     if (child.contains("profile") || child["build"]["generator"])
       throw std::runtime_error("workspace root owns profiles and generator; "
                                "remove member overrides: " +
-                               input.string());
+                               input.u8string());
 
     auto member_options = options;
     member_options.root = path;

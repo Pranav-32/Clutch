@@ -13,9 +13,8 @@
 #include <iostream>
 
 /// Print a greeting so clutch run has observable output.
-int main()
-{
-    std::cout << "Hello from Clutch and C++!\n";
+int main() {
+  std::cout << "Hello from Clutch and C++!\n";
 
-    return 0;
+  return 0;
 }

@@ -58,4 +58,4 @@ std::vector<std::string>
 backend_build_command(const Graph &graph,
                       const Options &options,
                       const std::vector<size_t> &target_indices);
-} // namespace clutch
+}  // namespace clutch

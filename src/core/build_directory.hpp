@@ -30,4 +30,4 @@ void prepare_build_directory(const Project &project);
 void validate_build_directory(const fs::path &root,
                               const fs::path &directory,
                               bool require_owner);
-} // namespace clutch
+}  // namespace clutch

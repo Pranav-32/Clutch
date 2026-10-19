@@ -82,6 +82,15 @@ Visual Studio on Windows, and Xcode on macOS. JOM and Windows GNU Make are
 exercised when present. Report what ran and any skips. Python powers test
 harnesses only; generated project builds do not require it.
 
+File-API regressions also configure/build Unicode source and profile paths,
+restore saved actions, relocate the Clutch executable, and search a Unicode
+`PATH` entry without relocating external tool installations. POSIX checks ensure
+generated metadata and object-file symlinks cannot overwrite source files.
+Workspace checks distinguish harmless repeated local
+names from conflicting shared-library loader names. Linux target checks move
+an artifact tree and execute its shared-library consumer to catch absolute
+`DT_NEEDED` paths. Moving saved configuration itself still requires reconfiguration.
+
 Tooling tests use disposable repositories and install trees to check source
 identity, release-only CI classification, package notices/checksums and failure
 handling. The [CI driver](releases.md#continuous-verification) additionally runs

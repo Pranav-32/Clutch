@@ -29,17 +29,15 @@ void validate_path(const fs::path &build, const fs::path &relative) {
 
     path /= part;
     std::error_code error;
-    const auto state = fs::symlink_status(path, error);
-    if (error == std::errc::no_such_file_or_directory)
+    if (const auto state = fs::symlink_status(path, error);
+        error == std::errc::no_such_file_or_directory)
       continue;
-
-    if (error)
+    else if (error)
       throw fs::filesystem_error("cannot inspect file API path", path, error);
-
-    if (fs::is_symlink(state) ||
-        (fs::exists(state) && fs::canonical(path) != path))
+    else if (fs::is_symlink(state) ||
+             (fs::exists(state) && fs::canonical(path) != path))
       throw std::runtime_error("refusing redirected file API path: " +
-                               path.string());
+                               path.u8string());
   }
 }
 
@@ -63,7 +61,7 @@ std::vector<fs::path> entries(const fs::path &build, const fs::path &relative) {
 }
 
 bool query_only_directory(const fs::path &build) {
-  const auto query = fs::path(api_directory) / "query";
+  const auto query = fs::u8path(api_directory) / "query";
   validate_path(build, query);
   if (!fs::is_directory(build / query))
     return false;
@@ -72,8 +70,8 @@ bool query_only_directory(const fs::path &build) {
   // unrelated files must not let configure claim and later clean a user's tree.
   auto parent = fs::path{};
   for (const auto &part : query) {
-    const auto children = entries(build, parent);
-    if (children.size() != 1 || children.front().filename() != part)
+    if (const auto children = entries(build, parent);
+        children.size() != 1 || children.front().filename() != part)
       return false;
 
     parent /= part;
@@ -84,8 +82,8 @@ bool query_only_directory(const fs::path &build) {
       continue;
 
     if (!fs::is_directory(build / path) ||
-        path.filename().string().find("client-") != 0 ||
-        path.filename().string() == "client-")
+        path.filename().u8string().find("client-") != 0 ||
+        path.filename().u8string() == "client-")
       return false;
 
     for (const auto &child : entries(build, path))

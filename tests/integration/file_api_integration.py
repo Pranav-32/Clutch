@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 
 class FileApiTests(unittest.TestCase):
@@ -54,7 +55,7 @@ class FileApiTests(unittest.TestCase):
     def cli(self, *arguments, success=True):
         """Return complete diagnostics and require the expected process result."""
         result = subprocess.run([OPTIONS.clutch, *arguments], cwd=self.root,
-                                text=True, capture_output=True)
+                                text=True, encoding='utf-8', errors='replace', capture_output=True)
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -90,6 +91,80 @@ class FileApiTests(unittest.TestCase):
         path = directory / reference['jsonFile']
         self.assertTrue(path.resolve().is_relative_to(directory.resolve()))
         return json.loads(path.read_text(encoding='utf-8'))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX symlinks; Windows junction checks run separately')
+    def test_generated_links_cannot_overwrite_source(self):
+        """Owned build metadata and compiler outputs must not follow source links."""
+        source = self.root / 'src/main.cpp'
+        expected = source.read_bytes()
+        for name in ('build.ninja', 'compile_commands.json', 'configuration.toml',
+                     'toolchain.toml', 'backend.toml'):
+            with self.subTest(output=name):
+                self.configure()
+                output = self.build / name
+                output.unlink()
+                output.symlink_to(source)
+                self.configure(success=False)
+                self.assertEqual(source.read_bytes(), expected)
+                output.unlink()
+
+        self.configure()
+        database = json.loads((self.build / 'compile_commands.json').read_text(encoding='utf-8'))
+        output = Path(database[0]['output'])
+        output.symlink_to(source)
+        self.cli('build', '-j', '1', success=False)
+        self.assertEqual(source.read_bytes(), expected)
+
+    def test_unicode_paths_and_saved_actions(self):
+        """Native paths, manifest paths and JSON remain UTF-8 across configuration/build."""
+        renamed = self.root.with_name('caf\u00e9')
+        self.root.rename(renamed)
+        self.root = renamed
+        manifest = self.root / 'clutch.toml'
+        (self.root / 'src').rename(self.root / 'sourc\u00e9')
+        text = manifest.read_text(encoding='utf-8').replace('[build]',
+            '[build]\nsources=["sourc\u00e9/main.cpp", "sourc\u00e9/value.c"]')
+        text = text.replace('out/debug # profile', 'out/d\u00e9bug')
+        manifest.write_text(text, encoding='utf-8')
+        self.location = self.locate()
+        self.build = Path(self.location['paths']['build'])
+        self.query = Path(self.location['paths']['query'])
+        self.reply = Path(self.location['paths']['reply'])
+        self.request()
+        self.configure()
+        tools = self.root / 'tools'
+        tools.mkdir()
+        executable = tools / Path(OPTIONS.clutch).name
+        shutil.copy2(OPTIONS.clutch, executable)
+        # Keep external launchers beside their installed assets (Chocolatey
+        # shims are not relocatable). Clutch is the binary we can relocate.
+        environment = {
+            'CLUTCH_BUILD_TOOL': Path(OPTIONS.ninja).name,
+            'PATH': os.pathsep.join((str(tools), str(Path(OPTIONS.ninja).parent),
+                                    os.environ.get('PATH', ''))),
+        }
+        with mock.patch.object(OPTIONS, 'clutch', str(executable)), \
+                mock.patch.dict(os.environ, environment):
+            self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx)
+            self.cli('run', '-j', '1')
+            self.cli('test', '-j', '1')
+        # Native Windows generators must decode rule filenames as well as
+        # compiler response arguments; ASCII-only fixtures cannot catch this.
+        if os.name == 'nt' and all(Path(compiler).stem.lower() == 'cl'
+                                   for compiler in (OPTIONS.cc, OPTIONS.cxx)):
+            for generator, tool in (('nmake', 'nmake'), ('visual-studio', 'MSBuild')):
+                if executable := shutil.which(tool):
+                    with self.subTest(generator=generator):
+                        self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
+                                 '--generator', generator, '--build-tool', executable)
+                        self.cli('run', '-j', '1')
+                        self.cli('test', '-j', '1')
+        database = json.loads((self.build / 'compile_commands.json').read_text(encoding='utf-8'))
+        self.assertTrue(all(Path(unit['file']).is_file() for unit in database))
+        _, index = self.index()
+        self.assertEqual(Path(index['paths']['source']), self.root)
+        self.assertEqual(index['status'], 'success')
+        self.cli('clean')
 
     def test_capabilities_and_locate_do_not_configure(self):
         capabilities = json.loads(self.cli('capabilities').stdout)

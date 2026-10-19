@@ -15,8 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace example
-{
-    /// Return an owning greeting; the input view is only borrowed during this call.
-    std::string greet(std::string_view name);
-} // namespace example
+namespace example {
+/// Return an owning greeting; the input view is only borrowed during this call.
+std::string greet(std::string_view name);
+}  // namespace example

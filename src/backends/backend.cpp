@@ -11,11 +11,6 @@
  * commands.
  */
 
-#ifdef _MSC_VER
-// Microsoft's CRT opt-out requires this reserved macro spelling.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include "backend.hpp"
 
 #include "backends/make/make.hpp"
@@ -26,13 +21,13 @@
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
+#include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -66,12 +61,12 @@ ninja_build_command(const Graph &graph,
                     const std::vector<size_t> &target_indices) {
   std::vector<std::string> command{graph.backend.executable,
                                    "-C",
-                                   graph.project.build.string()};
+                                   graph.project.build.u8string()};
   if (options.jobs > 0)
     command.insert(command.end(), {"-j", std::to_string(options.jobs)});
 
   for (const auto index : target_indices)
-    command.push_back(graph.targets.at(index).output.generic_string());
+    command.push_back(graph.targets.at(index).output.generic_u8string());
 
   return command;
 }
@@ -158,7 +153,7 @@ const BackendDriver &driver_for(const std::string &name) {
   throw std::runtime_error("unsupported build generator: " + name +
                            "; implemented generators: " + available);
 }
-} // namespace
+}  // namespace
 
 /// Map accepted display-name aliases onto stable Clutch generator identifiers.
 std::string normalize_backend_name(const std::string &name) {
@@ -212,18 +207,18 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
   // cache.
   auto requested = options.build_tool_executable;
 
-  if (const auto *value = std::getenv("CLUTCH_BUILD_TOOL");
-    requested.empty() && value)
-    requested = value;
+  if (const auto value = environment_value("CLUTCH_BUILD_TOOL");
+      requested.empty() && value)
+    requested = *value;
 
-  if (const auto *value = std::getenv(driver.environment_variable);
-    requested.empty() && value)
-    requested = value;
+  if (const auto value = environment_value(driver.environment_variable);
+      requested.empty() && value)
+    requested = *value;
 
   if (const auto cache_path = project.build / layout::backend_cache;
-    requested.empty() && fs::exists(cache_path)) {
-    if (const auto cache = toml::parse_file(cache_path.string());
-      cache["name"].value_or(std::string{}) == driver.name)
+      requested.empty() && fs::exists(cache_path)) {
+    if (const auto cache = toml::parse_file(cache_path.u8string());
+        cache["name"].value_or(std::string{}) == driver.name)
       requested = cache["executable"].value_or(std::string{});
   }
 
@@ -288,4 +283,4 @@ backend_build_command(const Graph &graph,
 
   return driver.build(graph, options, target_indices);
 }
-} // namespace clutch
+}  // namespace clutch
