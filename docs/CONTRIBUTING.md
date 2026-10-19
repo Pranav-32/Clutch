@@ -30,6 +30,10 @@ the existing PR checks.
 
 ## Code organization and style
 
+- Project artwork lives in [`assets/branding/`](../assets/branding/).
+  Keep the SVG logo as the vector source, its transparent PNG as the raster
+  export, and the 1280 × 640 banner for the README and GitHub social preview.
+  Preserve the supplied artwork when changing documentation.
 - Keep module headers beside their implementations under `src/`. Vendored code
   and upstream notices belong in `third_party/`.
 - Follow [`.clang-format`](../.clang-format) and [`.clang-tidy`](../.clang-tidy).
