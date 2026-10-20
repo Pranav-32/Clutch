@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Keep CI executable discovery faithful to compiler-driver invocation semantics."""
 
+from contextlib import redirect_stdout
+import io
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -70,10 +73,49 @@ class WorkflowExecutionTests(unittest.TestCase):
             commands = [call.args for call in run.call_args_list]
             self.assertFalse(any(command[1] == 'build' for command in commands))
             self.assertEqual([command for command in commands if command[1] == 'run'],
-                             [('clutch', 'run'), ('clutch', 'run', '--release')])
+                             [('clutch', 'run', '--jobs', '1'),
+                              ('clutch', 'run', '--release', '--jobs', '1')])
             self.assertEqual([command for command in commands if command[1] == 'test'],
-                             [('clutch', 'test'), ('clutch', 'test', '--release')])
+                             [('clutch', 'test', '--jobs', '1'),
+                              ('clutch', 'test', '--release', '--jobs', '1')])
             self.assertTrue(all('--locked' in command for command in commands if command[1] == '.'))
+
+    def test_examples_overlap_with_bounded_workers_and_keep_failure_logs(self):
+        with tempfile.TemporaryDirectory(prefix='clutch parallel examples ') as temporary:
+            root = Path(temporary)
+            names = ('a', 'b', 'c', 'd')
+            for name in names:
+                manifest = root / 'examples' / name / 'clutch.toml'
+                manifest.parent.mkdir(parents=True)
+                manifest.touch()
+            barrier = threading.Barrier(2, timeout=10)
+            lock = threading.Lock()
+            completed = []
+            running = peak = 0
+
+            def check(manifest, work, binary, cc, cxx, generator, output):
+                nonlocal running, peak
+                with lock:
+                    running += 1
+                    peak = max(peak, running)
+                # Both slots must be active; no wall-clock sleeps or thresholds.
+                barrier.wait()
+                with lock:
+                    running -= 1
+                    completed.append(manifest.parent.name)
+                print('fixture output: ' + manifest.parent.name, file=output)
+                if manifest.parent.name == 'a':
+                    raise RuntimeError('fixture failed')
+
+            captured = io.StringIO()
+            with patch.object(ci, 'ROOT', root), patch.object(ci, 'test_example', check), \
+                    patch.dict(os.environ, {'CLUTCH_TEST_JOBS': '2'}), redirect_stdout(captured):
+                with self.assertRaisesRegex(RuntimeError, 'fixture failed'):
+                    ci.test_examples('clutch', 'cc', 'c++', 'xcode')
+            self.assertEqual(peak, 2)
+            self.assertCountEqual(completed, names)
+            for name in names:
+                self.assertIn('fixture output: ' + name, captured.getvalue())
 
 
 if __name__ == '__main__':

@@ -4,12 +4,14 @@
 """Build, test, install and package one native CI target using argument arrays."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import platform
 import shutil
 import subprocess
 import tempfile
+import time
 import tomllib
 from pathlib import Path
 
@@ -21,10 +23,15 @@ TEST_TIMEOUT_SECONDS = 300
 DEFAULT_JOB_COUNT = 2
 
 
-def run(*command, cwd=ROOT):
+def run(*command, cwd=ROOT, output=None):
     """Log exact argument boundaries and retain native failure exit status."""
-    print(f'Running: {command!r}', flush=True)
-    subprocess.run([str(argument) for argument in command], cwd=cwd, check=True)
+    print(f'Running: {command!r}', file=output, flush=True)
+    started = time.monotonic()
+    try:
+        subprocess.run([str(argument) for argument in command], cwd=cwd, check=True,
+                       stdout=output, stderr=subprocess.STDOUT if output else None)
+    finally:
+        print(f'Elapsed: {time.monotonic() - started:.2f}s', file=output, flush=True)
 
 
 def require_tool(name):
@@ -44,31 +51,61 @@ def job_count(variable):
     return value
 
 
+def test_example(manifest, work, binary, cc, cxx, generator, output):
+    """Keep each project's profiles sequential and its compiler budget at one."""
+    project = work / manifest.parent.name
+    settings = tomllib.loads(manifest.read_text(encoding='utf-8'))
+    shutil.copytree(manifest.parent, project,
+                    ignore=shutil.ignore_patterns('Clutch-build-*', '.clutch'))
+    # Checked-in resolution must already match; CI must not silently repair it.
+    frozen = ('--locked',) if (project / 'clutch.lock').is_file() else ()
+    for profile in ((), ('--release',)):
+        run(binary, '.', '--generator', generator, '--cc', cc, '--cxx', cxx,
+            *profile, *frozen, cwd=project, output=output)
+        # run builds first; another build would start Xcode/MSBuild twice.
+        run(binary, 'run', *profile, '--jobs', '1', cwd=project, output=output)
+        run(binary, '.', '--locked', '--generator', generator, '--cc', cc, '--cxx', cxx,
+            *profile, cwd=project, output=output)
+        if settings.get('test') or settings.get('workspace'):
+            run(binary, 'test', *profile, '--jobs', '1', cwd=project, output=output)
+        if manifest.parent.name == 'multi-file':
+            run(binary, 'run', *profile, '--jobs', '1', '--', 'Clutch contributor',
+                cwd=project, output=output)
+
+
 def test_examples(binary, cc, cxx, generator):
-    """Exercise shipped projects in both profiles without polluting examples/."""
+    """Run independent projects concurrently; retain complete, separate logs."""
+    workers = int(job_count('CLUTCH_TEST_JOBS'))
     with tempfile.TemporaryDirectory(prefix='clutch examples ') as temporary:
         # Resolve macOS /var aliases before Clutch's build ownership checks.
         work = Path(temporary).resolve()
-        for manifest in sorted((ROOT / 'examples').glob('*/clutch.toml')):
-            project = work / manifest.parent.name
-            settings = tomllib.loads(manifest.read_text(encoding='utf-8'))
-            shutil.copytree(manifest.parent, project,
-                            ignore=shutil.ignore_patterns('Clutch-build-*', '.clutch'))
-            # Checked-in resolution must already match; CI must not silently
-            # repair an outdated example lock before testing it.
-            frozen = ('--locked',) if (project / 'clutch.lock').is_file() else ()
-            for profile in ((), ('--release',)):
-                run(binary, '.', '--generator', generator, '--cc', cc, '--cxx', cxx,
-                    *profile, *frozen, cwd=project)
-                # run builds its executable first; another build here starts
-                # Xcode/MSBuild twice without adding example coverage.
-                run(binary, 'run', *profile, cwd=project)
-                run(binary, '.', '--locked', '--generator', generator, '--cc', cc, '--cxx', cxx,
-                    *profile, cwd=project)
-                if settings.get('test') or settings.get('workspace'):
-                    run(binary, 'test', *profile, cwd=project)
-                if manifest.parent.name == 'multi-file':
-                    run(binary, 'run', *profile, '--', 'Clutch contributor', cwd=project)
+
+        def check(manifest):
+            log = work / (manifest.parent.name + '.log')
+            with log.open('w', encoding='utf-8') as output:
+                test_example(manifest, work, binary, cc, cxx, generator, output)
+
+        failures = []
+        started = time.monotonic()
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            pending = {executor.submit(check, manifest): manifest.parent.name
+                       for manifest in sorted((ROOT / 'examples').glob('*/clutch.toml'))}
+            for future in as_completed(pending):
+                name = pending[future]
+                try:
+                    future.result()
+                except Exception as error:
+                    # Complete other fixtures and print every failure's log.
+                    failures.append(error)
+                finally:
+                    log = work / (name + '.log')
+                    print(f'Example: {name} ({generator})', flush=True)
+                    if log.exists():
+                        print(log.read_text(encoding='utf-8', errors='replace'), flush=True)
+        print(f'Examples ({generator}): {time.monotonic() - started:.2f}s; '
+              f'{workers} workers', flush=True)
+        if failures:
+            raise failures[0]
 
 
 def build(target, build_dir, output):
