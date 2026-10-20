@@ -53,6 +53,12 @@ not titles, labels or branch names. Unknown history and manual runs receive full
 coverage. Preserve the five required check names in both paths. Compiler caches
 may be reused; saved test results and release packages are not cached.
 
+The native driver reports elapsed time for each command. Shipped examples use
+`CLUTCH_TEST_JOBS` independent project workers (two by default), each with one
+compiler job. Profiles and lock checks stay sequential within each project;
+logs are grouped by project and failures remain fatal. The CTest stage finishes
+before the example stage starts, keeping their concurrency budgets separate.
+
 ## Version proposals and publication
 
 1. Merge reviewed changes with [Conventional Commit titles](releases.md#contribution-titles-and-version-proposals).
