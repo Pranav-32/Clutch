@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0-beta.1](https://github.com/Pranav-32/Clutch/compare/v0.3.2...v0.4.0-beta.1) (2026-10-20)
+
+
+### Features
+
+* add flexible manifests, dependency management and source bundles ([#12](https://github.com/Pranav-32/Clutch/issues/12)) ([fda0d85](https://github.com/Pranav-32/Clutch/commit/fda0d8553f0730d1f2d1dd2b287412fd3de95760))
+
+
+### Continuous Integration
+
+* run independent example projects concurrently ([69448cf](https://github.com/Pranav-32/Clutch/commit/69448cf65648f630679a716dc6431a911c4f3489))
+
 ## [0.3.2](https://github.com/Pranav-32/Clutch/compare/v0.3.1...v0.3.2) (2026-10-19)
 
 
