@@ -12,8 +12,13 @@ entry = "../main.cpp"
 generator = "ninja"
 include_dirs = ["../git-local"]
 
-[dependencies]
-number = { path = "../local/number", build_system = "make", libraries = ["libnumber.a"], include_dirs = ["src"] }
+[dependencies.number]
+path = "../local/number"
+build_system = "make"
+libraries = ["libnumber.a"]
+include_dirs = ["src"]
+# Preserve the library's C++ link requirement even for a C-only consumer.
+link_language = "cpp"
 
 [[test]]
 name = "package-test"

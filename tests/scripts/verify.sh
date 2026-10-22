@@ -107,7 +107,7 @@ registered_tests="$("$ctest" --test-dir "$build_dir" -N)"
     || fail 'clutch.package-examples was not registered (CMake and Git are required)'
 [[ "$registered_tests" == *'clutch.files'* ]] \
     || fail 'clutch.files was not registered'
-for suite in clutch.source-files clutch.capture clutch.stress-source-files clutch.stress-capture clutch.stress-integration clutch.bundle clutch.zip; do
+for suite in clutch.source-files clutch.capture clutch.stress-source-files clutch.stress-capture clutch.stress-integration clutch.bundle clutch.zip clutch.git-submodules clutch.cmake-projects; do
     [[ "$registered_tests" == *"$suite"* ]] || fail "$suite was not registered"
 done
 

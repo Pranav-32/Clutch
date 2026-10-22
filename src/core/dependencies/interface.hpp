@@ -12,6 +12,7 @@
 #include "core/targets/target.hpp"
 #include "core/workspace/inputs.hpp"
 #include "dependency.hpp"
+#include <utility>
 
 namespace clutch {
 struct Project;
@@ -27,5 +28,8 @@ struct NativeInterface {
   ForeignBuild build;
   std::vector<ConfigurationInput> inputs;
   std::string version;
+  // Evaluated native target names and types, available before selecting a
+  // library.
+  std::vector<std::pair<std::string, std::string>> available_targets;
 };
 }  // namespace clutch::dependencies

@@ -82,7 +82,14 @@ void validate_build_graph(const Graph &graph) {
   std::set<std::string> foreign_ids;
   for (const auto &build : graph.project.foreign_builds) {
     if (build.id.empty() || !foreign_ids.insert(build.id).second ||
-        build.arguments.empty() || !build.directory.is_absolute())
+        build.arguments.empty() || !build.directory.is_absolute() ||
+        !std::all_of(build.id.begin(),
+                     build.id.end(),
+                     [](const unsigned char c) {
+                       return (c >= 'a' && c <= 'z') ||
+                              (c >= 'A' && c <= 'Z') ||
+                              (c >= '0' && c <= '9') || c == '-' || c == '_';
+                     }))
       throw std::runtime_error("duplicate or invalid foreign build action");
     for (const auto &artifact : build.artifacts)
       produce(artifact);
@@ -296,6 +303,14 @@ Graph make_build_graph(Project project,
         a.push_back(u.source.u8string());
         a.push_back("/Fo" + u.object.u8string());
       } else {
+        if (toolchain.microsoft_abi) {
+          const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
+          a.push_back(std::string("-fms-runtime-lib=") + runtime +
+                      (options.release ? "" : "_dbg"));
+          if (!options.release)
+            a.emplace_back("-D_DEBUG");
+        }
+
         a.push_back(std::string("-std=") + (c ? "c" + target.c_standard
                                               : "c++" + target.cxx_standard));
         a.emplace_back(p.optimize == "speed"  ? "-O3"
@@ -387,6 +402,25 @@ Graph make_build_graph(Project project,
         target.link.insert(target.link.begin() + 1, "--rsp-quoting=posix");
     } else {
       target.link = {target_linker};
+      if (!toolchain.msvc && toolchain.microsoft_abi) {
+        const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
+        target.link.push_back(std::string("-fms-runtime-lib=") + runtime +
+                              (options.release ? "" : "_dbg"));
+        // GNU Clang injects release libcmt as a startup default even when the
+        // selected object/runtime is Debug or DLL. Microsoft LINK then mixes
+        // CRTs. Suppress that driver default and name the selected CRT plus
+        // the compatibility library explicitly; retain compiler-rt handling.
+        const auto *const crt = p.runtime == "dynamic"
+                                    ? (options.release ? "msvcrt" : "msvcrtd")
+                                    : (options.release ? "libcmt" : "libcmtd");
+        target.link.insert(target.link.end(),
+                           {"-nostartfiles",
+                            "-Xlinker",
+                            std::string("/defaultlib:") + crt,
+                            "-Xlinker",
+                            "/defaultlib:oldnames"});
+      }
+
       if (toolchain.msvc)
         target.link.insert(target.link.end(),
                            {"/nologo",
@@ -430,6 +464,8 @@ Graph make_build_graph(Project project,
                              {"-dynamiclib",
                               "-Wl,-install_name,@rpath/" +
                                   target.output.filename().u8string()});
+#elif defined(_WIN32)
+          target.link.emplace_back("-shared");
 #else
           // A loader filename avoids embedding the build directory in ELF
           // DT_NEEDED entries, allowing the existing $ORIGIN paths to work.
@@ -440,9 +476,15 @@ Graph make_build_graph(Project project,
 #endif
         }
 #ifdef _WIN32
-        if (!target.import_library.empty())
-          target.link.push_back("-Wl,--out-implib," +
-                                target.import_library.u8string());
+        if (!target.import_library.empty()) {
+          if (toolchain.microsoft_abi)
+            target.link.insert(
+                target.link.end(),
+                {"-Xlinker", "/implib:" + target.import_library.u8string()});
+          else
+            target.link.push_back("-Wl,--out-implib," +
+                                  target.import_library.u8string());
+        }
 #elif defined(__APPLE__)
         target.link.insert(
             target.link.end(),

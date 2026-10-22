@@ -27,6 +27,7 @@ add_executable(clutch
     src/app/cli.cpp
     src/app/workflow.cpp
     src/backends/backend.cpp
+    src/backends/foreign_actions.cpp
     src/backends/make/make.cpp
     src/backends/ninja/ninja.cpp
     src/backends/visual_studio/visual_studio.cpp
@@ -42,10 +43,12 @@ add_executable(clutch
     src/core/dependencies/foreign.cpp
     src/core/dependencies/make.cpp
     src/core/dependencies/git.cpp
+    src/core/dependencies/git_submodules.cpp
     src/core/dependencies/manifest.cpp
     src/core/dependencies/resolve.cpp
     src/core/dependencies/sources.cpp
     src/core/dependencies/system.cpp
+    src/core/dependencies/updates.cpp
     src/core/dependencies/vcpkg.cpp
     src/core/dependencies/version.cpp
     src/core/file_api/file_api.cpp
@@ -68,6 +71,7 @@ add_executable(clutch
     src/core/workspace/lock.cpp
     src/core/workspace/workspace.cpp
     src/platform/arguments.cpp
+    src/platform/artifacts.cpp
     src/platform/capture.cpp
     src/platform/environment.cpp
     src/platform/files.cpp
@@ -75,6 +79,8 @@ add_executable(clutch
     src/platform/process.cpp
     src/platform/terminal.cpp
     src/platform/zip.cpp
+    src/providers/cmake.cpp
+    src/providers/cmake_model.cpp
     src/toolchains/toolchain.cpp
 )
 add_dependencies(clutch clutch_version)

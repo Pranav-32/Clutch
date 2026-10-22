@@ -483,6 +483,7 @@ void resolve(Project &project, const Options &options) {
         if (identity(request.requirement) == git &&
             (!request.requirement.libraries.empty() ||
              !request.requirement.build_arguments.empty() ||
+             !request.requirement.link_language.empty() ||
              !request.requirement.cmake_options.empty() ||
              !request.requirement.runtime.empty() ||
              (!native && !request.requirement.targets.empty())))

@@ -47,6 +47,11 @@ std::vector<GeneratorInfo> supported_generators();
 BuildBackend resolve_backend(const Options &options, const Project &project);
 /// Persist generator name and executable in the selected build directory.
 void save_backend(const BuildBackend &backend, const Project &project);
+/// Clean selected artifacts when a backend cannot force compilation directly.
+/// Other backends combine their cleaning/forced-build step with the build
+/// action.
+int clean_backend_artifacts(const Graph &graph,
+                            const std::vector<size_t> &target_indices);
 /// Dispatch build-file generation through the selected generator driver.
 void generate_backend_files(const Graph &graph,
                             const Options &options,

@@ -36,8 +36,14 @@ struct Options {
   bool locked = false;  ///< Configuration must use an unchanged existing lock.
   bool update_dependencies =
       false;  ///< Refresh untagged imports within constraints.
+  bool check_updates =
+      false;  ///< Report compatible updates after configuration.
   bool offline =
-      false;     ///< Resolve Git imports using existing local pins only.
+      false;  ///< Resolve Git imports using existing local pins only.
+  bool discover_targets =
+      false;  ///< Inspect targets without saving build rules.
+  bool clean_build =
+      false;     ///< Rebuild selected targets and their prerequisites.
   int jobs = 0;  ///< Zero selects host CPU concurrency for parallel backends.
 };
 }  // namespace clutch

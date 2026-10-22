@@ -47,6 +47,8 @@ paths. Clutch has no built-in vendor/package-name list.
 
 The [Makefile variant](makefile/clutch.toml) explicitly chooses the native library's
 alternative GNU Make rules and declares its output archive/include directory.
+Its `link_language = "cpp"` also declares the library's link-driver requirement;
+a C-only consumer can use the same field without compiling its sources as C++.
 Run it the same way on a POSIX host with GNU Make and `ar`. Its objects and archive
 stay in the profile's foreign-build sandbox; the source directory is not modified.
 

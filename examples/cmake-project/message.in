@@ -1,0 +1,5 @@
+// Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+// SPDX-License-Identifier: BSD-3-Clause
+// Copied into the build tree by the example's CMake custom command.
+#pragma once
+constexpr auto example_message = "Hello from the original CMake project!";

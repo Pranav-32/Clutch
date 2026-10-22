@@ -6,6 +6,7 @@
  */
 #pragma once
 #include "core/paths.hpp"
+#include <string>
 #include <vector>
 
 namespace clutch {
@@ -26,6 +27,13 @@ void configure_foreign(Project &project,
 int build_foreign(const Graph &graph,
                   const Options &options,
                   const std::vector<size_t> &selected);
+/// Execute one saved action for a generated native graph and update its
+/// interface stamp only when artifact/header timestamps or membership change.
+int prepare_foreign(const Graph &graph,
+                    const Options &options,
+                    const std::string &id);
+/// Stable prerequisite shared by every consumer of a foreign action.
+fs::path foreign_stamp(const Graph &graph, const std::string &id);
 /// Stage explicitly discovered DLLs beside the selected executables.
 void stage_foreign_runtime(const Graph &graph,
                            const std::vector<size_t> &selected);

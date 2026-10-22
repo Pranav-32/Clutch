@@ -89,6 +89,10 @@ repository root.
 
 ## Optional dependency adapters
 
+To drive an existing `CMakeLists.txt` directly, see the
+[CMake project workflow](cmake-projects.md). This keeps CMake in charge of its
+native rules, including framework application helpers and generated resources.
+
 Ordinary local/header-only imports need no package manager. Git 2.29+ is required
 only for Git and source-catalog imports. The CMake adapter and discovery of
 installed CMake package targets need CMake 3.21+; Ninja is preferred for foreign

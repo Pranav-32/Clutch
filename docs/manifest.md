@@ -155,7 +155,7 @@ Clutch validates both standard values even if a language is currently unused.
 | `defines` | Array of strings | Empty | Preprocessor definitions for every target/test in the project; workspace-root definitions are shared with members. |
 | `links` | Array of target names | Empty | Private library dependencies of the default application named by `project.name`; accepts qualified workspace names. |
 | `pch` | Array of header paths, or `{ c = [...], cpp = [...] }` | Empty | Prefix headers for targets/tests; array form selects C++. |
-| `runtime` | `"static"` or `"dynamic"` | `"static"` | Microsoft CRT: `/MT[d]` or `/MD[d]`; debug profiles select the debug runtime. No effect on GNU-style drivers. |
+| `runtime` | `"static"` or `"dynamic"` | `"static"` | Microsoft CRT: `/MT[d]` or `/MD[d]` for `cl`/`clang-cl`, or `-fms-runtime-lib` for GNU-style Clang targeting MSVC. Debug profiles select the debug runtime. No effect on MinGW or POSIX targets. |
 
 ```toml
 [build]

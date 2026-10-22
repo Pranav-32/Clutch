@@ -23,6 +23,7 @@ to `src/`. Each module documents its own functions and platform assumptions.
 | `src/core/file_api/` | Queries, versioned code models and snapshot publication |
 | `src/toolchains/` | Compiler discovery, driver families and saved selections |
 | `src/backends/` | Generator registry, native build-file generation and execution |
+| `src/providers/` | Whole-project delegation and evaluated metadata from existing build systems |
 | `src/platform/` | Child processes, file output, JSON escaping and terminal messages |
 | `third_party/` | Vendored headers, version notes and upstream licenses |
 | `tests/` | Unit, integration and development-tooling checks |
@@ -30,6 +31,14 @@ to `src/`. Each module documents its own functions and platform assumptions.
 | `.devcontainer/` | Shared Linux development environment |
 
 ## Configuration and execution
+
+Native manifests use Clutch's own configuration engine. The separate CMake
+project provider configures an original top-level `CMakeLists.txt`, requests
+CMake File API facts and routes operations to its owning CMake/CTest/CPack tools.
+It does not feed a foreign application's source list into Clutch generators.
+Source-local profile routing and build-local identity records prevent accidental
+cross-project reuse; a pending marker blocks execution after failed configuration.
+See [CMake projects](cmake-projects.md) for selection, presets and IDE boundaries.
 
 `clutch .` validates manifests, resolves the selected profile and tools,
 constructs the graph, and writes native rules. It also writes
@@ -55,6 +64,19 @@ edits are incremental; changing the manifest or discovered source set requires
 configuration. Direct Ninja/GNU Make invocations can rerun configuration when
 manifest timestamps change, using recorded tool selections.
 
+`build`, `run` and `test` accept `--clean` as an execution policy. Ninja cleans
+the selected producer closure; Make/NMake/JOM force its commands, and MSBuild
+uses native Rebuild targets. GNU Make holds the already validated Makefile old
+while forcing products, avoiding unintended regeneration of IDE snapshots.
+Xcode uses controlled per-target intermediate/PCH directories and removes only
+those directories and selected products after checking ownership and redirection.
+The profile root is shared with metadata and must never be passed to recursive
+product-directory cleanup. CMake/Make adapters retain explicit forced-build argv
+alongside their ordinary actions in the private saved graph.
+The generator registry owns optional cleanup hooks. `platform/artifacts.*`
+preflights an explicit output list before removing anything; its caller establishes
+profile ownership, and unlisted configuration and inputs remain intact.
+
 ## Persistent state
 
 | Location | Contract |
@@ -71,6 +93,12 @@ Private cache schemas may change and require reconfiguration. The public
 Changed file contents are written only when necessary to preserve incremental
 behavior. Build directories must not overwrite inputs, adopt unrelated contents
 or redirect through links; cleanup verifies ownership.
+
+Dependency update reporting resolves a candidate graph in memory and compares its
+Git records with existing pins. It may extend the immutable source cache to read
+candidate manifests, but never publishes a lock, native configuration or API reply.
+Transitive conflicts use the same backtracking solver as actual updates. Input
+fingerprints and a before/after lock signature reject a changing comparison base.
 
 Native tools track source/header dependencies. Make command changes also
 invalidate affected artifacts and their consumers so coarse timestamps cannot
@@ -120,16 +148,30 @@ immutable source publication. `dependencies/vcpkg.*` reads a pinned source-catal
 entry without executing its port script or invoking vcpkg. Unsupported recipe
 requirements fail rather than silently changing their meaning.
 
+Git checkouts use their stable revision paths from initialization onward. An
+adjacent pending record proves ownership of an unfinished checkout; a verified
+origin, commit and clean tree allow that record to become the completion marker
+with one file rename. Source trees are never renamed for publication. This
+supports Windows file readers and offline recovery after interrupted completion,
+while existing complete cache entries keep their paths and metadata format.
+
 The CMake adapter configures a small external consumer with the selected compiler
 and profile. CMake evaluates imported targets and generator expressions; its file
 API supplies public usage and transitive link inputs. Upstream sources keep their
 native build graph. Makefiles have no standard interface metadata, so their
 adapter requires explicit usage/artifact declarations and out-of-source rules.
+
+For CMake targets carrying `INTERFACE_SOURCES`, an isolated static bridge compiles
+the evaluated implementations with native rules. The probe link interface includes
+that archive and transitive libraries. Compile groups are separated by language,
+and compiler driver syntax is distinguished from the target ABI when selecting
+the Microsoft runtime. Target discovery uses native directory properties before
+selection; a sole library can be selected implicitly.
 Clutch's own configuration engine remains responsible for the main project.
 
 Installed packages use the same generic interfaces across vendors. Imports with
-`target`/`targets` use CMake discovery; imports with explicit `include_dirs` and/or
-`libraries` use `dependencies/system.*` without a configuration subprocess.
+target/package discovery fields use CMake discovery; imports with only explicit
+`include_dirs` and/or `libraries` use `dependencies/system.*` without a configuration subprocess.
 `dependencies/interface.hpp` shares the evaluated interface between adapters.
 Package names do not select special SDK behavior. Existing library files become
 link prerequisites, while bare library names use the selected driver's spelling.
@@ -138,7 +180,12 @@ Evaluated interfaces propagate through native library targets. Saved configurati
 retains foreign argv actions, artifact prerequisites and runtime paths. CLI builds
 run reachable upstream actions before the main backend, using the same job budget
 sequentially to avoid multiplying independent pools. Direct backend invocation
-currently does not run that preparation. IDE databases merge upstream records
+also prepares foreign actions through saved callbacks and stable public-interface
+stamps. Ninja/GNU Make use explicit prerequisites, MSBuild shares preparation
+targets, and Xcode uses aggregate dependencies. NMake/JOM perform preparation
+while parsing their Makefile. Direct callbacks use one upstream job per native
+scheduler slot and serialize profile-local upstream operations; CLI preparation
+uses the requested job budget before handing off to the backend. IDE databases merge upstream records
 with their original directories and exclude adapter probe sources.
 
 ## Packages, PCH and concurrency
@@ -150,12 +197,18 @@ source, prefers compatible lock pins, chooses the most constrained unresolved
 package first, and backtracks with cached ref listings and parsed commit metadata.
 Search and metadata limits bound untrusted or excessively broad input. Source
 publication uses one project-local writer and immutable revision directories.
+`dependencies/git_submodules.*` walks NUL-framed gitlinks with depth/count
+limits, initializes missing worktrees at recorded commits and rejects modified
+nested checkouts. Git resolves relative URLs; offline checks never clone/fetch.
+Submodule files participate in source snapshots while Git metadata is omitted.
 
 Native library manifests are composed as qualified targets with their own private
 settings and standards. Public requirements propagate through the existing target
 resolver. Header-only transitive interfaces are expanded once per consumer project.
 The file API exports package records and PCH metadata; DOT output distinguishes
 package edges, precompilation, compilation and linking.
+Native action nodes have a separate DOT namespace from package records and expose
+generated-header preparation edges even for interfaces without link artifacts.
 
 PCH creator actions copy target flags and are isolated by target and language.
 Compiler PCH capabilities are checked after external interfaces have supplied

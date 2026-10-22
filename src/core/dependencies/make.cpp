@@ -58,6 +58,7 @@ NativeInterface inspect_make(const ForeignRequest &request,
   NativeInterface result;
   result.usage.id = id;
   result.usage.defines = r.defines;
+  result.usage.needs_cpp = r.link_language == "cpp";
   result.build = {id,
                   build,
                   {make,
@@ -78,6 +79,10 @@ NativeInterface inspect_make(const ForeignRequest &request,
                                 r.targets.end());
   for (const auto &argument : r.build_arguments)
     result.build.arguments.push_back(expand(argument, request.source, build));
+  result.build.rebuild_arguments = result.build.arguments;
+  result.build.rebuild_arguments.insert(result.build.rebuild_arguments.begin() +
+                                            1,
+                                        "--always-make");
   for (const auto &library : r.libraries) {
     const auto path =
         fs::absolute(build / fs::u8path(expand(library, request.source, build)))

@@ -128,7 +128,7 @@ def build(target, build_dir, output):
     launcher = os.environ.get('CLUTCH_COMPILER_LAUNCHER')
     command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={require_tool(launcher) if launcher else ""}')
     required = {'clutch.help', 'clutch.version', 'clutch.files', 'clutch.graph', 'clutch.file-api', 'clutch.targets',
-                'clutch.workspace', 'clutch.dependencies', 'clutch.foreign-dependencies',
+                'clutch.workspace', 'clutch.dependencies', 'clutch.foreign-dependencies', 'clutch.cmake-projects', 'clutch.git-submodules',
                 'clutch.package-examples', 'clutch.version-ranges', 'clutch.bundle', 'clutch.zip',
                 'clutch.source-files', 'clutch.capture', 'clutch.stress-source-files',
                 'clutch.stress-capture', 'clutch.stress-integration'}

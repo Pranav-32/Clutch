@@ -128,40 +128,65 @@ fs::path reply_file(const fs::path &reply, const Json &reference) {
 void compile_usage(DependencyUsage &usage,
                    const Json &target,
                    const bool c,
-                   const bool microsoft) {
-  for (const auto &group : target.value("compileGroups", Json::array())) {
-    auto &flags = c ? usage.c_options : usage.cpp_options;
-    for (const auto &include : group.value("includes", Json::array())) {
-      const auto path = include.at("path").get<std::string>();
-      if (include.value("isSystem", false)) {
-        if (microsoft) {
-          if (std::find(flags.begin(), flags.end(), "/external:W0") ==
-              flags.end())
-            flags.emplace_back("/external:W0");
-          flags.push_back("/external:I" + path);
-        } else
-          flags.insert(flags.end(), {"-isystem", path});
+                   const bool microsoft,
+                   std::vector<fs::path> &interface_dirs) {
+  // Module sources can carry private per-file definitions. Select the probe's
+  // own source group instead of merging unrelated source/language settings.
+  const auto *const filename = c ? "c.c" : "cpp.cpp";
+  const auto &sources = target.at("sources");
+  const auto probe =
+      std::find_if(sources.begin(), sources.end(), [&](const Json &source) {
+        const auto path = fs::u8path(source.at("path").get<std::string>());
+        return path == fs::path(filename) ||
+               path == fs::u8path(
+                           target.at("paths").at("source").get<std::string>()) /
+                           filename;
+      });
+  if (probe == sources.end() || !probe->contains("compileGroupIndex"))
+    throw std::runtime_error("CMake consumer probe has no compile group");
+
+  const auto &group = target.at("compileGroups")
+                          .at(probe->at("compileGroupIndex").get<size_t>());
+  if (group.at("language") != (c ? "C" : "CXX"))
+    throw std::runtime_error("CMake consumer probe has the wrong language");
+
+  auto &flags = c ? usage.c_options : usage.cpp_options;
+  for (const auto &include : group.value("includes", Json::array())) {
+    const auto path = include.at("path").get<std::string>();
+    // Retain physical roots for preparation stamps without mixing C-only and
+    // C++-only include flags in the public compile interface.
+    const auto directory = fs::u8path(path);
+    if (std::find(interface_dirs.begin(), interface_dirs.end(), directory) ==
+        interface_dirs.end())
+      interface_dirs.push_back(directory);
+    if (include.value("isSystem", false)) {
+      if (microsoft) {
+        if (std::find(flags.begin(), flags.end(), "/external:W0") ==
+            flags.end())
+          flags.emplace_back("/external:W0");
+        flags.push_back("/external:I" + path);
       } else
-        flags.push_back((microsoft ? "/I" : "-I") + path);
-    }
-    for (const auto &define : group.value("defines", Json::array()))
-      flags.push_back((microsoft ? "/D" : "-D") +
-                      define.at("define").get<std::string>());
-    auto &standard = c ? usage.c_standard : usage.cpp_standard;
-    if (group.contains("languageStandard"))
-      standard = group.at("languageStandard").at("standard").get<std::string>();
-    for (const auto &fragment :
-         group.value("compileCommandFragments", Json::array())) {
-      if (!fragment.contains("backtrace"))
-        continue;
-      for (const auto &flag :
-           split(fragment.at("fragment").get<std::string>(), microsoft))
-        // The consumer's profile owns CRT/optimization/debug policy. Language
-        // requirements are represented separately and checked before
-        // generation.
-        if (flag.rfind("-std=", 0) != 0 && flag.rfind("/std:", 0) != 0)
-          flags.push_back(flag);
-    }
+        flags.insert(flags.end(), {"-isystem", path});
+    } else
+      flags.push_back((microsoft ? "/I" : "-I") + path);
+  }
+  for (const auto &define : group.value("defines", Json::array()))
+    flags.push_back((microsoft ? "/D" : "-D") +
+                    define.at("define").get<std::string>());
+  auto &standard = c ? usage.c_standard : usage.cpp_standard;
+  if (group.contains("languageStandard"))
+    standard = group.at("languageStandard").at("standard").get<std::string>();
+  for (const auto &fragment :
+       group.value("compileCommandFragments", Json::array())) {
+    if (!fragment.contains("backtrace"))
+      continue;
+    for (const auto &flag :
+         split(fragment.at("fragment").get<std::string>(), microsoft))
+      // The consumer's profile owns CRT/optimization/debug policy. Language
+      // requirements are represented separately and checked before
+      // generation.
+      if (flag.rfind("-std=", 0) != 0 && flag.rfind("/std:", 0) != 0)
+        flags.push_back(flag);
   }
 }
 
@@ -170,6 +195,7 @@ void compile_usage(DependencyUsage &usage,
 void link_usage(DependencyUsage &usage,
                 const Json &target,
                 const fs::path &build,
+                const std::set<fs::path> &artifacts,
                 const bool microsoft) {
   if (!target.contains("link"))
     return;
@@ -184,8 +210,9 @@ void link_usage(DependencyUsage &usage,
       if (role == "libraries" && !flag.empty() && flag.front() != '-' &&
           (flag.front() != '/' || fs::u8path(flag).is_absolute())) {
         const auto path = fs::u8path(flag);
-        if (path.is_absolute() || path.has_parent_path()) {
-          const auto absolute = fs::absolute(build / path).lexically_normal();
+        const auto absolute = fs::absolute(build / path).lexically_normal();
+        if (path.is_absolute() || path.has_parent_path() ||
+            artifacts.count(absolute)) {
           usage.link_inputs.push_back(absolute);
           flag = absolute.u8string();
         }
@@ -209,9 +236,6 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
   auto targets = r.targets;
   if (!r.target.empty())
     targets.push_back(r.target);
-  if (targets.empty())
-    throw std::runtime_error("CMake dependency '" + r.alias +
-                             "' requires target or targets");
 
   std::string selection =
       request.identity + ':' + r.version + ':' + r.cmake_package;
@@ -219,6 +243,10 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
     selection += ':' + component;
   for (const auto &target : targets)
     selection += ':' + target;
+  for (const auto &define : r.defines)
+    selection += ':' + std::to_string(define.size()) + ':' + define;
+  if (options.discover_targets)
+    selection += ":discovery";
   const auto id = source_key(selection);
   const auto directory = project.build / layout::environment / "foreign" / id;
   const auto source = directory / "probe";
@@ -226,9 +254,26 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
   validate_generated_path(directory);
   std::ostringstream script;
   script << "cmake_minimum_required(VERSION 3.21)\n"
-            "project(ClutchDependencyProbe LANGUAGES C CXX)\n"
+            "cmake_policy(SET CMP0091 NEW)\n"
+            "set(CMAKE_FIND_USE_PACKAGE_REGISTRY OFF)\n"
+            "set(CMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY OFF)\n"
+            "set(CMAKE_EXPORT_COMPILE_COMMANDS ON)\n"
+         << "set(CMAKE_C_STANDARD " << literal(project.c_standard) << ")\n"
+         << "set(CMAKE_CXX_STANDARD " << literal(project.cxx_standard) << ")\n"
+         << "set(CMAKE_C_STANDARD_REQUIRED ON)\n"
+            "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+  if (tools.microsoft_abi || tools.msvc)
+    script << "set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded"
+           << (options.release ? "" : "Debug")
+           << (project.runtime == "dynamic" ? "DLL" : "") << ")\n";
+
+  script << "project(ClutchDependencyProbe LANGUAGES C CXX)\n"
             "file(REMOVE \"${CMAKE_BINARY_DIR}/package-version.txt\")\n"
             "set(BUILD_TESTING OFF CACHE BOOL \"\")\n";
+  if (options.offline)
+    script << "set(FETCHCONTENT_FULLY_DISCONNECTED ON)\n"
+              "set(FETCHCONTENT_UPDATES_DISCONNECTED ON)\n";
+
   if (!r.root.empty() && r.provider == "system")
     script << "list(PREPEND CMAKE_PREFIX_PATH " << literal(r.root) << ")\n";
   if (r.provider == "system") {
@@ -263,28 +308,87 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
     script << "add_subdirectory(" << literal(request.source.generic_u8string())
            << " upstream EXCLUDE_FROM_ALL)\n";
   }
-  script << "add_custom_target(clutch_dependency)\n";
-  for (const auto &target : targets) {
-    script << "if(NOT TARGET " << literal(target) << ")\nmessage(FATAL_ERROR "
-           << literal("dependency does not export target: " + target)
-           << ")\nendif()\n"
-           << "get_target_property(_kind " << literal(target)
-           << " TYPE)\n"
-              "if(NOT _kind MATCHES "
-              "\"^(STATIC_LIBRARY|SHARED_LIBRARY|INTERFACE_LIBRARY|UNKNOWN_"
-              "LIBRARY)$\")\n"
-              "message(FATAL_ERROR \"dependency target must be a "
-              "library\")\nendif()\n"
-           << "add_dependencies(clutch_dependency " << literal(target) << ")\n";
+  // Directory properties enumerate real targets, including INTERFACE and
+  // imported libraries that have no standalone codemodel build target. CMake
+  // does not enumerate aliases; their underlying target names remain usable.
+  script << R"cmake(
+function(clutch_collect_targets directory)
+  get_property(_local DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+  get_property(_imported DIRECTORY "${directory}" PROPERTY IMPORTED_TARGETS)
+  foreach(_target IN LISTS _local _imported)
+    if(NOT TARGET "${_target}")
+      continue()
+    endif()
+    get_target_property(_type "${_target}" TYPE)
+    if(_type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|INTERFACE_LIBRARY|UNKNOWN_LIBRARY)$")
+      set_property(GLOBAL APPEND PROPERTY clutch_libraries "${_target}")
+      file(APPEND "${CMAKE_BINARY_DIR}/available-targets.txt" "${_target}\t${_type}\n")
+    endif()
+  endforeach()
+  get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+  foreach(_child IN LISTS _children)
+    clutch_collect_targets("${_child}")
+  endforeach()
+endfunction()
+file(WRITE "${CMAKE_BINARY_DIR}/available-targets.txt" "")
+clutch_collect_targets("${CMAKE_CURRENT_SOURCE_DIR}")
+)cmake";
+  script << "set(_clutch_selected";
+  for (const auto &target : targets)
+    script << ' ' << literal(target);
+  script << ")\n";
+  if (options.discover_targets)
+    script << "return()\n";
+  else
+    script << R"cmake(
+if(NOT _clutch_selected)
+  get_property(_clutch_selected GLOBAL PROPERTY clutch_libraries)
+  list(REMOVE_DUPLICATES _clutch_selected)
+  list(LENGTH _clutch_selected _count)
+  if(NOT _count EQUAL 1)
+    message(FATAL_ERROR "Dependency has ${_count} library targets: ${_clutch_selected}. Select target/targets in clutch.toml; use clutch . --targets to list libraries.")
+  endif()
+endif()
+)cmake";
+  // Keep selected names as CMake variable expansions in the generated loop.
+  // Explicit names were supplied as bracket literals, never executable code.
+  script << R"cmake(
+add_custom_target(clutch_dependency)
+foreach(_clutch_target IN LISTS _clutch_selected)
+  if(NOT TARGET "${_clutch_target}")
+    message(FATAL_ERROR "dependency does not export target: ${_clutch_target}")
+  endif()
+  get_target_property(_kind "${_clutch_target}" TYPE)
+  if(NOT _kind MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|INTERFACE_LIBRARY|UNKNOWN_LIBRARY)$")
+    message(FATAL_ERROR "dependency target must be a library: ${_clutch_target}")
+  endif()
+  add_dependencies(clutch_dependency "${_clutch_target}")
+endforeach()
+)cmake";
+  // INTERFACE libraries may publish implementation sources (JUCE modules, for
+  // example). A native archive compiles them with CMake's evaluated settings,
+  // dependencies and generated-file rules. Probe executables are never built.
+  script << "add_library(clutch_interface_sources STATIC EXCLUDE_FROM_ALL "
+            "bridge.c)\n"
+            "set_target_properties(clutch_interface_sources PROPERTIES "
+            "POSITION_INDEPENDENT_CODE ON)\n"
+            "target_link_libraries(clutch_interface_sources PRIVATE "
+            "${_clutch_selected})\n"
+            "add_dependencies(clutch_dependency clutch_interface_sources)\n";
+  if (!r.defines.empty()) {
+    script << "target_compile_definitions(clutch_interface_sources PRIVATE";
+    for (const auto &define : r.defines)
+      script << ' ' << literal(define);
+    script << ")\n";
   }
   for (const auto *const language : {"c", "cpp"}) {
     const auto probe = std::string("clutch_probe_") + language;
     script << "add_executable(" << probe << " EXCLUDE_FROM_ALL " << language
            << "." << language << ")\n"
-           << "target_link_libraries(" << probe << " PRIVATE";
-    for (const auto &target : targets)
-      script << ' ' << literal(target);
-    script << ")\n";
+           << "set_target_properties(" << probe
+           << " PROPERTIES EXPORT_COMPILE_COMMANDS OFF)\n"
+           << "target_link_libraries(" << probe
+           << " PRIVATE clutch_interface_sources ${_clutch_selected})\n";
   }
   // Generate runtime paths with evaluated target expressions. Imported DLLs
   // retain their runtime/import-library distinction; interfaces emit no file.
@@ -294,6 +398,8 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
   write_if_changed(source / "CMakeLists.txt", script.str());
   write_if_changed(source / "c.c", "int main(void) { return 0; }\n");
   write_if_changed(source / "cpp.cpp", "int main() { return 0; }\n");
+  write_if_changed(source / "bridge.c",
+                   "typedef int clutch_empty_translation_unit;\n");
   const auto query = build / ".cmake/api/v1/query";
   write_if_changed(query / "codemodel-v2", "");
   write_if_changed(query / "cmakeFiles-v1", "");
@@ -304,18 +410,10 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
       source.u8string(),
       "-B",
       build.u8string(),
-      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
       "-DCMAKE_BUILD_TYPE=" +
           std::string(options.release ? "Release" : "Debug"),
       "-DCMAKE_C_COMPILER=" + tools.cc,
-      "-DCMAKE_CXX_COMPILER=" + tools.cxx,
-      "-DCMAKE_CXX_STANDARD=" + project.cxx_standard,
-      "-DCMAKE_C_STANDARD=" + project.c_standard,
-      "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
-      "-DCMAKE_C_STANDARD_REQUIRED=ON",
-      "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
-      "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF",
-      "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF"};
+      "-DCMAKE_CXX_COMPILER=" + tools.cxx};
   if (r.provider == "system" && !r.root.empty())
     command.push_back("-D" +
                       (r.cmake_package.empty() ? r.system : r.cmake_package) +
@@ -327,10 +425,6 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
   if (!ninja.empty())
     command.insert(command.end(),
                    {"-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=" + ninja});
-  if (tools.msvc)
-    command.push_back("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" +
-                      std::string(options.release ? "" : "Debug") +
-                      (project.runtime == "dynamic" ? "DLL" : ""));
   for (const auto &[key, value] : r.cmake_options) {
     if (!identifier(key) || key.rfind("CMAKE_", 0) == 0 ||
         key.rfind("VCPKG_", 0) == 0 || key == "BUILD_TESTING")
@@ -341,13 +435,35 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
     argument += value;
     command.push_back(std::move(argument));
   }
-  if (options.offline)
-    command.insert(command.end(),
-                   {"-DFETCHCONTENT_FULLY_DISCONNECTED=ON",
-                    "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON"});
   if (const int code = run(command, project.root))
     throw std::runtime_error("CMake configuration failed for " + r.alias +
                              " (exit " + std::to_string(code) + ")");
+
+  NativeInterface result;
+  const auto catalog = build / "available-targets.txt";
+  validate_generated_path(catalog);
+  if (!fs::is_regular_file(catalog) ||
+      fs::file_size(catalog) > maximum_metadata_bytes)
+    throw std::runtime_error("invalid CMake target catalog");
+  std::ifstream catalog_stream(catalog);
+  for (std::string line; std::getline(catalog_stream, line);) {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+
+    if (const auto separator = line.find('\t');
+        separator != line.npos &&
+        result.available_targets.size() < maximum_cmake_targets)
+      result.available_targets.emplace_back(line.substr(0, separator),
+                                            line.substr(separator + 1));
+    else
+      throw std::runtime_error("invalid or oversized CMake target catalog");
+  }
+  if (catalog_stream.bad())
+    throw std::runtime_error("cannot read CMake target catalog");
+
+  std::sort(result.available_targets.begin(), result.available_targets.end());
+  if (options.discover_targets)
+    return result;
 
   const auto reply = build / ".cmake/api/v1/reply";
   fs::path index;
@@ -375,7 +491,6 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
     throw std::runtime_error(
         "CMake dependency exceeds the target metadata limit");
 
-  NativeInterface result;
   result.usage.id = id;
   result.build = {id,
                   build,
@@ -390,27 +505,44 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
                    "@CLUTCH_JOBS@"},
                   {}};
   result.build.compilation_database = build / "compile_commands.json";
+  result.build.rebuild_arguments = result.build.arguments;
+  result.build.rebuild_arguments.emplace_back("--clean-first");
   std::set<fs::path> artifact_paths;
+  // Inventory producers before decoding link fragments: a root-level native
+  // artifact has a bare filename, unlike a system library with the same suffix.
   for (const auto &reference : references) {
+    if (reference.at("name") == "clutch_probe_c" ||
+        reference.at("name") == "clutch_probe_cpp")
+      continue;
+
+    // Discard each model after extracting its artifacts; large native graphs
+    // must not retain every target's sources and compile groups in memory.
     const auto target = read_json(reply_file(reply, reference));
-    const auto name = target.at("name").get<std::string>();
+    for (const auto &artifact : target.value("artifacts", Json::array()))
+      artifact_paths.insert(
+          fs::absolute(build /
+                       fs::u8path(artifact.at("path").get<std::string>()))
+              .lexically_normal());
+  }
+  for (const auto &reference : references) {
+    const auto name = reference.at("name").get<std::string>();
     if (name == "clutch_probe_c" || name == "clutch_probe_cpp") {
+      const auto target = read_json(reply_file(reply, reference));
       const bool c = name == "clutch_probe_c";
-      compile_usage(result.usage, target, c, tools.msvc);
+      compile_usage(result.usage,
+                    target,
+                    c,
+                    tools.msvc,
+                    result.build.interface_dirs);
       if (c && target.contains("link"))
         result.usage.needs_cpp =
             target.at("link").value("language", std::string{}) == "CXX";
       if (!c) {
         const bool needs_cpp = result.usage.needs_cpp;
-        link_usage(result.usage, target, build, tools.msvc);
+        link_usage(result.usage, target, build, artifact_paths, tools.msvc);
         result.usage.needs_cpp = needs_cpp;
       }
-    } else
-      for (const auto &artifact : target.value("artifacts", Json::array()))
-        artifact_paths.insert(
-            fs::absolute(build /
-                         fs::u8path(artifact.at("path").get<std::string>()))
-                .lexically_normal());
+    }
   }
   for (const auto &input : result.usage.link_inputs)
     if (artifact_paths.count(input))

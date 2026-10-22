@@ -6,12 +6,26 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import patch
+import zipfile
+
+# Bound the test-only Git-hook handshake independently of compiler timestamps.
+CHECKOUT_HANDSHAKE_TIMEOUT_SECONDS = 30
+CHECKOUT_HOOK_POLL_SECONDS = 0.05
+CHECKOUT_OBSERVER_POLL_SECONDS = 0.01
+# Win32 API values used through ctypes; no pywin32 runtime is required.
+WINDOWS_GENERIC_READ = 0x80000000
+WINDOWS_SHARE_READ_WRITE = 3
+WINDOWS_OPEN_EXISTING = 3
+WINDOWS_NORMAL_ATTRIBUTES = 0x80
 
 
 class DependencyTests(unittest.TestCase):
@@ -301,6 +315,131 @@ class DependencyTests(unittest.TestCase):
         self.configure('ninja', '--locked')
         self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
 
+    def test_outdated_reports_compatible_updates_without_publishing_them(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 1\n')
+        old = self.tag(library, 'v1.0.0')
+        self.write(self.app, 'main.cpp', '#include <value.hpp>\nint main() { return VALUE == 1 ? 0 : 1; }\n')
+        self.manifest({'library': self.dependency(library, version='^1.0.0')})
+        self.configure()
+        self.cli('run', '--jobs', '2')
+        lock = (self.app / 'clutch.lock').read_bytes()
+        configuration = (self.app / 'out/configuration.toml').read_bytes()
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 2\n')
+        new = self.tag(library, 'v1.1.0')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 3\n')
+        self.tag(library, 'v2.0.0')
+        output = self.cli('outdated')
+        self.assertIn('v1.1.0', output)
+        self.assertNotIn('v2.0.0', output)
+        self.assertIn('Available', output)
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+        self.assertEqual(configuration, (self.app / 'out/configuration.toml').read_bytes())
+        self.cli('run', '--jobs', '2')
+        self.assertIn('v1.1.0', self.configure('ninja', '--locked', '--check-updates'))
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+        self.assertIn(old, lock.decode())
+        self.assertNotIn(new, lock.decode())
+        self.configure('ninja', '--auto-update-dependencies')
+        self.assertIn(new, (self.app / 'clutch.lock').read_text())
+
+    def test_outdated_preserves_exact_tags_and_reports_unchanged_graphs(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        old = self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        self.configure()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.write(library, 'include/value.hpp', '#pragma once\n#define NEW_VALUE 2\n')
+        self.tag(library, 'v1.1.0')
+        self.git(library, 'tag', '-f', 'v1.0.0')
+        self.assertIn('no compatible Git dependency updates', self.cli('outdated'))
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+        self.assertIn(old, lock.decode())
+
+    def test_outdated_reports_untagged_head_changes(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library)})
+        self.configure()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.write(library, 'include/value.hpp', '#pragma once\n#define HEAD_CHANGED 1\n')
+        self.git(library, 'add', '.')
+        self.git(library, 'commit', '-qm', 'Move the untagged HEAD fixture')
+        output = self.cli('outdated')
+        self.assertIn('Available', output)
+        self.assertIn('HEAD @', output)
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+
+    def test_outdated_respects_transitive_conflicts(self):
+        base, bridge = self.repo('base'), self.repo('bridge')
+        self.write(base, 'include/value.hpp', '#pragma once\n')
+        self.tag(base, 'v1.0.0')
+        self.write(bridge, 'include/bridge.hpp', '#pragma once\n')
+        self.write(bridge, 'clutch.toml', '[dependencies]\nbase=' +
+                   self.dependency(base, version='^1.0.0') + '\n')
+        self.tag(bridge, 'v1.0.0')
+        self.manifest({'base': self.dependency(base, version='^1.0.0'),
+                       'bridge': self.dependency(bridge, version='^1.0.0', build_system='header-only')})
+        self.configure()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.write(base, 'include/value.hpp', '#pragma once\n#define MAJOR 2\n')
+        self.tag(base, 'v2.0.0')
+        self.write(bridge, 'clutch.toml', '[dependencies]\nbase=' +
+                   self.dependency(base, version='^2.0.0') + '\n')
+        self.tag(bridge, 'v1.1.0')
+        self.assertIn('no compatible Git dependency updates', self.cli('outdated'))
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+
+    def test_outdated_reports_added_and_removed_transitive_dependencies(self):
+        before, after, wrapper = self.repo('before'), self.repo('after'), self.repo('wrapper')
+        for library in (before, after):
+            self.write(library, 'include/optional.hpp', '#pragma once\n')
+            self.tag(library, 'v1.0.0')
+        self.write(wrapper, 'include/wrapper.hpp', '#pragma once\n')
+        self.write(wrapper, 'clutch.toml', '[dependencies]\nchild=' +
+                   self.dependency(before, tag='v1.0.0') + '\n')
+        self.tag(wrapper, 'v1.0.0')
+        self.manifest({'wrapper': self.dependency(wrapper, version='^1.0.0', build_system='header-only')})
+        self.configure()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.write(wrapper, 'clutch.toml', '[dependencies]\nchild=' +
+                   self.dependency(after, tag='v1.0.0') + '\n')
+        self.tag(wrapper, 'v1.1.0')
+        output = self.cli('outdated')
+        self.assertIn(before.as_posix(), output)
+        self.assertIn(after.as_posix(), output)
+        self.assertIn('-> (not required)', output)
+        self.assertIn('(not required) ->', output)
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+
+    def test_update_checks_validate_options_and_require_a_lock(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, version='^1.0.0')})
+        self.assertIn('clutch.lock', self.cli('outdated', success=False))
+        for incompatible in ('--offline', '--auto-update-dependencies', '--targets'):
+            self.assertIn('cannot be combined', self.configure('ninja', '--check-updates',
+                          incompatible, success=False))
+        self.assertFalse((self.app / '.clutch').exists())
+        self.assertFalse((self.app / 'out').exists())
+        self.manifest({})
+        self.assertIn('no compatible Git dependency updates', self.cli('outdated'))
+        self.assertFalse((self.app / '.clutch').exists())
+
+    def test_outdated_reports_all_dependencies_removed_from_manifest(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library)})
+        self.configure()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.manifest({})
+        self.assertIn('-> (not required)', self.cli('outdated'))
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+
     def test_opt_in_updates_ranges_and_preserves_exact_tags(self):
         base = self.repo('base')
         self.write(base, 'include/value.hpp', '#pragma once\n#define VALUE 1\n')
@@ -383,6 +522,247 @@ class DependencyTests(unittest.TestCase):
         self.assertIn(revision, (self.app / 'clutch.lock').read_text())
         self.cli('build', '--jobs', '2')
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows non-delete-sharing file handles')
+    def test_windows_publication_while_checkout_file_remains_open(self):
+        """Hold a checked-out file until configure exits, without timed releases."""
+        import ctypes
+        from ctypes import wintypes
+
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 42\n')
+        revision = self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        ready, release = self.root / 'checkout-ready', self.root / 'checkout-release'
+        template = self.root / 'git template'
+        # Gate checkout completion so the file handle is open before Clutch can
+        # publish anything. The hook writes only outside the checked-out tree.
+        self.write(template, 'hooks/post-checkout', '#!/bin/sh\nset -eu\n' +
+                   f'printf ready > {shlex.quote(ready.as_posix())}\n' +
+                   f'while [ ! -e {shlex.quote(release.as_posix())} ]; do '
+                   f'sleep {CHECKOUT_HOOK_POLL_SECONDS}; done\n')
+        (template / 'hooks/post-checkout').chmod(0o755)
+        environment = {**os.environ, 'GIT_CONFIG_COUNT': '1',
+                       'GIT_CONFIG_KEY_0': 'init.templateDir',
+                       'GIT_CONFIG_VALUE_0': str(template)}
+        process = subprocess.Popen([OPTIONS.clutch, '.', '--cc', OPTIONS.cc,
+                                    '--cxx', OPTIONS.cxx, '--build-tool', OPTIONS.ninja],
+                                   cwd=self.app, env=environment,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = None
+        try:
+            # This bounds IPC setup, not filesystem timestamp ordering.
+            deadline = time.monotonic() + CHECKOUT_HANDSHAKE_TIMEOUT_SECONDS
+            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(CHECKOUT_OBSERVER_POLL_SECONDS)
+            self.assertTrue(ready.exists(), 'Git checkout did not reach its synchronization hook')
+            candidates = list((self.app / '.clutch/deps').glob(
+                f'*/{revision}/source/include/value.hpp'))
+            # Include the earlier layout so this regression also proves that
+            # directory publication fails in an unmodified release binary.
+            candidates += list((self.app / '.clutch/download/source/include').glob('value.hpp'))
+            self.assertEqual(len(candidates), 1)
+            # GENERIC_READ, FILE_SHARE_READ|WRITE and OPEN_EXISTING intentionally
+            # omit delete sharing for the lifetime of the configure process.
+            handle = kernel.CreateFileW(str(candidates[0]), WINDOWS_GENERIC_READ,
+                                       WINDOWS_SHARE_READ_WRITE, None, WINDOWS_OPEN_EXISTING,
+                                       WINDOWS_NORMAL_ATTRIBUTES, None)
+            self.assertNotEqual(handle, wintypes.HANDLE(-1).value, ctypes.get_last_error())
+            release.write_text('continue', encoding='utf-8')
+            output, _ = process.communicate(timeout=CHECKOUT_HANDSHAKE_TIMEOUT_SECONDS)
+            self.assertEqual(process.returncode, 0, output)
+            self.assertNotIn('could not roll back', output)
+        finally:
+            release.touch()
+            if handle is not None and handle != wintypes.HANDLE(-1).value:
+                kernel.CloseHandle(handle)
+            if process.poll() is None:
+                process.communicate(timeout=CHECKOUT_HANDSHAKE_TIMEOUT_SECONDS)
+            if process.stdout:
+                process.stdout.close()
+        self.configure('ninja', '--locked', '--offline')
+
+    def test_interrupted_verified_checkout_recovers_offline(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 42\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        self.configure()
+        metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+        pending = metadata.parent.with_name(metadata.parent.name + '.pending.toml')
+        original = metadata.read_bytes()
+        lock = (self.app / 'clutch.lock').read_bytes()
+        metadata.rename(pending)
+        output = self.configure('ninja', '--locked', '--offline')
+        self.assertNotIn('Fetching', output)
+        self.assertEqual(metadata.read_bytes(), original)
+        self.assertFalse(pending.exists())
+        self.assertEqual((self.app / 'clutch.lock').read_bytes(), lock)
+
+    def submodule_library(self):
+        """A relative nested URL and moving branch must retain the gitlink pin."""
+        leaf = self.repo('leaf')
+        self.write(leaf, 'value.hpp', '#pragma once\n#define SUBMODULE_VALUE 42\n')
+        leaf_pin = self.tag(leaf, 'v1.0.0')
+        middle = self.repo('middle')
+        self.git(middle, '-c', 'protocol.file.allow=always', 'submodule', 'add',
+                 '../leaf', 'nested headers')
+        self.tag(middle, 'v1.0.0')
+        library = self.repo('submodule library')
+        self.git(library, '-c', 'protocol.file.allow=always', 'submodule', 'add',
+                 '../middle', 'vendor/middle')
+        self.tag(library, 'v1.0.0')
+        self.write(leaf, 'value.hpp', '#pragma once\n#define SUBMODULE_VALUE 99\n')
+        self.tag(leaf, 'v1.1.0')
+        self.write(self.app, 'main.cpp', '#include <value.hpp>\n'
+                   'int main() { return SUBMODULE_VALUE == 42 ? 0 : 1; }\n')
+        self.manifest({'library': self.dependency(library, git=library.as_uri(), tag='v1.0.0',
+                       build_system='header-only',
+                       include_dirs=['vendor/middle/nested headers'])})
+        return leaf_pin
+
+    def test_recursive_submodule_pins_offline_recovery_and_bundle(self):
+        # Local file transport is enabled only for this local-repository fixture;
+        # Clutch must never weaken Git's transport policy for downloaded projects.
+        with patch.dict(os.environ, {'GIT_ALLOW_PROTOCOL': 'file'}):
+            leaf_pin = self.submodule_library()
+            self.configure()
+            metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+            module = metadata.parent / 'source/vendor/middle/nested headers'
+            self.assertEqual(self.git(module, 'rev-parse', 'HEAD'), leaf_pin)
+            lock = (self.app / 'clutch.lock').read_bytes()
+            pending = metadata.parent.with_name(metadata.parent.name + '.pending.toml')
+            metadata.rename(pending)
+            # Removing upstreams proves that offline validation and finalizing
+            # an interrupted publication do not consult any remote repository.
+            for name in ('leaf', 'middle', 'submodule library'):
+                (self.root / name).rename(self.root / (name + '-unavailable'))
+            self.configure('ninja', '--locked', '--offline')
+            self.assertTrue(metadata.is_file())
+            self.assertFalse(pending.exists())
+            self.assertEqual((self.app / 'clutch.lock').read_bytes(), lock)
+            self.cli('run')
+            archive = self.root / 'submodules.zip'
+            self.cli('bundle', '--output', str(archive))
+            relocated = self.root / 'relocated'
+            with zipfile.ZipFile(archive) as snapshot:
+                self.assertFalse(any('.git' in Path(name).parts for name in snapshot.namelist()))
+                snapshot.extractall(relocated)
+            original = self.app
+            self.app = relocated
+            try:
+                self.configure('ninja', '--offline')
+                self.cli('run')
+            finally:
+                self.app = original
+
+    def test_missing_submodules_are_recovered_online_but_never_fetched_offline(self):
+        with patch.dict(os.environ, {'GIT_ALLOW_PROTOCOL': 'file'}):
+            self.submodule_library()
+            self.configure()
+            metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+            source = metadata.parent / 'source'
+            self.git(source, 'submodule', 'deinit', '--force', '--all')
+            self.assertIn('submodule is unavailable offline',
+                          self.configure('ninja', '--offline', '--locked', success=False))
+            self.assertTrue(metadata.is_file())
+            self.configure('ninja', '--locked')
+            self.cli('run')
+
+    def test_dirty_nested_submodule_is_preserved_even_with_ignore_all(self):
+        with patch.dict(os.environ, {'GIT_ALLOW_PROTOCOL': 'file'}):
+            self.submodule_library()
+            self.configure()
+            metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+            source = metadata.parent / 'source'
+            self.git(source, 'config', 'submodule.vendor/middle.ignore', 'all')
+            changed = source / 'vendor/middle/nested headers/value.hpp'
+            changed.write_text('#error keep this edit\n', encoding='utf-8')
+            self.assertIn('modified', self.configure(success=False))
+            self.assertEqual(changed.read_text(), '#error keep this edit\n')
+
+    def test_incomplete_owned_checkout_is_refetched_without_changing_pins(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define VALUE 42\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        self.configure()
+        metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+        pending = metadata.parent.with_name(metadata.parent.name + '.pending.toml')
+        metadata.rename(pending)
+        dirty = metadata.parent / 'source/incomplete.txt'
+        dirty.write_text('unfinished checkout', encoding='utf-8')
+        lock = (self.app / 'clutch.lock').read_bytes()
+        self.assertIn('offline', self.configure('ninja', '--locked', '--offline', success=False))
+        self.assertTrue(dirty.exists())
+        self.configure('ninja', '--locked')
+        self.assertTrue(metadata.is_file())
+        self.assertFalse(pending.exists())
+        self.assertFalse(dirty.exists())
+        self.assertEqual((self.app / 'clutch.lock').read_bytes(), lock)
+
+    def test_incomplete_checkout_without_ownership_is_preserved(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        self.configure()
+        metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+        metadata.unlink()
+        preserved = metadata.parent / 'keep.txt'
+        preserved.write_text('unowned content', encoding='utf-8')
+        self.assertIn('ownership', self.configure(success=False))
+        self.assertEqual(preserved.read_text(), 'unowned content')
+
+    def test_invalid_pending_records_preserve_unpublished_contents(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        revision = self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        self.configure()
+        metadata, = (self.app / '.clutch/deps').glob('*/*/resolution.toml')
+        pending = metadata.parent.with_name(metadata.parent.name + '.pending.toml')
+        metadata.rename(pending)
+        preserved = metadata.parent / 'source/keep.txt'
+        preserved.write_text('do not discard', encoding='utf-8')
+        # Ownership must be established before any partial directory is removed.
+        maximum_metadata_bytes = 1024 * 1024
+        cases = {
+            'other source': f'git="other"\nrev={json.dumps(revision)}\n',
+            'other revision': f'git={json.dumps(library.as_posix())}\nrev="' + '0' * 40 + '"\n',
+            'malformed': 'invalid=[\n',
+            'oversized': 'x' * (maximum_metadata_bytes + 1),
+        }
+        for name, content in cases.items():
+            with self.subTest(record=name):
+                pending.write_text(content, encoding='utf-8')
+                before = pending.read_bytes()
+                self.configure(success=False)
+                self.assertEqual(preserved.read_text(), 'do not discard')
+                self.assertEqual(pending.read_bytes(), before)
+                self.assertFalse(metadata.exists())
+
+    def test_legacy_download_leftovers_are_not_modified(self):
+        library = self.repo('library')
+        self.write(library, 'include/value.hpp', '#pragma once\n')
+        self.tag(library, 'v1.0.0')
+        self.manifest({'library': self.dependency(library, tag='v1.0.0')})
+        # Initialize an owned cache, then fetch a different revision with an old
+        # download directory present. Its unrelated contents must be preserved.
+        self.configure()
+        legacy = self.app / '.clutch/download/keep.txt'
+        legacy.parent.mkdir()
+        legacy.write_text('retained legacy download', encoding='utf-8')
+        self.write(library, 'include/value.hpp', '#pragma once\n#define NEXT 1\n')
+        self.tag(library, 'v1.1.0')
+        self.manifest({'library': self.dependency(library, tag='v1.1.0')})
+        self.configure()
+        self.assertEqual(legacy.read_text(), 'retained legacy download')
+
     def test_failed_checkout_rolls_back_read_only_git_objects(self):
         library = self.repo('library')
         self.write(library, 'include/value.hpp', '#pragma once\n')
@@ -392,6 +772,8 @@ class DependencyTests(unittest.TestCase):
         self.manifest({'library': self.dependency(library, tag='v1.0.0')})
         self.configure(success=False)
         self.assertFalse((self.app / '.clutch/download').exists())
+        self.assertFalse(list((self.app / '.clutch/deps').glob('*.pending.toml')))
+        self.assertFalse(list((self.app / '.clutch/deps').glob('*/*.pending.toml')))
         self.manifest({'library': self.dependency(library, tag='v0.1.0')})
         self.configure()
 

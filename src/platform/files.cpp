@@ -13,54 +13,32 @@
 
 #include "files.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
-#ifdef _WIN32
-#include <chrono>
-#include <thread>
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
 
 namespace clutch {
-void publish_directory(const fs::path &source, const fs::path &destination) {
-  validate_generated_path(source);
-  validate_generated_path(destination);
-  if (!fs::is_directory(source) || fs::exists(destination))
-    throw std::runtime_error("directory publication requires an existing stage "
-                             "and a new destination");
+std::string file_time_text(const fs::file_time_type timestamp) {
+  // libc++ can use a signed 128-bit rep, which has no ostream overload. Work
+  // in native ticks rather than narrowing or rounding to another duration.
+  constexpr auto decimal_base = 10;
+  auto ticks = timestamp.time_since_epoch().count();
+  const bool negative = ticks < 0;
+  std::string result;
+  do {
+    const auto remainder = ticks % decimal_base;
+    const auto digit = remainder < 0 ? -remainder : remainder;
+    result += static_cast<char>('0' + digit);
+    ticks /= decimal_base;
+  } while (ticks != 0);
 
-#ifdef _WIN32
-  // Indexers/security scanners may briefly hold newly checked-out Git files.
-  // Keep publication atomic; never replace a failed rename with a partial copy.
-  constexpr auto maximum_attempts = 20;
-  constexpr auto retry_delay = std::chrono::milliseconds(25);
-  for (auto attempt = 0; attempt < maximum_attempts; ++attempt) {
-    std::error_code error;
-    fs::rename(source, destination, error);
-    if (!error)
-      return;
-    const bool transient = error.value() == ERROR_ACCESS_DENIED ||
-                           error.value() == ERROR_SHARING_VIOLATION ||
-                           error.value() == ERROR_LOCK_VIOLATION;
-    if (!transient || attempt + 1 == maximum_attempts)
-      throw fs::filesystem_error("cannot publish directory",
-                                 source,
-                                 destination,
-                                 error);
-    std::this_thread::sleep_for(retry_delay);
-    validate_generated_path(source);
-    validate_generated_path(destination);
-    if (fs::exists(destination))
-      throw std::runtime_error(
-          "directory publication destination already exists");
-  }
-#else
-  fs::rename(source, destination);
-#endif
+  // Negate only a single digit, never the whole most-negative native value.
+  if (negative)
+    result += '-';
+
+  std::reverse(result.begin(), result.end());
+  return result;
 }
 
 /// Generated files must never redirect a write into source or unrelated data.

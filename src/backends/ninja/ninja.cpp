@@ -12,6 +12,8 @@
  */
 
 #include "ninja.hpp"
+#include "backends/foreign_actions.hpp"
+#include "core/dependencies/foreign.hpp"
 #include "core/pch/pch.hpp"
 #include "platform/arguments.hpp"
 
@@ -189,12 +191,63 @@ void generate_ninja(const Graph &graph,
            "Staging $out\n";
   std::set<fs::path> staged;
 
+  if (!p.foreign_builds.empty() ||
+      std::any_of(graph.targets.begin(),
+                  graph.targets.end(),
+                  [](const Target &target) {
+                    return !target.runtime_libraries.empty();
+                  })) {
+    ninja << "pool clutch_foreign\n  depth = 1\n"
+             "rule foreign\n  command = $prepare_command\n"
+             "  description = Preparing native dependency\n  restat = 1\n"
+             "  pool = clutch_foreign\n"
+             "rule foreign_runtime\n  command = $prepare_command\n"
+             "  description = Staging imported runtime libraries\n"
+             "build clutch-foreign-force: phony\n";
+    for (const auto &action : p.foreign_builds) {
+      ninja << "build " << path(dependencies::foreign_stamp(graph, action.id));
+      if (!action.artifacts.empty()) {
+        ninja << " |";
+        for (const auto &artifact : action.artifacts)
+          ninja << ' ' << path(artifact);
+      }
+      ninja
+          << ": foreign clutch-foreign-force\n  prepare_command = "
+          << ninja_value(command_line(
+                 foreign_action_command(graph, options, executable, action.id)))
+          << '\n';
+    }
+  }
+
   // Every application/test unit keeps its graph-selected compiler and object
   // path.
   for (size_t target_index = 0; target_index < graph.targets.size();
        ++target_index) {
     const auto &target = graph.targets[target_index];
     fs::create_directories(target.output.parent_path());
+
+    // Imported headers can be generated only by an upstream build action.
+    // A restat stamp changes for public-header membership/timestamps as well as
+    // archives, including header-only CMake targets with no link artifact.
+    const auto foreign_prerequisites = [&] {
+      for (const auto &id : target.foreign_dependencies)
+        ninja << ' ' << path(dependencies::foreign_stamp(graph, id));
+    };
+    const bool foreign_runtime = target.type == TargetType::Executable &&
+                                 !target.runtime_libraries.empty();
+    if (foreign_runtime) {
+      ninja << "build clutch_foreign_runtime_" << target_index
+            << ": foreign_runtime clutch-foreign-force";
+      if (!target.foreign_dependencies.empty())
+        ninja << " ||";
+      foreign_prerequisites();
+      ninja << "\n  prepare_command = "
+            << ninja_value(command_line(foreign_runtime_command(graph,
+                                                                options,
+                                                                executable,
+                                                                target_index)))
+            << '\n';
+    }
 
     for (const auto &prefix : target.precompiled_headers) {
       fs::create_directories(prefix.creator.object.parent_path());
@@ -206,6 +259,7 @@ void generate_ninja(const Graph &graph,
             << path(fs::u8path(prefix.creator.arguments.front()));
       if (prefix.creator.source != prefix.header)
         ninja << ' ' << path(prefix.header);
+      foreign_prerequisites();
 
       ninja << "\n  compiler = "
             << ninja_value(command_line({prefix.creator.arguments.front()}))
@@ -223,6 +277,9 @@ void generate_ninja(const Graph &graph,
       ninja << "build " << path(object) << ": compile " << path(source);
       if (const auto *const prefix = pch::for_unit(target, unit))
         ninja << " | " << path(prefix->creator.object);
+      else if (!target.foreign_dependencies.empty())
+        ninja << " |";
+      foreign_prerequisites();
 
       ninja << "\n  compiler = "
             << ninja_value(command_line({arguments.front()})) << "\n  args = "
@@ -255,6 +312,7 @@ void generate_ninja(const Graph &graph,
     for (const auto &prefix : target.precompiled_headers)
       if (!prefix.companion_object.empty())
         ninja << ' ' << path(prefix.companion_object);
+    foreign_prerequisites();
     if (target.type == TargetType::StaticLibrary) {
       const auto metadata =
           p.build / "obj" /
@@ -276,12 +334,14 @@ void generate_ninja(const Graph &graph,
       for (const auto dependency : target.dependencies)
         ninja << ' ' << path(graph.targets.at(dependency).output);
     }
-    if (!copies.empty()) {
+    if (!copies.empty() || foreign_runtime) {
       ninja << " ||";
       for (const auto &[library, destination] : copies) {
         (void)library;
         ninja << ' ' << path(destination);
       }
+      if (foreign_runtime)
+        ninja << " clutch_foreign_runtime_" << target_index;
     }
 
     ninja << "\n";

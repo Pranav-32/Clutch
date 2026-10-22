@@ -63,6 +63,14 @@ runs MSVC/Clang integration checks with an initialized environment.
 
 ## Select checks
 
+`clutch.cmake-projects` exercises the whole-project provider with framework-like
+target helpers, generated resources, top-level source identity, preset directories
+and environment, multiple configurations, native failure codes, CTest filters,
+installation and CPack. It also rejects escaped reply references and stale failed
+configuration. The target integration suite separately checks argument forwarding
+after repeatable target selection. These fixtures use installed CMake tools and
+do not download external libraries.
+
 List registered tests before relying on a run; missing tools can omit optional
 suites. CI and the POSIX verification runner require the relevant integration
 registrations.
@@ -77,8 +85,8 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | --- | --- |
 | `clutch.help`, `clutch.version` | CLI startup and version identity |
 | `clutch.standalone` | Windows MSVC executable startup without compiler DLL paths |
-| `clutch.graph` | Graph validation, deterministic DOT escaping and optional rendering |
-| `clutch.files` | Atomic directory publication, existing-output preservation and Windows sharing-handle retries |
+| `clutch.graph` | Graph validation, deterministic DOT escaping, package/action identity separation, generated-header preparation edges and optional rendering |
+| `clutch.files` | Generated-file content/timestamps, directory-output rejection, and artifact cleanup containment, preflight, redirection and metadata preservation |
 | `clutch.zip` | Archive path traversal, Windows device names, invalid UTF-8, case/hierarchy collisions, member bounds and existing-output preservation |
 | `clutch.bundle` | Independent ZIP/CRC parsing, repeatable bytes, Unicode/binary files, exclusions, workspace relocation and offline Git/local/CMake dependency snapshots; includes 256 files and a one-MiB binary fixture |
 | `clutch.source-files` | Recursive source matching, brace products, canonical paths, exclusions and invalid patterns without a compiler |
@@ -90,8 +98,9 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.file-api` | Query/reply versions, compilation-database agreement, snapshots, failures and concurrency |
 | `clutch.targets` | Library/application links, recursive source patterns, noncompiled IDE files, public requirements, target selection, archive replacement, import libraries and DLL staging |
 | `clutch.version-ranges` | Semantic precedence, range intersections, prerelease gates and invalid constraints |
-| `clutch.dependencies` | Local Git histories, transitive conflicts/backtracking, cycle rejection, locks/offline recovery and C/C++ PCH rebuilds across host generators |
-| `clutch.foreign-dependencies` | Local directories, real CMake/Makefile libraries without Clutch manifests, generated headers, public compile flags, mixed-language linking, shared runtime libraries, installed SDKs and source-catalog imports without vcpkg |
+| `clutch.git-submodules` | Offline no-write behavior, unsafe paths, modified revisions and bounded deep traversal without Git/network processes |
+| `clutch.dependencies` | Local Git histories, transitive conflicts/backtracking, cycle rejection, locks/offline recovery, ownership records, recursive pinned submodules, dirty/missing nested checkouts, relocated submodule bundles, Windows long paths and permanent source-file handles, and C/C++ PCH rebuilds across host generators |
+| `clutch.foreign-dependencies` | Local directories, real CMake/Makefile libraries without Clutch manifests, generated headers, public compile flags, mixed-language interface sources, target discovery/implicit selection, incremental linking, shared runtime libraries, installed SDKs and source-catalog imports without vcpkg; Windows also checks GNU-style Clang/MSVC debug and release runtimes when available |
 | `clutch.package-examples` | Shipped local directory, Git, catalog, Make and installed-package examples; both profiles, consumer tests and locked offline use |
 | `clutch.workspace` | Qualified links, member boundaries/standards, locks, stale inputs, relocation and native regeneration |
 
@@ -104,6 +113,14 @@ Generator tests run available host tools: Ninja/GNU Make on POSIX, Ninja/NMake/
 Visual Studio on Windows, and Xcode on macOS. JOM and Windows GNU Make are
 exercised when present. Report what ran and any skips. Python powers test
 harnesses only; generated project builds do not require it.
+
+The foreign-dependency suite invokes generated backends directly as well as
+through Clutch. It checks shared preparation across parallel consumers, fresh
+generated public headers, header-only interface refresh, incremental relinking,
+upstream failures and Windows DLL repair. A C consumer links a C++ Make archive
+and an explicit installed archive using `link_language = "cpp"`. Submodule
+fixtures explicitly permit local file transport only inside their test process;
+production resolution retains Git's configured transport policy.
 
 File-API regressions also configure/build Unicode source and profile paths,
 restore saved actions, relocate the Clutch executable, and search a Unicode
@@ -120,6 +137,14 @@ verify discovery excludes sources owned by explicit targets, reject invalid
 application links and name conflicts, and compare file-API source commands with
 the compilation database. Shared compile settings preserve project-level lock
 resolution and are checked with each available native generator.
+
+Clean-build regressions deliberately corrupt unchanged products and transitive
+objects while preserving timestamps. `build/run/test --clean` must repair them,
+retain configuration/IDE snapshots and leave unrelated targets/profiles intact.
+A failed compilation must prevent program launch. Foreign CMake/Make fixtures
+exercise their own forced-build actions. Update-reporting fixtures publish local
+Git versions and verify compatible proposals, transitive additions/removals,
+conflict backtracking, immutable selectors and unchanged locks/saved graphs.
 
 Tooling tests use disposable repositories and install trees to check source
 identity, release-only CI classification, package notices/checksums and failure

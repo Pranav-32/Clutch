@@ -9,6 +9,7 @@
 
 #include "git.hpp"
 #include "core/project_layout.hpp"
+#include "git_submodules.hpp"
 #include "platform/capture.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
@@ -81,10 +82,25 @@ std::string trim(std::string text) {
   return text;
 }
 
-/// Best-effort rollback of this operation's new staging tree. Git object files
-/// can be read-only on Windows; change permissions only on verified regular
-/// entries, never on symlink targets or an already published checkout.
-bool discard_download(const fs::path &stage) noexcept {
+/// Validate completion/ownership records before accepting or recovering
+/// sources.
+void validate_record(const fs::path &path, const Candidate &candidate) {
+  validate_generated_path(path);
+  if (!fs::is_regular_file(path) || fs::file_size(path) > maximum_lock_bytes)
+    throw std::runtime_error("invalid dependency cache record: " +
+                             path.u8string());
+
+  if (const auto record = toml::parse_file(path.u8string());
+      required(record, "git") != candidate.identity ||
+      required(record, "rev") != candidate.revision)
+    throw std::runtime_error(
+        "dependency cache identity does not match its metadata");
+}
+
+/// Best-effort rollback of this operation's unpublished checkout. Git object
+/// files can be read-only on Windows; change permissions only on verified
+/// regular entries, never on symlink targets or an already published checkout.
+bool discard_checkout(const fs::path &stage) noexcept {
   try {
     validate_generated_path(stage);
     std::error_code error;
@@ -282,6 +298,11 @@ GitStore::~GitStore() {
 std::string GitStore::git(const fs::path &directory,
                           const std::vector<std::string> &arguments) const {
   std::vector<std::string> command{executable_, "-c", "core.quotePath=false"};
+#ifdef _WIN32
+  // Nested module object stores can exceed MAX_PATH even for short source
+  // filenames. This applies only to this Git process and its children.
+  command.insert(command.end(), {"-c", "core.longpaths=true"});
+#endif
   command.insert(command.end(), arguments.begin(), arguments.end());
   const auto result = capture(command, directory);
   if (result.status)
@@ -523,84 +544,160 @@ void GitStore::explore_alternatives(const bool preserve_pins) {
   preserve_pins_ = preserve_pins;
 }
 
+void GitStore::validate_checkout(Candidate &candidate,
+                                 const fs::path &directory) const {
+  candidate.source = fs::canonical(directory / "source");
+  if (candidate.source != directory / "source" ||
+      git(candidate.source,
+          {"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}) !=
+          candidate.revision ||
+      git(candidate.source, {"remote", "get-url", "origin"}) !=
+          candidate.identity ||
+      !git(candidate.source,
+           {"status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignore-submodules=none"})
+           .empty())
+    throw std::runtime_error("dependency checkout was modified; restore or "
+                             "remove its project-local cache");
+
+  prepare_git_submodules(candidate.source,
+                         offline_,
+                         [&](const fs::path &repository,
+                             const std::vector<std::string> &arguments) {
+                           return git(repository, arguments);
+                         });
+}
+
 Candidate GitStore::materialize(Candidate candidate) {
   const auto destination = checkout(cache_, candidate);
   const auto metadata = destination / "resolution.toml";
+  // Keep ownership outside the source tree so a failed rollback cannot remove
+  // the evidence needed to recover it. Published cache paths remain unchanged.
+  const auto pending =
+      destination.parent_path() / (candidate.revision + ".pending.toml");
   validate_generated_path(metadata);
-  if (!fs::exists(destination)) {
-    if (offline_)
-      throw std::runtime_error("dependency checkout is unavailable offline: " +
-                               source_key(candidate.identity));
-    status("Fetching", candidate.identity + " @ " + candidate.reference);
-    const auto stage = cache_ / "download";
-    validate_generated_path(stage);
-    if (!fs::create_directory(stage))
+  validate_generated_path(pending);
+  bool verified = false;
+  if (!fs::exists(metadata)) {
+    if (fs::exists(destination) && !fs::is_regular_file(pending))
       throw std::runtime_error(
-          "interrupted dependency download exists; inspect .clutch/download");
-    try {
-      const auto source = stage / "source";
-      git(root_,
-          {"init",
-           "--quiet",
-           candidate.revision.size() == sha256_digits ? "--object-format=sha256"
-                                                      : "--object-format=sha1",
-           source.u8string()});
-      git(source, {"remote", "add", "origin", candidate.identity});
-      // Fetch the selected object, including when a formerly locked branch
-      // moved.
-      git(source,
-          {"fetch",
-           "--quiet",
-           "--depth=1",
-           "--no-tags",
-           "origin",
-           candidate.revision});
-      if (const auto actual = git(source, {"rev-parse", "FETCH_HEAD^{commit}"});
-          actual != candidate.revision)
+          "incomplete dependency checkout has no ownership record; inspect " +
+          destination.u8string());
+
+    if (fs::exists(pending)) {
+      validate_record(pending, candidate);
+      if (fs::exists(destination)) {
+        try {
+          validate_checkout(candidate, destination);
+          verified = true;
+        } catch (const std::runtime_error &) {
+          if (offline_)
+            throw std::runtime_error(
+                "incomplete dependency checkout cannot be recovered offline: " +
+                destination.u8string());
+
+          // Only a matching private ownership record authorizes removal. A
+          // completed checkout is never repaired by deleting or overwriting it.
+          if (!discard_checkout(destination))
+            throw std::runtime_error(
+                "cannot recover incomplete dependency checkout; close programs "
+                "using its files: " +
+                destination.u8string());
+        }
+      }
+    }
+
+    if (!verified) {
+      if (offline_)
         throw std::runtime_error(
-            "Git ref changed during dependency resolution; configure again");
-      git(source,
-          {"-c",
-           "advice.detachedHead=false",
-           "checkout",
-           "--quiet",
-           "--detach",
-           candidate.revision});
+            "dependency checkout is unavailable offline: " +
+            source_key(candidate.identity));
+      status("Fetching", candidate.identity + " @ " + candidate.reference);
+      fs::create_directories(destination.parent_path());
       const toml::table record{{"git", candidate.identity},
                                {"rev", candidate.revision},
                                {"ref", candidate.reference},
                                {"version", candidate.version}};
       std::ostringstream text;
       text << record << '\n';
-      write_if_changed(stage / "resolution.toml", text.str());
-      fs::create_directories(destination.parent_path());
+      write_if_changed(pending, text.str());
       validate_generated_path(metadata);
-      publish_directory(stage, destination);
-    } catch (...) {
-      // The directory was created by this operation under a verified cache.
-      // remove_all removes symlinks as entries rather than following them.
-      if (!discard_download(stage))
-        std::fputs("warning: could not roll back .clutch/download; inspect it "
-                   "before configuring again\n",
-                   stderr);
-      throw;
+      if (!fs::create_directory(destination))
+        throw std::runtime_error(
+            "dependency checkout destination already exists");
+
+      try {
+        const auto source = destination / "source";
+        git(root_,
+            {"init",
+             "--quiet",
+             candidate.revision.size() == sha256_digits
+                 ? "--object-format=sha256"
+                 : "--object-format=sha1",
+             source.u8string()});
+        git(source, {"remote", "add", "origin", candidate.identity});
+        // Fetch the selected object, including when a formerly locked branch
+        // moved.
+        git(source,
+            {"fetch",
+             "--quiet",
+             "--depth=1",
+             "--no-tags",
+             "origin",
+             candidate.revision});
+        if (const auto actual =
+                git(source, {"rev-parse", "FETCH_HEAD^{commit}"});
+            actual != candidate.revision)
+          throw std::runtime_error(
+              "Git ref changed during dependency resolution; configure again");
+        git(source,
+            {"-c",
+             "advice.detachedHead=false",
+             "checkout",
+             "--quiet",
+             "--detach",
+             candidate.revision});
+        validate_checkout(candidate, destination);
+        verified = true;
+      } catch (...) {
+        if (discard_checkout(destination)) {
+          std::error_code ignored;
+          fs::remove(pending, ignored);
+        } else {
+          std::fprintf(
+              stderr,
+              "warning: incomplete dependency checkout retained at %s; "
+              "configure again after closing programs using its files\n",
+              destination.u8string().c_str());
+        }
+        throw;
+      }
     }
+
+    // Moving the checkout itself fails on Windows when any descendant has an
+    // open non-delete-sharing handle. Commit only the small, closed record.
+    // Keep verified sources and ownership metadata if this final step fails.
+    validate_generated_path(metadata);
+    validate_generated_path(pending);
+    if (fs::exists(metadata))
+      throw std::runtime_error("dependency completion record already exists");
+
+    std::error_code error;
+    fs::rename(pending, metadata, error);
+    if (error)
+      throw fs::filesystem_error(
+          "cannot complete Git checkout; verified sources are retained for "
+          "the next configure",
+          pending,
+          metadata,
+          error);
   }
 
-  if (const auto record = toml::parse_file(metadata.u8string());
-      required(record, "git") != candidate.identity ||
-      required(record, "rev") != candidate.revision)
-    throw std::runtime_error(
-        "dependency cache identity does not match its metadata");
-  candidate.source = fs::canonical(destination / "source");
-  if (candidate.source != destination / "source" ||
-      git(candidate.source, {"rev-parse", "HEAD"}) != candidate.revision ||
-      git(candidate.source, {"remote", "get-url", "origin"}) !=
-          candidate.identity ||
-      !git(candidate.source, {"status", "--porcelain", "--untracked-files=all"})
-           .empty())
-    throw std::runtime_error("dependency checkout was modified; restore or "
-                             "remove its project-local cache");
+  validate_record(metadata, candidate);
+  if (!verified)
+    validate_checkout(candidate, destination);
   return candidate;
 }
 }  // namespace clutch::dependencies

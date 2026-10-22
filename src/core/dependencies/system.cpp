@@ -27,6 +27,7 @@ NativeInterface inspect_system(const ForeignRequest &request,
         "select target/targets to discover installed package metadata");
 
   NativeInterface result;
+  result.usage.needs_cpp = r.link_language == "cpp";
   std::string selection = request.identity + ":system:";
   for (const auto &library : r.libraries) {
     selection += std::to_string(library.size()) + ':' + library;

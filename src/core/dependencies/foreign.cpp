@@ -18,10 +18,13 @@
 #include "platform/terminal.hpp"
 #include "system.hpp"
 #include <algorithm>
+#include <chrono>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -31,14 +34,25 @@ namespace {
 /// Serialize access to native dependency output trees within one profile.
 class Writer {
   public:
-  explicit Writer(fs::path path)
+  explicit Writer(fs::path path, const bool wait = false)
       : path_(std::move(path)) {
     validate_generated_path(path_);
     fs::create_directories(path_.parent_path());
-    if (!fs::create_directory(path_))
-      throw std::runtime_error(
-          "native dependency operation is already active; inspect " +
-          path_.u8string() + " if interrupted");
+    // Native executors can schedule independent preparation nodes together.
+    // Serialize their upstream job pools; ordinary competing CLI operations
+    // still fail immediately. A stale lock never causes an unbounded wait.
+    constexpr auto lock_timeout = std::chrono::minutes(5);
+    constexpr auto poll_interval = std::chrono::milliseconds(100);
+    const auto deadline = std::chrono::steady_clock::now() + lock_timeout;
+    while (!fs::create_directory(path_)) {
+      if (!wait || std::chrono::steady_clock::now() >= deadline)
+        throw std::runtime_error(
+            "native dependency operation is already active; inspect " +
+            path_.u8string() + " if interrupted");
+
+      std::this_thread::sleep_for(poll_interval);
+      validate_generated_path(path_);
+    }
   }
 
   ~Writer() {
@@ -65,6 +79,7 @@ void append(std::vector<T> &destination, const std::vector<T> &source) {
 /// An identity must have one upstream configuration shared by its consumers.
 bool compatible(const Requirement &a, const Requirement &b) {
   return a.build_system == b.build_system && a.root == b.root &&
+         a.link_language == b.link_language &&
          a.cmake_options == b.cmake_options &&
          a.build_arguments == b.build_arguments &&
          (a.provider == "system" || a.libraries == b.libraries) &&
@@ -126,21 +141,43 @@ void configure_foreign(Project &project,
       selection += ':' + component;
     for (const auto &target : r.targets)
       selection += ':' + target;
+    for (const auto &define : r.defines)
+      selection += ':' + std::to_string(define.size()) + ':' + define;
     for (const auto &library : r.libraries)
       selection += ':' + std::to_string(library.size()) + ':' + library;
     if (!inspected.count(selection)) {
       const bool installed =
-          r.provider == "system" && r.target.empty() && r.targets.empty();
+          r.provider == "system" && r.target.empty() && r.targets.empty() &&
+          (!r.libraries.empty() ||
+           (!r.include_dirs.empty() && r.cmake_package.empty() &&
+            r.components.empty() && r.version.empty() &&
+            r.cmake_options.empty()));
       status("Configuring",
              r.alias + " (" + (installed ? "system" : r.build_system) + ")");
       const bool make = r.build_system == "make" ||
                         (r.build_system == "auto" && !request.source.empty() &&
                          !fs::exists(request.source / "CMakeLists.txt") &&
                          fs::exists(request.source / "Makefile"));
+      if (!r.link_language.empty() && !installed && !make)
+        throw std::runtime_error(
+            "dependency.link_language requires Make or an explicit system "
+            "interface; "
+            "CMake supplies its own link-language metadata");
       auto result =
           installed ? inspect_system(request, tools)
           : make    ? inspect_make(request, project, tools)
                     : inspect_cmake(request, project, tools, backend, options);
+      if (options.discover_targets) {
+        std::cout << "Dependency " << r.alias << ":\n";
+        for (const auto &[name, type] : result.available_targets)
+          std::cout << "  " << name << "  " << type << '\n';
+
+        if (result.available_targets.empty())
+          std::cout << "  (no discoverable native library targets)\n";
+        inspected.emplace(selection, std::move(result));
+        continue;
+      }
+
       for (const auto &input : result.inputs)
         if (std::none_of(project.inputs.begin(),
                          project.inputs.end(),
@@ -148,7 +185,7 @@ void configure_foreign(Project &project,
                            return entry.path == input.path;
                          }))
           project.inputs.push_back(input);
-      if (r.provider == "git" || r.provider == "path")
+      if (!result.build.arguments.empty())
         project.foreign_builds.push_back(result.build);
       if (!result.version.empty())
         for (auto &package : project.packages)
@@ -161,6 +198,9 @@ void configure_foreign(Project &project,
           }
       inspected.emplace(selection, std::move(result));
     }
+    if (options.discover_targets)
+      continue;
+
     auto usage = inspected.at(selection).usage;
     usage.defines = merge_defines(usage.defines, r.defines);
     const auto source_root = !request.source.empty() ? request.source
@@ -180,6 +220,9 @@ void configure_foreign(Project &project,
     }
     const auto cpp_headers = pch::paths(r.pch, source_root);
     const auto c_headers = pch::paths(r.pch_c, source_root);
+    for (auto &build : project.foreign_builds)
+      if (build.id == usage.id)
+        append(build.interface_dirs, usage.includes);
     // Header-only packages have no native target. Carry their foreign usage
     // through incoming package edges until a real consuming project is found.
     std::set<std::string> owners, visited;
@@ -259,14 +302,13 @@ void configure_foreign(Project &project,
   }
 }
 
-int build_foreign(const Graph &graph,
-                  const Options &options,
-                  const std::vector<size_t> &selected) {
-  const auto required = required_builds(graph, selected);
+namespace {
+/// One execution path serves CLI builds and native-graph preparation nodes.
+int execute_foreign(const Graph &graph,
+                    const Options &options,
+                    const std::set<std::string> &required) {
   if (graph.project.foreign_builds.empty() || required.empty())
     return 0;
-  const Writer writer(graph.project.build / layout::environment /
-                      "foreign.lock");
   const auto processors = std::max(1U, std::thread::hardware_concurrency());
   const auto jobs =
       options.jobs > 0
@@ -277,7 +319,11 @@ int build_foreign(const Graph &graph,
   for (const auto &build : graph.project.foreign_builds) {
     if (!required.count(build.id))
       continue;
-    auto command = build.arguments;
+    auto command =
+        options.clean_build ? build.rebuild_arguments : build.arguments;
+    if (command.empty())
+      throw std::runtime_error(
+          "native dependency has no clean-build action; configure again");
     for (auto &argument : command)
       if (argument == "@CLUTCH_JOBS@")
         argument = std::to_string(jobs);
@@ -291,10 +337,90 @@ int build_foreign(const Graph &graph,
   }
   return 0;
 }
+}  // namespace
+
+int build_foreign(const Graph &graph,
+                  const Options &options,
+                  const std::vector<size_t> &selected) {
+  const auto required = required_builds(graph, selected);
+  if (required.empty())
+    return 0;
+
+  const Writer writer(graph.project.build / layout::environment /
+                      "foreign.lock");
+  return execute_foreign(graph, options, required);
+}
+
+fs::path foreign_stamp(const Graph &graph, const std::string &id) {
+  return graph.project.build / layout::environment / "foreign" /
+         (id + ".stamp");
+}
+
+int prepare_foreign(const Graph &graph,
+                    const Options &options,
+                    const std::string &id) {
+  const auto build = std::find_if(graph.project.foreign_builds.begin(),
+                                  graph.project.foreign_builds.end(),
+                                  [&](const ForeignBuild &action) {
+                                    return action.id == id;
+                                  });
+  if (build == graph.project.foreign_builds.end())
+    throw std::runtime_error("unknown native dependency action: " + id);
+
+  const Writer writer(graph.project.build / layout::environment /
+                          "foreign.lock",
+                      true);
+  if (const int result = execute_foreign(graph, options, {id}))
+    return result;
+
+  // Include membership and native timestamps, not archive contents: scanning
+  // huge binaries on every incremental build defeats the native executor's
+  // cache. Explicit --clean remains the repair path for unchanged timestamps.
+  constexpr size_t maximum_interface_entries = 100000;
+  std::set<fs::path> files(build->artifacts.begin(), build->artifacts.end());
+  size_t entries = 0;
+  for (const auto &directory : build->interface_dirs) {
+    if (!fs::is_directory(directory))
+      continue;
+
+    for (fs::recursive_directory_iterator current(directory), end;
+         current != end;
+         ++current) {
+      if (++entries > maximum_interface_entries)
+        throw std::runtime_error(
+            "native dependency interface exceeds scan limit");
+
+      if (current->is_symlink()) {
+        current.disable_recursion_pending();
+        continue;
+      }
+
+      if (current->is_directory()) {
+        if (const auto name = current->path().filename();
+            name == ".git" || name == layout::environment)
+          current.disable_recursion_pending();
+      } else if (current->is_regular_file())
+        files.insert(current->path());
+    }
+  }
+  std::ostringstream state;
+  for (const auto &file : files)
+    state << file.generic_u8string().size() << ':' << file.generic_u8string()
+          << ':' << fs::file_size(file) << ':'
+          << file_time_text(fs::last_write_time(file)) << '\n';
+
+  write_if_changed(foreign_stamp(graph, id), state.str());
+  return 0;
+}
 
 void stage_foreign_runtime(const Graph &graph,
                            const std::vector<size_t> &selected) {
 #ifdef _WIN32
+  // Executables can share a destination directory while native build nodes
+  // stage DLLs concurrently. Compare/copy under one profile-local writer.
+  const Writer writer(graph.project.build / layout::environment /
+                          "foreign-runtime.lock",
+                      true);
   for (const auto index : selected) {
     const auto &target = graph.targets.at(index);
     if (target.type != TargetType::Executable)

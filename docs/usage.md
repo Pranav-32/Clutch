@@ -1,5 +1,9 @@
 # Using Clutch
 
+For an existing `CMakeLists.txt` application, see
+[CMake project workflows](cmake-projects.md). The commands below describe
+projects configured from native `clutch.toml` manifests.
+
 Audience: Users configuring, building and testing C/C++ projects with Clutch.
 
 Configure and build C and C++ projects with Clutch. For your first project, see
@@ -35,6 +39,21 @@ Changes to `clutch.toml` require another explicit `clutch .` invocation; adding
 or removing discovered sources also requires reconfiguration. Editing an
 existing source or header only requires a build.
 
+To force recompilation with the saved settings, add `--clean`:
+
+```sh
+clutch build --clean
+clutch run --clean --target my_app
+clutch test --clean --jobs 4
+```
+
+The selected targets and their build dependencies are rebuilt, including native
+Clutch libraries, precompiled headers and CMake/Make dependencies. Other profiles,
+downloaded sources, lock files and IDE query/reply metadata are retained.
+`run` starts the newly built executable only after the build succeeds; `test`
+likewise runs tests only after a successful build. The separate `clutch clean`
+command removes the owned profile directory, requiring configuration afterward.
+
 Source arrays accept recursive patterns such as `sources = ["src/*.{cpp,c,h}"]`.
 Use the same syntax for library and test targets. Matched headers are IDE files;
 only C/C++ source extensions are compiled. See [source selection](manifest.md#sources-and-headers)
@@ -58,6 +77,11 @@ Refresh untagged imports explicitly with `clutch . --auto-update-dependencies`;
 normal configuration preserves compatible pins. See [dependencies](dependencies.md)
 and [PCH settings](manifest.md#precompiled-headers).
 
+Use `clutch outdated` to check compatible dependency updates without applying them,
+or `clutch . --check-updates` to report them after configuration. These checks may
+fetch sources to inspect transitive manifests; they do not compile libraries or
+replace existing pins. Applying updates remains explicit.
+
 Choose compilers and the generator during configuration:
 
 ```sh
@@ -80,9 +104,17 @@ selected profile's build directory. A fresh build directory runs discovery
 again; use `--build-tool` for a custom installation that is not discoverable.
 
 Resolved settings and the complete graph are saved inside the profile build
-directory. Build execution accepts `--project`, `--release`, and `--jobs`; change
+directory. Build execution accepts `--project`, `--release`, `--jobs` and `--clean`; change
 compilers, generator, or build-tool paths by configuring again. `run` additionally
 forwards program arguments, and `test --filter text` selects tests.
+
+Generated native builds also prepare imported CMake/Make libraries and their
+generated headers. Windows builds stage imported runtime DLLs even when the
+executable is already current. Keep the configured Clutch executable available
+for these saved callbacks. `clutch build --clean` applies the dependency adapters'
+forced-build actions as well as rebuilding selected native targets; see
+[dependency adapters](dependencies.md#contributing-a-foreign-adapter) for scheduling
+and NMake/JOM behavior.
 
 ## A project
 
@@ -326,7 +358,10 @@ automatically linked into tests. Reconfigure after changing declarations.
 test fails. An unmatched explicit filter is an error. Ordinary `build` compiles
 ordinary default targets. `NO_COLOR` disables status colors.
 
-Use `clutch targets` to list configured target names and kinds. `build`, `run`
+Use `clutch . --targets` to discover project and CMake dependency library targets
+before selecting imports. Discovery may fetch sources and run native configuration;
+it leaves the saved Clutch graph and lock unchanged. Use `clutch targets` to list
+configured target names and kinds. `build`, `run`
 and `test` accept `--target <name>` (short form `-t`). Repeat it for multiple
 build/test targets. Without selection, `build` uses ordinary targets marked
 `default`, while `test` uses all tests. `run` requires one application executable.

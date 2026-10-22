@@ -156,6 +156,29 @@ int main(const int argc, char **argv) {
       std::cout << "Graphviz not found: rendering check skipped\n";
     }
 
+    // Package identity and upstream action identity are independent nodes;
+    // a generated-header dependency must remain visible without an archive.
+    auto foreign = graph;
+    clutch::dependencies::Package package;
+    package.id = "shared-identity";
+    package.git = "https://example.invalid/library";
+    package.version = "1.0.0";
+    foreign.project.packages.push_back(package);
+    foreign.project.foreign_builds.push_back(
+        {package.id, build / "foreign", {"executor"}, {}});
+    foreign.targets.front().foreign_dependencies.push_back(package.id);
+    clutch::validate_build_graph(foreign);
+    clutch::write_graph_visualization(foreign);
+    const auto boundary = read(path);
+    require(boundary.find("\"foreign:shared-identity\"") != std::string::npos &&
+                boundary.find("\"shared-identity\" [shape=folder") !=
+                    std::string::npos,
+            "DOT merged a native action with its logical package");
+    require(boundary.find("prepare headers") != std::string::npos,
+            "DOT omitted generated-header preparation");
+    foreign.project.foreign_builds.front().id = "../redirect";
+    rejects(foreign, "invalid foreign build action");
+
     std::cout << "PASS: DAG validation, shared inputs, DOT escaping and "
                  "deterministic output\n";
     return 0;
