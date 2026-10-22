@@ -141,6 +141,27 @@ add_library(Answer::Answer ALIAS answer)
                 # run a stale application as if it were a successful build.
                 self.cmake_library()
 
+    def test_foreign_archives_with_equal_basenames_remain_distinct(self):
+        """Independent CMake interface-source archives must retain full paths."""
+        imports = {}
+        for name, value in (('one', 40), ('two', 2)):
+            library = self.root / name
+            self.write(library, 'value.cpp', f'int {name}() {{ return {value}; }}\n')
+            self.write(library, 'CMakeLists.txt', 'cmake_minimum_required(VERSION 3.21)\n'
+                       f'project({name} LANGUAGES CXX)\nadd_library({name} INTERFACE)\n'
+                       f'target_sources({name} INTERFACE "${{CMAKE_CURRENT_SOURCE_DIR}}/value.cpp")\n')
+            imports[name] = self.dependency(path='../' + name, target=name)
+        self.write(self.app, 'main.cpp',
+                   'int one(); int two();\nint main() { return one() + two() == 42 ? 0 : 1; }\n')
+        for generator in self.direct_generators():
+            with self.subTest(generator=generator):
+                if (self.app / 'out').exists():
+                    shutil.rmtree(self.app / 'out')
+                self.manifest(imports, generator)
+                self.configure(generator)
+                self.direct_backend(generator)
+                self.run_product()
+
     def test_direct_backend_generated_public_headers_precede_compilation(self):
         library = self.root / 'generated interface'
         self.write(library, 'value.in', '#define PUBLIC_VALUE 42\n')
@@ -466,9 +487,8 @@ set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MO
         self.assertEqual(saved, (self.app / 'out/configuration.toml').read_bytes())
         self.cli('run', '--jobs', '2')
 
-    @unittest.skipUnless(os.name == 'nt', 'MSVC ABI is a Windows target')
-    def test_gnu_clang_microsoft_runtime_matches_native_cmake(self):
-        """Exercise the GNU driver independently of the bootstrap compiler."""
+    def microsoft_clang(self):
+        """Require actual GNU-style Microsoft-targeting Clang, not a filename guess."""
         cxx = shutil.which('clang++')
         cc = shutil.which('clang')
         if not cc or not cxx:
@@ -476,6 +496,12 @@ set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MO
         triple = subprocess.run([cxx, '-dumpmachine'], capture_output=True, text=True, check=True).stdout
         if '-windows-msvc' not in triple:
             self.skipTest('Clang targets a different ABI')
+        return cc, cxx
+
+    @unittest.skipUnless(os.name == 'nt', 'MSVC ABI is a Windows target')
+    def test_gnu_clang_microsoft_runtime_matches_native_cmake(self):
+        """Exercise the GNU driver independently of the bootstrap compiler."""
+        cc, cxx = self.microsoft_clang()
         library = self.interface_sources_library()
         # GNU Clang's default linker varies by distribution. Microsoft LINK
         # exposes conflicting default CRTs that lld can otherwise tolerate.
@@ -492,6 +518,17 @@ set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MO
                     self.cli('.', '--cc', cc, '--cxx', cxx, '--build-tool', OPTIONS.ninja, *profile)
                     output = self.cli('run', '--jobs', '2', *profile)
                     self.assertNotIn('LNK4098', output, 'conflicting CRT defaults remain')
+
+    @unittest.skipUnless(os.name == 'nt', 'MSVC ABI is a Windows target')
+    def test_gnu_clang_microsoft_native_shared_libraries(self):
+        """Reuse the full DLL/import-repair DAG with the GNU Clang driver."""
+        cc, cxx = self.microsoft_clang()
+        command = [sys.executable, str(Path(__file__).with_name('targets_integration.py')),
+                   '--clutch', str(Path(OPTIONS.clutch).resolve()), '--cc', cc, '--cxx', cxx,
+                   '--ninja', OPTIONS.ninja, 'TargetTests.test_native_generators', '-v']
+        result = subprocess.run(command, cwd=self.root, capture_output=True,
+                                text=True, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_c_consumer_uses_cpp_linker_for_foreign_library(self):
         library = self.root / 'cpp library'

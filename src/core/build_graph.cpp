@@ -464,6 +464,8 @@ Graph make_build_graph(Project project,
                              {"-dynamiclib",
                               "-Wl,-install_name,@rpath/" +
                                   target.output.filename().u8string()});
+#elif defined(_WIN32)
+          target.link.emplace_back("-shared");
 #else
           // A loader filename avoids embedding the build directory in ELF
           // DT_NEEDED entries, allowing the existing $ORIGIN paths to work.
@@ -474,9 +476,15 @@ Graph make_build_graph(Project project,
 #endif
         }
 #ifdef _WIN32
-        if (!target.import_library.empty())
-          target.link.push_back("-Wl,--out-implib," +
-                                target.import_library.u8string());
+        if (!target.import_library.empty()) {
+          if (toolchain.microsoft_abi)
+            target.link.insert(
+                target.link.end(),
+                {"-Xlinker", "/implib:" + target.import_library.u8string()});
+          else
+            target.link.push_back("-Wl,--out-implib," +
+                                  target.import_library.u8string());
+        }
 #elif defined(__APPLE__)
         target.link.insert(
             target.link.end(),

@@ -272,7 +272,9 @@ std::vector<std::string> compile_flags(const Target &target, const Unit &unit) {
 }
 
 /// Remove graph object/output paths because Xcode supplies its own
-/// intermediates.
+/// intermediates. Keep foreign library arguments absolute and ordered: Xcode's
+/// framework phase rewrites them as basename searches and can select the wrong
+/// archive when independent dependency trees contain the same filename.
 std::vector<std::string> link_flags(const Target &target) {
   if (target.type == TargetType::StaticLibrary)
     return {};
@@ -291,12 +293,7 @@ std::vector<std::string> link_flags(const Target &target) {
       continue;
     }
 
-    if (!objects.count(argument) && std::none_of(target.link_inputs.begin(),
-                                                 target.link_inputs.end(),
-                                                 [&](const fs::path &input) {
-                                                   return input.u8string() ==
-                                                          argument;
-                                                 }))
+    if (!objects.count(argument))
       result.push_back(argument);
   }
 
@@ -543,19 +540,6 @@ void generate_xcode(const Graph &graph,
       out << "\t\t" << ids.get(foreign_prefix + action)
           << " = { isa = PBXTargetDependency; target = "
           << ids.get("foreign:" + action) << "; };\n";
-    // Real framework-phase inputs let Xcode observe changed foreign archives
-    // and relink; merely placing a filename in OTHER_LDFLAGS is insufficient.
-    if (target.type != TargetType::StaticLibrary)
-      for (const auto &input : target.link_inputs) {
-        const auto imported = key + ":import:" + input.generic_u8string();
-        out << "\t\t" << ids.get(imported + ":file")
-            << " = { isa = PBXFileReference; "
-            << "path = " << literal(input.generic_u8string())
-            << "; sourceTree = \"<absolute>\"; };\n"
-            << "\t\t" << ids.get(imported + ":build")
-            << " = { isa = PBXBuildFile; fileRef = "
-            << ids.get(imported + ":file") << "; };\n";
-      }
     for (const auto &unit : target.units) {
       const auto source_key = key + ":source:" + unit.source.generic_u8string();
       out << "\t\t" << ids.get(source_key + ":file") << " = {\n"
@@ -607,10 +591,6 @@ void generate_xcode(const Graph &graph,
         << "\t\t\tisa = PBXFrameworksBuildPhase;\n"
         << "\t\t\tbuildActionMask = " << all_build_actions_mask << ";\n"
         << "\t\t\tfiles = (";
-    if (target.type != TargetType::StaticLibrary)
-      for (const auto &input : target.link_inputs)
-        out << ids.get(key + ":import:" + input.generic_u8string() + ":build")
-            << ',';
     out << ");\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n"
         << "\t\t" << ids.get(key + ":group") << " = {\n"
         << "\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n";
