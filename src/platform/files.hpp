@@ -28,4 +28,8 @@ void validate_generated_path(const fs::path &path);
 /// reports write/close failures. It does not provide a multi-file transaction.
 void write_if_changed(const fs::path &path, const std::string &content);
 
+/// Encode native filesystem ticks without narrowing wide clock representations.
+/// This preserves precision and the complete signed range for local stamps.
+std::string file_time_text(fs::file_time_type timestamp);
+
 }  // namespace clutch

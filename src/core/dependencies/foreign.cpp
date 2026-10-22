@@ -407,7 +407,7 @@ int prepare_foreign(const Graph &graph,
   for (const auto &file : files)
     state << file.generic_u8string().size() << ':' << file.generic_u8string()
           << ':' << fs::file_size(file) << ':'
-          << fs::last_write_time(file).time_since_epoch().count() << '\n';
+          << file_time_text(fs::last_write_time(file)) << '\n';
 
   write_if_changed(foreign_stamp(graph, id), state.str());
   return 0;

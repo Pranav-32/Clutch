@@ -406,6 +406,19 @@ Graph make_build_graph(Project project,
         const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
         target.link.push_back(std::string("-fms-runtime-lib=") + runtime +
                               (options.release ? "" : "_dbg"));
+        // GNU Clang injects release libcmt as a startup default even when the
+        // selected object/runtime is Debug or DLL. Microsoft LINK then mixes
+        // CRTs. Suppress that driver default and name the selected CRT plus
+        // the compatibility library explicitly; retain compiler-rt handling.
+        const auto *const crt = p.runtime == "dynamic"
+                                    ? (options.release ? "msvcrt" : "msvcrtd")
+                                    : (options.release ? "libcmt" : "libcmtd");
+        target.link.insert(target.link.end(),
+                           {"-nostartfiles",
+                            "-Xlinker",
+                            std::string("/defaultlib:") + crt,
+                            "-Xlinker",
+                            "/defaultlib:oldnames"});
       }
 
       if (toolchain.msvc)

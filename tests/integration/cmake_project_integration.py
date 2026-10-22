@@ -274,6 +274,14 @@ include(CPack)
         self.cli('test')
         self.cli('package')
 
+    def test_header_only_project_without_buildable_targets(self):
+        self.write('CMakeLists.txt', 'cmake_minimum_required(VERSION 3.21)\n'
+                   'project(HeaderOnly LANGUAGES NONE)\nadd_library(headers INTERFACE)\n')
+        self.cli('.', '--generator', 'Ninja', '--cmake-arg=-DCMAKE_MAKE_PROGRAM=' + OPTIONS.ninja)
+        self.assertEqual(self.cli('targets').strip(), '')
+        self.cli('build')
+        self.cli('run', success=False)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

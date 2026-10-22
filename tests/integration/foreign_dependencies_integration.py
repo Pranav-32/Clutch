@@ -476,7 +476,13 @@ set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MO
         triple = subprocess.run([cxx, '-dumpmachine'], capture_output=True, text=True, check=True).stdout
         if '-windows-msvc' not in triple:
             self.skipTest('Clang targets a different ABI')
-        self.interface_sources_library()
+        library = self.interface_sources_library()
+        # GNU Clang's default linker varies by distribution. Microsoft LINK
+        # exposes conflicting default CRTs that lld can otherwise tolerate.
+        project = library / 'CMakeLists.txt'
+        project.write_text(project.read_text() +
+                           '\ntarget_link_options(module INTERFACE -fuse-ld=link)\n',
+                           encoding='utf-8')
         for runtime in ('static', 'dynamic'):
             self.manifest({'module': self.dependency(path='../module library', target='Module::Module',
                                                     defines=['CUSTOM_MODULE'])},
@@ -484,7 +490,8 @@ set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MO
             for profile in ([], ['--release']):
                 with self.subTest(runtime=runtime, profile=profile):
                     self.cli('.', '--cc', cc, '--cxx', cxx, '--build-tool', OPTIONS.ninja, *profile)
-                    self.cli('run', '--jobs', '2', *profile)
+                    output = self.cli('run', '--jobs', '2', *profile)
+                    self.assertNotIn('LNK4098', output, 'conflicting CRT defaults remain')
 
     def test_c_consumer_uses_cpp_linker_for_foreign_library(self):
         library = self.root / 'cpp library'

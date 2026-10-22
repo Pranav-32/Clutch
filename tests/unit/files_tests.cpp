@@ -21,6 +21,39 @@ void require(const bool condition, const char *const message) {
     throw std::runtime_error(message);
 }
 
+/// Round-trip the complete clock range, including libc++'s wide signed rep.
+void check_native_file_times() {
+  using Time = clutch::fs::file_time_type;
+  using Duration = Time::duration;
+  const auto now = Time::clock::now();
+  for (const auto timestamp : {Time::min(),
+                               Time::max(),
+                               Time{Duration{0}},
+                               Time{Duration{-1}},
+                               now,
+                               now + Duration{1}}) {
+    const auto text = clutch::file_time_text(timestamp);
+    require(!text.empty(), "empty filesystem timestamp encoding");
+    const bool negative = text.front() == '-';
+    Duration::rep parsed = 0;
+    for (size_t index = negative ? 1U : 0U; index < text.size(); ++index) {
+      const auto digit = text[index] - '0';
+      require(digit >= 0 && digit <= 9, "invalid timestamp decimal digit");
+      parsed = negative ? parsed * 10 - digit : parsed * 10 + digit;
+    }
+
+    require(parsed == timestamp.time_since_epoch().count(),
+            "filesystem timestamp lost range or precision");
+  }
+
+  require(clutch::file_time_text(Time{Duration{0}}) == "0" &&
+              clutch::file_time_text(Time{Duration{-1}}) == "-1",
+          "filesystem timestamp sign/zero encoding differs");
+  require(clutch::file_time_text(now) !=
+              clutch::file_time_text(now + Duration{1}),
+          "single native tick was rounded away");
+}
+
 /// Read exact bytes independently of the generation helper under test.
 std::string read(const clutch::fs::path &path) {
   std::ifstream input(path, std::ios::binary);
@@ -90,6 +123,7 @@ int main(const int argc, char **const argv) {
   namespace fs = clutch::fs;
   try {
     require(argc == 2, "expected a fixture output directory");
+    check_native_file_times();
     const auto stamp =
         std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = fs::absolute(fs::u8path(argv[1])) / std::to_string(stamp);
