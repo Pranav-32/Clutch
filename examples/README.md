@@ -16,6 +16,7 @@ The application examples use Ninja and installed C/C++ compilers by default.
 | [c-project](c-project/clutch.toml)     | C11 application                                       |
 | [mixed](mixed/clutch.toml)             | Recursive C/C++ suffix selection with separate standards |
 | [foreign](foreign/clutch.toml) | Local CMake library with its original native targets |
+| [cmake-project](cmake-project/README.md) | Existing CMake application, generated resources, tests and packaging |
 | [dependencies](dependencies/README.md) | Local directories, Git/GitHub imports, source catalogs and installed SDKs |
 | [pch](pch/clutch.toml)                 | Shared prefix compilation and independent source builds |
 | [targets](targets/README.md)           | Local libraries, public requirements and linked tests |

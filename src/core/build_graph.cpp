@@ -82,7 +82,14 @@ void validate_build_graph(const Graph &graph) {
   std::set<std::string> foreign_ids;
   for (const auto &build : graph.project.foreign_builds) {
     if (build.id.empty() || !foreign_ids.insert(build.id).second ||
-        build.arguments.empty() || !build.directory.is_absolute())
+        build.arguments.empty() || !build.directory.is_absolute() ||
+        !std::all_of(build.id.begin(),
+                     build.id.end(),
+                     [](const unsigned char c) {
+                       return (c >= 'a' && c <= 'z') ||
+                              (c >= 'A' && c <= 'Z') ||
+                              (c >= '0' && c <= '9') || c == '-' || c == '_';
+                     }))
       throw std::runtime_error("duplicate or invalid foreign build action");
     for (const auto &artifact : build.artifacts)
       produce(artifact);
@@ -296,6 +303,14 @@ Graph make_build_graph(Project project,
         a.push_back(u.source.u8string());
         a.push_back("/Fo" + u.object.u8string());
       } else {
+        if (toolchain.microsoft_abi) {
+          const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
+          a.push_back(std::string("-fms-runtime-lib=") + runtime +
+                      (options.release ? "" : "_dbg"));
+          if (!options.release)
+            a.emplace_back("-D_DEBUG");
+        }
+
         a.push_back(std::string("-std=") + (c ? "c" + target.c_standard
                                               : "c++" + target.cxx_standard));
         a.emplace_back(p.optimize == "speed"  ? "-O3"
@@ -387,6 +402,12 @@ Graph make_build_graph(Project project,
         target.link.insert(target.link.begin() + 1, "--rsp-quoting=posix");
     } else {
       target.link = {target_linker};
+      if (!toolchain.msvc && toolchain.microsoft_abi) {
+        const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
+        target.link.push_back(std::string("-fms-runtime-lib=") + runtime +
+                              (options.release ? "" : "_dbg"));
+      }
+
       if (toolchain.msvc)
         target.link.insert(target.link.end(),
                            {"/nologo",

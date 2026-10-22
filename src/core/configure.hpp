@@ -23,4 +23,8 @@ struct Options;
 /// Throws on invalid inputs or output failures. Foreign configure/compiler
 /// probes may run, but project artifacts are built only by build/run/test.
 Graph configure(const Options &options, const fs::path &executable);
+
+/// List project and foreign library targets without publishing a saved graph.
+/// Native configure steps and dependency fetches may be required for discovery.
+void list_available_targets(const Options &options);
 }  // namespace clutch

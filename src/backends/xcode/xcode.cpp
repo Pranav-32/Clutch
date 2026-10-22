@@ -16,13 +16,18 @@
  */
 
 #include "xcode.hpp"
+#include "backends/foreign_actions.hpp"
+#include "core/dependencies/foreign.hpp"
 #include "core/pch/pch.hpp"
 
+#include "core/build_directory.hpp"
 #include "core/build_graph.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
 #include "core/source_files.hpp"
+#include "platform/arguments.hpp"
+#include "platform/artifacts.hpp"
 #include "platform/files.hpp"
 
 #include <algorithm>
@@ -148,6 +153,11 @@ std::string xml(const std::string &value) {
 /// Keep the generated IDE bundle inside the selected profile's build directory.
 fs::path project_path(const Graph &graph) {
   return graph.project.build / (graph.project.name + ".xcodeproj");
+}
+
+/// Own each target's native intermediates independently of product directories.
+fs::path target_intermediates(const Graph &graph, const size_t index) {
+  return graph.project.build / "xcode-obj" / "targets" / std::to_string(index);
 }
 
 /// Separate application/test target names even when their manifest names match.
@@ -281,7 +291,12 @@ std::vector<std::string> link_flags(const Target &target) {
       continue;
     }
 
-    if (!objects.count(argument))
+    if (!objects.count(argument) && std::none_of(target.link_inputs.begin(),
+                                                 target.link_inputs.end(),
+                                                 [&](const fs::path &input) {
+                                                   return input.u8string() ==
+                                                          argument;
+                                                 }))
       result.push_back(argument);
   }
 
@@ -307,6 +322,7 @@ void list(std::ostream &out,
 void target_settings(std::ostream &out,
                      const Graph &graph,
                      const Target &target,
+                     const size_t index,
                      const Options &options) {
   const auto &p = graph.project;
   out << "\t\t\t\tPRODUCT_NAME = "
@@ -316,6 +332,12 @@ void target_settings(std::ostream &out,
       << "\t\t\t\tEXECUTABLE_SUFFIX = \"\";\n"
       << "\t\t\t\tCONFIGURATION_BUILD_DIR = "
       << literal(target.output.parent_path().generic_u8string()) << ";\n"
+      << "\t\t\t\tTARGET_TEMP_DIR = "
+      << literal(target_intermediates(graph, index).generic_u8string()) << ";\n"
+      << "\t\t\t\tSHARED_PRECOMPS_DIR = "
+      << literal(
+             (target_intermediates(graph, index) / "pch").generic_u8string())
+      << ";\n"
       << "\t\t\t\tCLANG_CXX_LANGUAGE_STANDARD = "
       << literal("c++" + target.cxx_standard) << ";\n"
       << "\t\t\t\tCLANG_CXX_LIBRARY = \"libc++\";\n"
@@ -414,13 +436,43 @@ std::string scheme(const Graph &graph,
 }
 }  // namespace
 
+/// Clean only known target products/intermediates, never a product directory
+/// shared with metadata. Preflight every path before removing any artifact.
+void clean_xcode_targets(const Graph &graph,
+                         const std::vector<size_t> &target_indices) {
+  validate_build_directory(graph.project.root, graph.project.build, true);
+  if (target_indices.empty())
+    throw std::runtime_error(
+        "no Xcode build targets were selected for cleaning");
+
+  auto pending = target_indices;
+  std::set<size_t> visited;
+  std::set<fs::path> artifacts;
+  while (!pending.empty()) {
+    const auto index = pending.back();
+    pending.pop_back();
+    if (!visited.insert(index).second)
+      continue;
+
+    const auto &target = graph.targets.at(index);
+    pending.insert(pending.end(),
+                   target.dependencies.begin(),
+                   target.dependencies.end());
+    artifacts.insert(target.output);
+    artifacts.insert(fs::u8path(target.output.u8string() + ".dSYM"));
+    artifacts.insert(target_intermediates(graph, index));
+  }
+
+  remove_generated_artifacts(graph.project.build,
+                             std::vector(artifacts.begin(), artifacts.end()));
+}
+
 /// Serialize native targets and shared schemes without invoking xcodebuild.
 void generate_xcode(const Graph &graph,
                     const Options &options,
                     const fs::path &clutch_executable) {
-  // This project consumes the explicitly configured graph. Native compilation
-  // does not recursively invoke Clutch or another generator.
-  (void)clutch_executable;
+  // Foreign targets call back only into saved preparation actions, never into
+  // the native build entry point; the upstream executor retains its own graph.
   validate_toolchain(graph);
   ObjectIds ids;
   const auto project = ids.get("project");
@@ -434,11 +486,43 @@ void generate_xcode(const Graph &graph,
       << ";\n\tclasses = {};\n\tobjectVersion = " << pbx_object_version << ";\n"
       << "\tobjects = {\n";
 
+  for (const auto &action : graph.project.foreign_builds) {
+    const auto key = "foreign:" + action.id;
+    out << "\t\t" << ids.get(key + ":script")
+        << " = { isa = PBXShellScriptBuildPhase;\n"
+        << "\t\t\tbuildActionMask = " << all_build_actions_mask << ";\n"
+        << "\t\t\talwaysOutOfDate = 1; files = (); inputPaths = (); "
+           "outputPaths = ("
+        << literal(
+               dependencies::foreign_stamp(graph, action.id).generic_u8string())
+        << ',';
+    for (const auto &artifact : action.artifacts)
+      out << literal(artifact.generic_u8string()) << ',';
+    out << ");\n\t\t\trunOnlyForDeploymentPostprocessing = 0; shellPath = "
+           "/bin/sh;\n"
+        << "\t\t\tshellScript = "
+        << quoted("exec " +
+                  command_line(foreign_action_command(graph,
+                                                      options,
+                                                      clutch_executable,
+                                                      action.id)))
+        << ";\n\t\t};\n"
+        << "\t\t" << ids.get(key) << " = { isa = PBXAggregateTarget;\n"
+        << "\t\t\tbuildConfigurationList = " << ids.get("project:config-list")
+        << ";\n"
+        << "\t\t\tbuildPhases = (" << ids.get(key + ":script")
+        << "); dependencies = ();\n"
+        << "\t\t\tname = " << literal("clutch_" + action.id)
+        << "; productName = " << literal("clutch_" + action.id)
+        << ";\n\t\t};\n";
+  }
+
   // Each target owns source references, build phases, a product and
   // configuration.
   for (size_t index = 0; index < graph.targets.size(); ++index) {
     const auto &target = graph.targets[index];
     const auto key = target_key(index);
+    const auto foreign_prefix = key + ":foreign:";
     const auto *const product_type =
         target.type == TargetType::StaticLibrary
             ? "com.apple.product-type.library.static"
@@ -455,6 +539,23 @@ void generate_xcode(const Graph &graph,
           << ids.get(key + ":dependency:" + std::to_string(dependency))
           << " = { isa = PBXTargetDependency; target = "
           << ids.get(target_key(dependency)) << "; };\n";
+    for (const auto &action : target.foreign_dependencies)
+      out << "\t\t" << ids.get(foreign_prefix + action)
+          << " = { isa = PBXTargetDependency; target = "
+          << ids.get("foreign:" + action) << "; };\n";
+    // Real framework-phase inputs let Xcode observe changed foreign archives
+    // and relink; merely placing a filename in OTHER_LDFLAGS is insufficient.
+    if (target.type != TargetType::StaticLibrary)
+      for (const auto &input : target.link_inputs) {
+        const auto imported = key + ":import:" + input.generic_u8string();
+        out << "\t\t" << ids.get(imported + ":file")
+            << " = { isa = PBXFileReference; "
+            << "path = " << literal(input.generic_u8string())
+            << "; sourceTree = \"<absolute>\"; };\n"
+            << "\t\t" << ids.get(imported + ":build")
+            << " = { isa = PBXBuildFile; fileRef = "
+            << ids.get(imported + ":file") << "; };\n";
+      }
     for (const auto &unit : target.units) {
       const auto source_key = key + ":source:" + unit.source.generic_u8string();
       out << "\t\t" << ids.get(source_key + ":file") << " = {\n"
@@ -505,8 +606,12 @@ void generate_xcode(const Graph &graph,
         << "\t\t" << ids.get(key + ":frameworks") << " = {\n"
         << "\t\t\tisa = PBXFrameworksBuildPhase;\n"
         << "\t\t\tbuildActionMask = " << all_build_actions_mask << ";\n"
-        << "\t\t\tfiles = ();\n"
-        << "\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n"
+        << "\t\t\tfiles = (";
+    if (target.type != TargetType::StaticLibrary)
+      for (const auto &input : target.link_inputs)
+        out << ids.get(key + ":import:" + input.generic_u8string() + ":build")
+            << ',';
+    out << ");\n\t\t\trunOnlyForDeploymentPostprocessing = 0;\n\t\t};\n"
         << "\t\t" << ids.get(key + ":group") << " = {\n"
         << "\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n";
     for (const auto &unit : target.units)
@@ -535,6 +640,8 @@ void generate_xcode(const Graph &graph,
         << "\t\t\tbuildRules = ();\n\t\t\tdependencies = (";
     for (const auto dependency : target.dependencies)
       out << ids.get(key + ":dependency:" + std::to_string(dependency)) << ',';
+    for (const auto &action : target.foreign_dependencies)
+      out << ids.get(foreign_prefix + action) << ',';
     out << ");\n\t\t\tname = " << literal(target_name(target, index)) << ";\n"
         << "\t\t\tproductName = "
         << literal(target.output.filename().u8string())
@@ -542,7 +649,7 @@ void generate_xcode(const Graph &graph,
         << ";\n\t\t\tproductType = " << quoted(product_type) << ";\n\t\t};\n"
         << "\t\t" << ids.get(key + ":config") << " = {\n"
         << "\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = {\n";
-    target_settings(out, graph, target, options);
+    target_settings(out, graph, target, index, options);
     out << "\t\t\t};\n\t\t\tname = " << quoted(configuration) << ";\n\t\t};\n"
         << "\t\t" << ids.get(key + ":config-list") << " = {\n"
         << "\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = ("
@@ -603,6 +710,8 @@ void generate_xcode(const Graph &graph,
       << ";\n\t\t\tprojectRoot = \"\";\n\t\t\ttargets = (\n";
   for (size_t index = 0; index < graph.targets.size(); ++index)
     out << "\t\t\t\t" << ids.get(target_key(index)) << ",\n";
+  for (const auto &action : graph.project.foreign_builds)
+    out << "\t\t\t\t" << ids.get("foreign:" + action.id) << ",\n";
 
   out << "\t\t\t);\n\t\t};\n\t};\n\trootObject = " << project << ";\n}\n";
   write_if_changed(project_path(graph) / "project.pbxproj", out.str());

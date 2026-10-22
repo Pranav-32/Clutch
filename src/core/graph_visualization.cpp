@@ -19,6 +19,7 @@
 #include "core/project_layout.hpp"
 #include "platform/files.hpp"
 
+#include <algorithm>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -127,12 +128,30 @@ void write_graph_visualization(const Graph &graph) {
   // Upstream executors own their internal graph; expose their artifact
   // boundary.
   for (const auto &build : graph.project.foreign_builds) {
-    dot << "  " << quoted(build.id)
+    const auto action_id = "foreign:" + build.id;
+    dot << "  " << quoted(action_id)
         << " [shape=box, label=\"native dependency build\"];\n";
     for (const auto &artifact : build.artifacts) {
       const auto output = node(artifact, "ellipse", "forestgreen");
-      dot << "  " << quoted(build.id) << " -> n" << output
+      dot << "  " << quoted(action_id) << " -> n" << output
           << " [label=\"build\"];\n";
+    }
+    for (const auto &target : graph.targets) {
+      if (std::find(target.foreign_dependencies.begin(),
+                    target.foreign_dependencies.end(),
+                    build.id) == target.foreign_dependencies.end())
+        continue;
+
+      for (const auto &unit : target.units) {
+        const auto output = node(unit.object, "ellipse", "steelblue");
+        dot << "  " << quoted(action_id) << " -> n" << output
+            << " [label=\"prepare headers\"];\n";
+      }
+      for (const auto &prefix : target.precompiled_headers) {
+        const auto output = node(prefix.creator.object, "ellipse", "purple");
+        dot << "  " << quoted(action_id) << " -> n" << output
+            << " [label=\"prepare headers\"];\n";
+      }
     }
   }
 

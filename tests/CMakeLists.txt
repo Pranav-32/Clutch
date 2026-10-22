@@ -11,9 +11,17 @@ add_executable(clutch_version_tests unit/version_tests.cpp
 clutch_target_defaults(clutch_version_tests)
 add_test(NAME clutch.version-ranges COMMAND clutch_version_tests)
 add_executable(clutch_files_tests unit/files_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/platform/artifacts.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
 clutch_target_defaults(clutch_files_tests)
 add_test(NAME clutch.files COMMAND clutch_files_tests "${CMAKE_CURRENT_BINARY_DIR}/file-tests")
+add_executable(clutch_git_submodules_tests unit/git_submodules_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/core/dependencies/git_submodules.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
+clutch_target_defaults(clutch_git_submodules_tests)
+add_test(NAME clutch.git-submodules COMMAND clutch_git_submodules_tests
+        "${CMAKE_CURRENT_BINARY_DIR}/submodule-tests")
+set_tests_properties(clutch.git-submodules PROPERTIES LABELS "unit" TIMEOUT 30)
 add_executable(clutch_zip_tests unit/zip_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/platform/zip.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
@@ -150,6 +158,11 @@ if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
     set_tests_properties(clutch.stress-integration PROPERTIES LABELS "stress" TIMEOUT 240)
     find_program(CLUTCH_TEST_CMAKE NAMES cmake)
     if (CLUTCH_TEST_CMAKE)
+        add_test(NAME clutch.cmake-projects
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/cmake_project_integration.py"
+                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+        set_tests_properties(clutch.cmake-projects PROPERTIES TIMEOUT 240)
         add_test(NAME clutch.foreign-dependencies
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/foreign_dependencies_integration.py"
                 --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"

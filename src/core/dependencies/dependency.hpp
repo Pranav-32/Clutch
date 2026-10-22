@@ -24,6 +24,8 @@ struct Requirement {
   std::vector<std::string> targets, components, features, libraries, runtime;
   std::vector<std::string> build_arguments;
   std::vector<std::pair<std::string, std::string>> cmake_options;
+  // Explicit link-driver requirement for adapters without target metadata.
+  std::string link_language{};
 };
 
 /// Root/member requirements retain ownership when manifests are combined.
@@ -60,6 +62,9 @@ struct ForeignBuild {
   std::vector<std::string> arguments;
   std::vector<fs::path> artifacts;
   fs::path compilation_database{};
+  std::vector<std::string>
+      rebuild_arguments{};                 ///< Native forced-build action.
+  std::vector<fs::path> interface_dirs{};  ///< Public/generated header roots.
 };
 
 /// Deferred until the consuming compiler and profile have been selected.

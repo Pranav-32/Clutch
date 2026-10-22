@@ -43,6 +43,8 @@ class GitStore {
   std::map<std::string, std::map<std::string, std::string>> remotes_;
   std::string git(const fs::path &directory,
                   const std::vector<std::string> &arguments) const;
+  /// Verify source identity and cleanliness before marking a checkout complete.
+  void validate_checkout(Candidate &candidate, const fs::path &directory) const;
 };
 
 /// Read dependency pins before graph resolution; legacy local-only locks have

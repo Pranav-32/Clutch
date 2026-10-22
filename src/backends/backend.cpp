@@ -36,6 +36,28 @@
 
 namespace clutch {
 namespace {
+/// Ninja's clean tool follows the selected producer closure and preserves
+/// rules.
+int ninja_clean_artifacts(const Graph &graph,
+                          const std::vector<size_t> &target_indices) {
+  std::vector<std::string> command{graph.backend.executable,
+                                   "-C",
+                                   graph.project.build.u8string(),
+                                   "-t",
+                                   "clean"};
+  for (const auto index : target_indices)
+    command.push_back(graph.targets.at(index).output.generic_u8string());
+
+  return run(command, graph.project.build);
+}
+
+/// Adapt controlled filesystem cleanup to the registry's action contract.
+int xcode_clean_artifacts(const Graph &graph,
+                          const std::vector<size_t> &target_indices) {
+  clean_xcode_targets(graph, target_indices);
+  return 0;
+}
+
 enum class Host {
   Any,
   Windows,
@@ -84,6 +106,7 @@ struct BackendDriver {
                                     const Options &,
                                     const std::vector<size_t> &);
   std::string (*discover)() = nullptr;
+  int (*clean)(const Graph &, const std::vector<size_t> &) = nullptr;
 };
 
 /// Return the process-lifetime registry of implemented generator drivers.
@@ -98,7 +121,8 @@ const std::vector<BackendDriver> &drivers() {
        {"ninja", "ninja-build"},
        generate_ninja,
        ninja_build_command,
-       discover_ninja},
+       discover_ninja,
+       ninja_clean_artifacts},
       {"make",
        "GNU Make (Unix, MinGW and MSYS)",
        Host::Any,
@@ -133,7 +157,9 @@ const std::vector<BackendDriver> &drivers() {
        "XCODEBUILD",
        {"xcodebuild"},
        generate_xcode,
-       xcode_build_command}};
+       xcode_build_command,
+       nullptr,
+       xcode_clean_artifacts}};
   return registered;
 }
 
@@ -185,6 +211,24 @@ std::string normalize_backend_name(const std::string &name) {
     return "visual-studio";
 
   return normalized;
+}
+
+/// Dispatch optional preparation through the same registry as native builds.
+int clean_backend_artifacts(const Graph &graph,
+                            const std::vector<size_t> &target_indices) {
+  const auto &driver = driver_for(graph.backend.name);
+  if (!supports(driver.host))
+    throw std::runtime_error(
+        "configured generator is unavailable on this host");
+
+  if (target_indices.empty())
+    throw std::runtime_error("no build targets were selected for cleaning");
+
+  for (const auto index : target_indices)
+    if (index >= graph.targets.size())
+      throw std::runtime_error("invalid build target selection");
+
+  return driver.clean ? driver.clean(graph, target_indices) : 0;
 }
 
 /// Expose registry metadata for the CLI without requiring a project or tool

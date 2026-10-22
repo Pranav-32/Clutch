@@ -30,9 +30,9 @@
 namespace clutch {
 namespace {
 // Increment this version when persisted graph fields or semantics change.
-// Version 10 retains noncompiled files selected by source patterns.
-// Older resolved commands require explicit reconfiguration.
-constexpr auto configuration_schema_version = 10;
+// Version 12 retains foreign public-header roots for direct backend
+// preparation. Older resolved commands require explicit reconfiguration.
+constexpr auto configuration_schema_version = 12;
 
 /// Serialize paths as UTF-8 strings and preserve ordinary string argument
 /// values.
@@ -135,7 +135,8 @@ void save_configuration(const Graph &graph, const Options &options) {
       {"build_tool", graph.backend.executable},
       {"cc", graph.toolchain.cc},
       {"cxx", graph.toolchain.cxx},
-      {"msvc", graph.toolchain.msvc}};
+      {"msvc", graph.toolchain.msvc},
+      {"microsoft_abi", graph.toolchain.microsoft_abi}};
 
   data.insert("workspace", project.is_workspace);
   toml::array inputs, projects;
@@ -156,8 +157,10 @@ void save_configuration(const Graph &graph, const Options &options) {
         {"id", build.id},
         {"directory", build.directory.u8string()},
         {"arguments", values(build.arguments)},
+        {"rebuild_arguments", values(build.rebuild_arguments)},
         {"artifacts", values(build.artifacts)},
-        {"compilation_database", build.compilation_database.u8string()}});
+        {"compilation_database", build.compilation_database.u8string()},
+        {"interface_dirs", values(build.interface_dirs)}});
   data.insert("foreign_builds", std::move(foreign_builds));
 
   // Retain complete argument arrays, including the executable, for each action.
@@ -286,6 +289,8 @@ Graph load_configuration(const Options &options) {
   graph.toolchain = {read_string(data, "cc"),
                      read_string(data, "cxx"),
                      data["msvc"].value_or(false)};
+  graph.toolchain.microsoft_abi =
+      data["microsoft_abi"].value_or(graph.toolchain.msvc);
   const auto *const foreign_builds = data["foreign_builds"].as_array();
   if (!foreign_builds)
     throw std::runtime_error("invalid saved foreign build actions");
@@ -299,7 +304,10 @@ Graph load_configuration(const Options &options) {
                                    read_paths(record, "artifacts")};
     build.compilation_database =
         fs::u8path(read_string(record, "compilation_database"));
-    if (build.arguments.empty() || !build.directory.is_absolute())
+    build.rebuild_arguments = read_strings(record, "rebuild_arguments");
+    build.interface_dirs = read_paths(record, "interface_dirs");
+    if (build.arguments.empty() || build.rebuild_arguments.empty() ||
+        !build.directory.is_absolute())
       throw std::runtime_error("invalid saved foreign command");
     project.foreign_builds.push_back(std::move(build));
   }

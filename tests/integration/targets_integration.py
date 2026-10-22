@@ -126,16 +126,17 @@ links = ["shared"]
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
-    def configure(self, generator='ninja'):
+    def configure(self, generator='ninja', release=False):
         """Request target artifacts without guessing directories or file names."""
-        location = json.loads(self.cli('locate').stdout)
+        profile = ['--release'] if release else []
+        location = json.loads(self.cli('locate', *profile).stdout)
         query = Path(location['paths']['query']) / 'codemodel-v1'
         query.parent.mkdir(parents=True, exist_ok=True)
         query.touch()
         args = ['.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx]
         if generator == 'ninja':
             args += ['--build-tool', OPTIONS.ninja]
-        result = self.cli(*args)
+        result = self.cli(*args, *profile)
         reply = Path(location['paths']['reply'])
         index = json.loads(sorted(reply.glob('index-*.json'))[-1].read_text(encoding='utf-8'))
         reference = next(item for item in index['objects'] if item['kind'] == 'codemodel')
@@ -203,6 +204,99 @@ links = ["shared"]
             if sys.platform == 'darwin' and shutil.which('xcodebuild'):
                 result.append('xcode')
         return result
+
+    def test_run_forwards_flags_after_target_selection(self):
+        """A repeatable --target must leave the application's -- separator intact."""
+        self.write('apps/arguments.cpp', '#include <string>\n'
+                   'int main(int argc, char** argv) {\n'
+                   'return argc == 4 && std::string(argv[1]) == "--flag" &&\n'
+                   'std::string(argv[2]) == "space value" &&\n'
+                   'std::string(argv[3]) == "--" ? 17 : 1;\n}\n')
+        self.manifest(targets='[[target]]\nname="arguments"\nsources=["apps/arguments.cpp"]\n')
+        self.configure()
+        result = self.cli('run', '--target', 'arguments', '--', '--flag',
+                          'space value', '--', success=False)
+        self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
+
+    def test_clean_build_recompiles_selected_dependencies_and_preserves_metadata(self):
+        """Damage unchanged outputs so successful clean execution proves real work."""
+        fixture_root = self.root
+        for generator in self.generators():
+            with self.subTest(generator=generator):
+                self.root = fixture_root / generator
+                self.root.mkdir()
+                self.create_fixture()
+                self.write('prefix.h', '#pragma once\n#include <stddef.h>\n')
+                self.manifest(generator)
+                manifest = (self.root / 'clutch.toml').read_text()
+                self.write('clutch.toml', manifest.replace('[build]',
+                           '[build]\npch={c=["prefix.h"],cpp=["prefix.h"]}'))
+                self.configure(generator)
+                self.cli('build', '-t', 'app', '-t', 'check', '-t', 'optional', '--jobs', '2')
+                location = json.loads(self.cli('locate').stdout)
+                build = Path(location['paths']['build'])
+                metadata = [build / 'configuration.toml', build / 'compile_commands.json',
+                            self.root / 'clutch.lock']
+                queries = Path(location['paths']['query'])
+                metadata.extend(path for path in queries.rglob('*') if path.is_file())
+                metadata.extend(path for path in Path(location['paths']['reply']).rglob('*') if path.is_file())
+                snapshots = {path: path.read_bytes() for path in metadata}
+                optional = self.build_path('optional')
+                optional_stamp = optional.stat().st_mtime_ns
+                optional_bytes = optional.read_bytes()
+                operations = [('build', 'app'), ('run', 'app'), ('test', 'check')]
+                if generator != 'ninja':
+                    operations = [('run', 'app')]
+                for command, target in operations:
+                    with self.subTest(command=command):
+                        executable = self.build_path(target)
+                        stamp = executable.stat()
+                        executable.write_bytes(bytes(stamp.st_size))
+                        os.utime(executable, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                        # Xcode owns its intermediate object locations; other
+                        # generators use the exact graph paths exposed by the API.
+                        object_file = None
+                        if generator != 'xcode':
+                            object_file = Path(self.configured_targets['base']['sources'][0]['object'])
+                            object_stamp = object_file.stat()
+                            object_file.write_bytes(bytes(object_stamp.st_size))
+                            os.utime(object_file, ns=(object_stamp.st_atime_ns, object_stamp.st_mtime_ns))
+                        self.cli(command, '--clean', '--jobs', '2', '-t', target)
+                        self.assertTrue(any(executable.read_bytes()), 'executable was not recreated')
+                        if object_file:
+                            self.assertTrue(any(object_file.read_bytes()), 'transitive object was not recompiled')
+                        self.assertEqual(optional_bytes, optional.read_bytes())
+                        self.assertEqual(optional_stamp, optional.stat().st_mtime_ns)
+                        self.assertEqual(snapshots, {path: path.read_bytes() for path in snapshots})
+                self.cli('run', '--clean', '-t', 'base', success=False)
+                self.assertEqual(optional_stamp, optional.stat().st_mtime_ns)
+
+    def test_clean_build_preserves_other_profile(self):
+        self.manifest(targets='[[target]]\nname="app"\nsources=["apps/optional.cpp"]\n')
+        self.configure()
+        self.cli('build')
+        debug_output = self.build_path('app')
+        debug_stamp = debug_output.stat().st_mtime_ns
+        debug_bytes = debug_output.read_bytes()
+        self.configure(release=True)
+        self.cli('build', '--release')
+        release_output = self.build_path('app')
+        release_stamp = release_output.stat()
+        release_output.write_bytes(bytes(release_stamp.st_size))
+        os.utime(release_output, ns=(release_stamp.st_atime_ns, release_stamp.st_mtime_ns))
+        self.cli('run', '--release', '--clean', '--jobs', '2')
+        self.assertEqual(debug_bytes, debug_output.read_bytes())
+        self.assertEqual(debug_stamp, debug_output.stat().st_mtime_ns)
+
+    def test_clean_run_does_not_launch_after_build_failure(self):
+        self.manifest(targets='[[target]]\nname="app"\nsources=["apps/optional.cpp"]\n')
+        self.write('apps/optional.cpp', '#include <fstream>\n'
+                   'int main() { std::ofstream("was-run").put(\'x\'); return 0; }\n')
+        self.configure()
+        self.cli('build')
+        self.write('apps/optional.cpp', '#error intentional compilation failure\n')
+        self.cli('run', '--clean', success=False)
+        self.assertFalse((self.root / 'was-run').exists())
 
     def test_native_generators(self):
         """The same DAG builds, runs, stages DLLs and stays incremental everywhere."""

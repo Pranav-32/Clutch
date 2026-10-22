@@ -78,7 +78,8 @@ std::vector<Requirement> read_requirements(const toml::table &document,
                                       "targets",       "components",
                                       "features",      "libraries",
                                       "runtime",       "build_arguments",
-                                      "cmake_options", "cmake_package"};
+                                      "cmake_options", "cmake_package",
+                                      "link_language"};
   for (const auto &[alias, value] : *table) {
     Requirement requirement;
     requirement.alias = alias.str();
@@ -217,6 +218,10 @@ std::vector<Requirement> read_requirements(const toml::table &document,
     requirement.libraries = strings(*settings, "libraries");
     requirement.runtime = strings(*settings, "runtime");
     requirement.build_arguments = strings(*settings, "build_arguments");
+    requirement.link_language = text(*settings, "link_language");
+    if (!requirement.link_language.empty() &&
+        requirement.link_language != "c" && requirement.link_language != "cpp")
+      throw std::runtime_error("dependency.link_language must be c or cpp");
     if (requirement.provider == "system" &&
         requirement.build_system != "auto" &&
         requirement.build_system != "cmake")

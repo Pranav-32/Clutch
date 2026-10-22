@@ -81,6 +81,140 @@ add_library(Answer::Answer ALIAS answer)
                    'int main() { return answer() == 42 ? 0 : 1; }\n')
         return library
 
+    def direct_backend(self, generator, success=True):
+        """Invoke generated files without the CLI's dependency preparation."""
+        directory = self.app / 'out'
+        if generator == 'ninja':
+            command = [OPTIONS.ninja, '-C', str(directory), '-j', '2']
+        elif generator == 'make':
+            command = [shutil.which('gmake') or shutil.which('make'), '-C', str(directory), '-j', '2']
+        elif generator == 'nmake':
+            command = ['nmake', '/NOLOGO', '/F', 'Makefile', 'clutch_all']
+        elif generator == 'visual-studio':
+            command = ['msbuild', 'clutch.proj', '/t:clutch_all', '/m:2', '/nologo']
+        else:
+            project, = directory.glob('*.xcodeproj')
+            command = ['xcodebuild', '-project', str(project), '-configuration', 'Debug', '-alltargets', 'build']
+        result = subprocess.run(command, cwd=directory, capture_output=True, text=True)
+        self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
+        return result.stdout + result.stderr
+
+    def direct_generators(self):
+        generators = ['ninja']
+        if os.name != 'nt':
+            if shutil.which('gmake') or shutil.which('make'):
+                generators.append('make')
+            if shutil.which('xcodebuild'):
+                generators.append('xcode')
+        elif Path(OPTIONS.cxx).stem.lower() == 'cl':
+            generators += ['nmake', 'visual-studio']
+        return generators
+
+    def run_product(self):
+        name = 'app.exe' if os.name == 'nt' else 'app'
+        executable, = (p for p in (self.app / 'out').rglob(name) if p.is_file())
+        result = subprocess.run([str(executable)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return executable
+
+    def test_direct_backend_foreign_preparation_and_incremental_link(self):
+        library = self.cmake_library()
+        for generator in self.direct_generators():
+            with self.subTest(generator=generator):
+                if (self.app / 'out').exists():
+                    shutil.rmtree(self.app / 'out')
+                self.write(library, 'generated.in', '#define GENERATED_VALUE 2\n')
+                self.manifest({'answer': self.dependency(path='../cmake library', target='Answer::Answer')}, generator)
+                self.configure(generator)
+                self.direct_backend(generator)
+                product = self.run_product()
+                stamp = (product.read_bytes(), product.stat().st_mtime_ns)
+                self.direct_backend(generator)
+                self.assertEqual(stamp, (product.read_bytes(), product.stat().st_mtime_ns))
+                self.write(library, 'generated.in', '#define GENERATED_VALUE (1 + 1)\n')
+                self.direct_backend(generator)
+                self.run_product()
+                self.assertNotEqual(stamp[1], product.stat().st_mtime_ns)
+                self.write(library, 'answer.cpp', '#error upstream failure must stop consumers\n')
+                self.direct_backend(generator, success=False)
+                # Restore for the next backend; the failed action must never
+                # run a stale application as if it were a successful build.
+                self.cmake_library()
+
+    def test_direct_backend_generated_public_headers_precede_compilation(self):
+        library = self.root / 'generated interface'
+        self.write(library, 'value.in', '#define PUBLIC_VALUE 42\n')
+        self.write(library, 'CMakeLists.txt', '''cmake_minimum_required(VERSION 3.21)
+project(GeneratedInterface LANGUAGES CXX)
+add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/public/value.hpp"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/public"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/value.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/public/value.hpp"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/value.in")
+add_custom_target(generate_header DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/public/value.hpp")
+add_library(api INTERFACE)
+add_dependencies(api generate_header)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/public")
+target_include_directories(api INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/public")
+''')
+        for generator in self.direct_generators():
+            with self.subTest(generator=generator):
+                if (self.app / 'out').exists():
+                    shutil.rmtree(self.app / 'out')
+                self.write(self.app, 'main.cpp', '#include <value.hpp>\nint main() { return PUBLIC_VALUE == 42 ? 0 : 1; }\n')
+                self.write(library, 'value.in', '#define PUBLIC_VALUE 42\n')
+                self.manifest({'api': self.dependency(path='../generated interface', target='api')}, generator)
+                self.configure(generator)
+                self.assertFalse(list((self.app / 'out').rglob('value.hpp')))
+                self.direct_backend(generator)
+                product = self.run_product()
+                stamp = product.stat().st_mtime_ns
+                self.direct_backend(generator)
+                self.assertEqual(stamp, product.stat().st_mtime_ns)
+                self.write(library, 'value.in', '#define PUBLIC_VALUE 7\n')
+                self.direct_backend(generator)
+                result = subprocess.run([str(product)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows imported runtime staging')
+    def test_direct_backend_stages_and_repairs_imported_dlls(self):
+        library = self.root / 'shared library'
+        self.write(library, 'value.cpp', 'int answer() { return 42; }\n')
+        self.write(library, 'CMakeLists.txt', 'cmake_minimum_required(VERSION 3.21)\n'
+                   'project(Shared LANGUAGES CXX)\nadd_library(answer SHARED value.cpp)\n'
+                   'set_target_properties(answer PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)\n')
+        self.write(self.app, 'main.cpp', 'int answer(); int main() { return answer() == 42 ? 0 : 1; }\n')
+        for generator in self.direct_generators():
+            with self.subTest(generator=generator):
+                if (self.app / 'out').exists():
+                    shutil.rmtree(self.app / 'out')
+                self.manifest({'answer': self.dependency(path='../shared library', target='answer')}, generator)
+                self.configure(generator)
+                self.direct_backend(generator)
+                product = self.run_product()
+                runtime = product.parent / 'answer.dll'
+                self.assertTrue(runtime.is_file())
+                stamp = product.stat().st_mtime_ns
+                runtime.unlink()
+                self.direct_backend(generator)
+                self.run_product()
+                self.assertEqual(stamp, product.stat().st_mtime_ns)
+
+    def test_direct_backend_shares_preparation_across_parallel_consumers(self):
+        self.cmake_library()
+        for generator in self.direct_generators():
+            with self.subTest(generator=generator):
+                if (self.app / 'out').exists():
+                    shutil.rmtree(self.app / 'out')
+                self.manifest({'answer': self.dependency(path='../cmake library', target='Answer::Answer')}, generator)
+                manifest = self.app / 'clutch.toml'
+                with manifest.open('a', encoding='utf-8') as output:
+                    output.write('[[target]]\nname="second"\ntype="executable"\nsources=["main.cpp"]\n')
+                self.configure(generator)
+                text = self.direct_backend(generator)
+                self.assertEqual(text.count('(native dependency)'), 1, text)
+                self.run_product()
+
     def test_cmake_native_graph_generated_headers_and_incremental_link(self):
         library = self.cmake_library()
         generators = ['ninja']
@@ -199,8 +333,7 @@ add_library(Answer::Answer ALIAS answer)
         for settings, diagnostic in (
                 ({'system': 'Vendor', 'libraries': ['example'], 'target': 'Vendor::Core'}, 'not both'),
                 ({'system': 'Vendor', 'libraries': ['-bad-switch']}, 'invalid system library'),
-                ({'system': 'Vendor', 'libraries': ['example'], 'version': '1.0'}, 'cannot use CMake'),
-                ({'system': 'Vendor'}, 'needs target/targets')):
+                ({'system': 'Vendor', 'libraries': ['example'], 'version': '1.0'}, 'cannot use CMake')):
             with self.subTest(settings=settings):
                 self.manifest({'api': self.dependency(**settings)})
                 self.assertIn(diagnostic, self.configure(success=False))
@@ -217,6 +350,141 @@ add_library(Answer::Answer ALIAS answer)
         self.cli('run', '--jobs', '2')
         if os.name == 'nt':
             self.assertTrue((self.app / 'out/answer.dll').is_file())
+
+    def test_clean_run_recompiles_native_cmake_objects(self):
+        self.cmake_library()
+        self.manifest({'answer': self.dependency(path='../cmake library', target='Answer::Answer')})
+        self.configure()
+        self.cli('run', '--jobs', '2')
+        native = self.app / 'out/.clutch/foreign'
+        object_file = next(path for path in native.rglob('*')
+                           if path.name in ('answer.cpp.o', 'answer.cpp.obj'))
+        stamp = object_file.stat()
+        object_file.write_bytes(bytes(stamp.st_size))
+        os.utime(object_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        lock = (self.app / 'clutch.lock').read_bytes()
+        configuration = (self.app / 'out/configuration.toml').read_bytes()
+        self.cli('run', '--clean', '--jobs', '2')
+        self.assertTrue(any(object_file.read_bytes()))
+        self.assertEqual(lock, (self.app / 'clutch.lock').read_bytes())
+        self.assertEqual(configuration, (self.app / 'out/configuration.toml').read_bytes())
+
+    def interface_sources_library(self):
+        """Model module libraries whose implementation belongs to their consumers."""
+        library = self.root / 'module library'
+        self.write(library, 'public.hpp', '#pragma once\nint module_answer();\n')
+        self.write(library, 'module.c', '#ifndef MODULE_C\n#error missing C interface\n#endif\n'
+                   'int module_c(void) { return 40; }\n')
+        self.write(library, 'module.cpp', '#include <string>\n#include "public.hpp"\n'
+                   '#ifndef MODULE_CPP\n#error missing C++ interface\n#endif\n'
+                   '#ifndef CUSTOM_MODULE\n#error missing dependency definition\n#endif\n'
+                   'extern "C" int module_c(void);\n'
+                   '#ifdef _DEBUG\nint debug_sentinel() { return 0; }\n'
+                   '#else\nint release_sentinel() { return 0; }\n#endif\n'
+                   'int module_answer() { return module_c() + static_cast<int>(std::string("42").size()); }\n')
+        self.write(library, 'CMakeLists.txt', '''cmake_minimum_required(VERSION 3.21)
+project(Module LANGUAGES C CXX)
+add_library(module INTERFACE)
+add_library(Module::Module ALIAS module)
+target_sources(module INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/module.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/module.cpp")
+target_include_directories(module INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(module INTERFACE "$<$<COMPILE_LANGUAGE:C>:MODULE_C>"
+  "$<$<COMPILE_LANGUAGE:CXX>:MODULE_CPP>")
+set_source_files_properties(module.cpp PROPERTIES COMPILE_DEFINITIONS PRIVATE_MODULE_SOURCE)
+''')
+        self.write(self.app, 'main.cpp', '#include <atomic>\n#include <string>\n#include <public.hpp>\n'
+                   '#if !defined(MODULE_CPP) || defined(MODULE_C) || defined(PRIVATE_MODULE_SOURCE)\n'
+                   '#error incorrect language interface\n#endif\n'
+                   '#ifdef _DEBUG\nint debug_sentinel();\n#define SENTINEL debug_sentinel\n'
+                   '#else\nint release_sentinel();\n#define SENTINEL release_sentinel\n#endif\n'
+                   'int main() { std::atomic<int> value(module_answer());\n'
+                   'return value.load() == 42 && std::string("ok").size() == 2 ? SENTINEL() : 1; }\n')
+        return library
+
+    def test_cmake_interface_sources_are_built_and_incremental(self):
+        library = self.interface_sources_library()
+        self.manifest({'module': self.dependency(path='../module library', target='Module::Module',
+                                                defines=['CUSTOM_MODULE'])})
+        for profile in ([], ['--release']):
+            with self.subTest(profile=profile):
+                self.configure('ninja', *profile)
+                self.cli('run', '--jobs', '2', *profile)
+                build = self.app / ('Clutch-build-release' if profile else 'out')
+                artifacts = [p for p in (build / '.clutch/foreign').rglob('*')
+                             if p.name in ('libclutch_interface_sources.a', 'clutch_interface_sources.lib')]
+                self.assertEqual(len(artifacts), 1)
+                stamp = artifacts[0].stat().st_mtime_ns
+                self.cli('run', '--jobs', '2', *profile)
+                self.assertEqual(stamp, artifacts[0].stat().st_mtime_ns)
+                commands = json.loads((build / 'compile_commands.json').read_text())
+                modules = [command for command in commands if Path(command['file']).name == 'module.cpp']
+                self.assertEqual(len(modules), 1)
+                self.assertIn('CUSTOM_MODULE', json.dumps(modules[0]))
+        self.write(library, 'module.c', '#ifndef MODULE_C\n#error missing C interface\n#endif\n'
+                   'int module_c(void) { return 39 + 1; }\n')
+        self.cli('run', '--jobs', '2')
+
+    def test_cmake_single_library_is_selected_automatically(self):
+        self.interface_sources_library()
+        self.manifest({'module': self.dependency(path='../module library', defines=['CUSTOM_MODULE'])})
+        discovery = self.configure('ninja', '--targets')
+        self.assertIn('module  INTERFACE_LIBRARY', discovery)
+        self.assertNotIn('Manually-specified variables were not used', discovery)
+        output = self.configure()
+        self.assertNotIn('Manually-specified variables were not used', output)
+        self.cli('run', '--jobs', '2')
+
+    def test_installed_single_library_is_selected_automatically(self):
+        sdk = self.root / 'installed sdk'
+        self.installed_package(sdk)
+        self.write(self.app, 'main.cpp', '#include <widget.hpp>\n'
+                   'int main() { return SDK_VALUE == SDK_PUBLIC ? 0 : 1; }\n')
+        self.manifest({'widget': self.dependency(system='Widget', root=sdk.as_posix())})
+        self.configure()
+        self.cli('run', '--jobs', '2')
+        self.configure('ninja', '--locked', '--offline')
+
+    def test_targets_discovery_precedes_selection_and_does_not_save_configuration(self):
+        self.cmake_library()
+        self.manifest({'answer': self.dependency(path='../cmake library')})
+        output = self.configure('ninja', '--targets')
+        self.assertIn('Dependency answer:', output)
+        self.assertIn('answer  STATIC_LIBRARY', output)
+        self.assertIn('base  STATIC_LIBRARY', output)
+        self.assertIn('Project targets:', output)
+        self.assertFalse((self.app / 'out/configuration.toml').exists())
+        self.assertFalse((self.app / 'out/build.ninja').exists())
+        self.assertFalse((self.app / 'clutch.lock').exists())
+        output = self.configure(success=False)
+        self.assertIn('Select target/targets', output)
+        self.assertIn('answer', output)
+        self.manifest({'answer': self.dependency(path='../cmake library', target='Answer::Answer')})
+        self.configure()
+        saved = (self.app / 'out/configuration.toml').read_bytes()
+        self.configure('ninja', '--targets')
+        self.assertEqual(saved, (self.app / 'out/configuration.toml').read_bytes())
+        self.cli('run', '--jobs', '2')
+
+    @unittest.skipUnless(os.name == 'nt', 'MSVC ABI is a Windows target')
+    def test_gnu_clang_microsoft_runtime_matches_native_cmake(self):
+        """Exercise the GNU driver independently of the bootstrap compiler."""
+        cxx = shutil.which('clang++')
+        cc = shutil.which('clang')
+        if not cc or not cxx:
+            self.skipTest('GNU-style Clang drivers are unavailable')
+        triple = subprocess.run([cxx, '-dumpmachine'], capture_output=True, text=True, check=True).stdout
+        if '-windows-msvc' not in triple:
+            self.skipTest('Clang targets a different ABI')
+        self.interface_sources_library()
+        for runtime in ('static', 'dynamic'):
+            self.manifest({'module': self.dependency(path='../module library', target='Module::Module',
+                                                    defines=['CUSTOM_MODULE'])},
+                          extra=f'runtime="{runtime}"')
+            for profile in ([], ['--release']):
+                with self.subTest(runtime=runtime, profile=profile):
+                    self.cli('.', '--cc', cc, '--cxx', cxx, '--build-tool', OPTIONS.ninja, *profile)
+                    self.cli('run', '--jobs', '2', *profile)
 
     def test_c_consumer_uses_cpp_linker_for_foreign_library(self):
         library = self.root / 'cpp library'
@@ -297,12 +565,58 @@ add_library(Answer::Answer ALIAS answer)
         self.cli('run', '--jobs', '2')
         self.assertFalse((library / 'answer.o').exists())
         self.cli('run', '--jobs', '2')
+        native_object = next((self.app / 'out/.clutch/foreign').rglob('answer.o'))
+        stamp = native_object.stat()
+        native_object.write_bytes(bytes(stamp.st_size))
+        os.utime(native_object, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        self.cli('run', '--clean', '--jobs', '2')
+        self.assertTrue(any(native_object.read_bytes()))
 
     def test_makefile_requires_public_artifact_contract(self):
         library = self.root / 'make library'
         self.write(library, 'Makefile', 'all:\n\t@echo do not execute during configure\n')
         self.manifest({'bad': self.dependency(path='../make library', build_system='make')})
         self.assertIn('requires libraries', self.configure(success=False))
+
+    @unittest.skipIf(os.name == 'nt', 'fixture uses GNU driver and archive flags')
+    def test_c_application_links_cpp_make_and_explicit_system_libraries(self):
+        """Metadata-free adapters can declare their C++ runtime requirement."""
+        library = self.root / 'make cpp'
+        self.write(library, 'answer.cpp', '#include <string>\n'
+                   'extern "C" int answer() { return static_cast<int>(std::string("answer").size()); }\n')
+        self.write(library, 'Makefile', 'empty :=\nspace := $(empty) $(empty)\n'
+                   'source := $(subst $(space),\\$(space),$(SOURCE_DIR))\n'
+                   'all: libanswer.a\n'
+                   'answer.o: $(source)/answer.cpp\n\t"$(CXX)" -c "$(SOURCE_DIR)/answer.cpp" -o "$@"\n'
+                   'libanswer.a: answer.o\n\tar rcs "$@" "$<"\n')
+        self.write(self.app, 'main.c', 'int answer(void);\nint main(void) { return answer() == 6 ? 0 : 1; }\n')
+        prefix = ('[project]\nname="app"\nversion="1.0.0"\nlanguage="c"\nstd=11\nentry="main.c"\n'
+                  '[profile.debug]\nbuild_dir="out"\n[dependencies]\nanswer=')
+        self.write(self.app, 'clutch.toml', prefix + self.dependency(
+            path='../make cpp', build_system='make', libraries=['libanswer.a']) + '\n')
+        self.configure()
+        self.assertIn('undefined', self.cli('build', success=False).lower())
+        self.write(self.app, 'clutch.toml', prefix + self.dependency(
+            path='../make cpp', build_system='make', libraries=['libanswer.a'], link_language='cpp') + '\n')
+        self.configure()
+        self.cli('run')
+        archive, = (self.app / 'out/.clutch/foreign').rglob('libanswer.a')
+        # The installed-library path exercises the same contract independently
+        # of the Make action and preserves the C compilation command.
+        self.write(self.app, 'clutch.toml', prefix + self.dependency(
+            system='Cpp Runtime Fixture', libraries=[archive.as_posix()], link_language='cpp') + '\n')
+        self.configure()
+        self.cli('run')
+        commands = json.loads((self.app / 'out/compile_commands.json').read_text())
+        self.assertEqual(Path(commands[0]['file']).suffix, '.c')
+        self.assertTrue(any(arg == '-std=c11' for arg in commands[0]['arguments']))
+
+    def test_link_language_rejects_invalid_values_and_metadata_overrides(self):
+        self.manifest({'bad': self.dependency(system='Invalid', include_dirs=['.'], link_language='rust')})
+        self.assertIn('link_language must be c or cpp', self.configure(success=False))
+        self.cmake_library()
+        self.manifest({'bad': self.dependency(path='../cmake library', target='answer', link_language='cpp')})
+        self.assertIn('CMake supplies its own', self.configure(success=False))
 
     def test_invalid_source_combinations(self):
         self.manifest({'bad': self.dependency(path='.', system='Widget')})

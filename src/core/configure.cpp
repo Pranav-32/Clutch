@@ -27,10 +27,37 @@
 #include "core/workspace/lock.hpp"
 #include "toolchains/toolchain.hpp"
 
+#include <iostream>
 #include <stdexcept>
 #include <utility>
 
 namespace clutch {
+/// Inspect resolved source catalogs without publishing a runnable
+/// configuration.
+void list_available_targets(const Options &options) {
+  if (options.update_dependencies && (options.locked || options.offline))
+    throw std::runtime_error("--auto-update-dependencies cannot be combined "
+                             "with --locked or --offline");
+
+  auto project = load_project(options);
+  validate_build_directory(project.root, project.build, false);
+  dependencies::resolve(project, options);
+  prepare_build_directory(project);
+  const auto backend = resolve_backend(options, project);
+  project.generator = backend.name;
+  const auto toolchain = resolve_toolchain(options, project);
+  dependencies::configure_foreign(project, toolchain, backend, options);
+
+  std::cout << "Project targets:\n";
+  if (project.targets.empty())
+    std::cout << "  " << project.name << "  executable\n";
+
+  for (const auto *const group : {&project.targets, &project.tests})
+    for (const auto &target : *group)
+      std::cout << "  " << target.name << "  " << target_type_name(target.type)
+                << (target.is_test ? " (test)" : "") << '\n';
+}
+
 /// Generate rules and metadata without building the project's final artifacts.
 Graph configure(const Options &options, const fs::path &executable) {
   file_api::Session api(options);

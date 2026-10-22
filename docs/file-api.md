@@ -3,6 +3,10 @@
 Audience: IDE integrators and contributors changing code-model output. This protocol
 reference is not required for general contributions.
 
+This protocol describes native `clutch.toml` projects. The
+[CMake project provider](cmake-projects.md#ide-metadata-and-failure-handling)
+retains CMake's original File API and reports its index through `clutch locate`.
+
 For an initial client, use the [runnable example](../examples/file-api/README.md),
 then follow [discovery and requests](#discover-and-request) and
 [snapshot reading](#read-an-immutable-snapshot). For an output change, check the

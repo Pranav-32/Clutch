@@ -12,6 +12,8 @@
  */
 
 #include "make.hpp"
+#include "backends/foreign_actions.hpp"
+#include "core/dependencies/foreign.hpp"
 #include "core/pch/pch.hpp"
 #include "platform/arguments.hpp"
 
@@ -322,6 +324,26 @@ void generate_make(const Graph &graph,
       make << " clutch_target_" << index;
   make << "\n\n";
 
+  if (gnu && !graph.project.foreign_builds.empty())
+    make << ".PHONY: clutch_foreign_force\nclutch_foreign_force:\n\n";
+  for (const auto &action : graph.project.foreign_builds) {
+    const auto stamp = dependencies::foreign_stamp(graph, action.id);
+    const auto command = recipe(
+        foreign_action_command(graph, options, clutch_executable, action.id));
+    if (gnu)
+      make << make_path(stamp, build, true) << ": clutch_foreign_force\n\t"
+           << command << "\n\n";
+    else
+      // NMake has no order-only prerequisites/restat. Run preparation before
+      // timestamp evaluation, preserving unchanged object and link products.
+      make << "!IF [" << command
+           << "] != 0\n!ERROR Native dependency preparation failed\n!ENDIF\n\n";
+
+    for (const auto &artifact : action.artifacts)
+      make << make_path(artifact, build, gnu) << ": "
+           << make_path(stamp, build, gnu) << "\n\n";
+  }
+
   // Import libraries are secondary linker outputs. NMake treats a recipe as
   // an update even when it leaves a file unchanged; depend on the DLL normally
   // and request repair only if the import library is absent at parse time.
@@ -348,6 +370,11 @@ void generate_make(const Graph &graph,
     const auto &name = target.name;
     const auto &output = target.output;
     const auto &units = target.units;
+    const auto foreign_prerequisites = [&] {
+      for (const auto &id : target.foreign_dependencies)
+        make << ' '
+             << make_path(dependencies::foreign_stamp(graph, id), build, gnu);
+    };
     const auto &link = target.link;
     fs::create_directories(output.parent_path());
     const auto copies = runtime_copies(graph, index);
@@ -358,6 +385,17 @@ void generate_make(const Graph &graph,
     }
 
     make << "\n\n";
+    if (target.type == TargetType::Executable &&
+        !target.runtime_libraries.empty()) {
+      // Aggregate target recipes run after their output prerequisites, even
+      // when linking is already current, repairing deleted runtime copies.
+      make << "clutch_target_" << index << ":\n\t"
+           << recipe(foreign_runtime_command(graph,
+                                             options,
+                                             clutch_executable,
+                                             index))
+           << "\n\n";
+    }
     for (const auto &[library, destination] : copies) {
       if (!staged.insert(destination).second)
         continue;
@@ -406,6 +444,7 @@ void generate_make(const Graph &graph,
            << make_path(fs::u8path(creator.arguments.front()), build, gnu);
       if (creator.source != prefix.header)
         make << ' ' << make_path(prefix.header, build, gnu);
+      foreign_prerequisites();
       for (const auto &header : prefix.headers)
         make << " \\\n  " << make_path(header, build, gnu);
       for (const auto &header : headers)
@@ -451,6 +490,7 @@ void generate_make(const Graph &graph,
            << make_path(response_path, build, gnu);
       if (const auto *const prefix = pch::for_unit(target, unit))
         make << ' ' << make_path(prefix->creator.object, build, gnu);
+      foreign_prerequisites();
 
       for (const auto &header : headers)
         make << " \\\n  " << make_path(header, build, gnu);
@@ -474,6 +514,7 @@ void generate_make(const Graph &graph,
                    });
     make << make_path(output, build, gnu) << ": "
          << make_path(response_path, build, gnu);
+    foreign_prerequisites();
     for (const auto &input : target.link_inputs)
       make << " \\\n  " << make_path(input, build, gnu);
 
@@ -559,6 +600,16 @@ make_build_command(const Graph &graph,
     validate_gnu_make(graph.backend.executable, graph.project.root);
 
   std::vector arguments{graph.backend.executable};
+  if (options.clean_build) {
+    if (gnu)
+      // The saved graph has already validated its configuration inputs. Force
+      // products without remaking the loaded Makefile and republishing IDE
+      // data.
+      arguments.insert(arguments.end(),
+                       {"--always-make", "--assume-old=Makefile"});
+    else
+      arguments.emplace_back("/A");
+  }
 
   if (gnu)
     arguments.insert(arguments.end(),

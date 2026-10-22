@@ -26,6 +26,8 @@ struct Toolchain {
       false;  ///< Selects Microsoft-style flags, including clang-cl drivers.
   std::string c_pch{},
       cpp_pch{};  ///< Compiler identity for opt-in PCH generation.
+  // Target ABI is independent of command syntax: clang++ can target MSVC.
+  bool microsoft_abi = false;
 };
 
 /// Resolve C/C++ compiler drivers and verify compatible driver conventions.

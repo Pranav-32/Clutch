@@ -30,6 +30,11 @@ void generate_xcode(const Graph &graph,
                     const Options &options,
                     const fs::path &clutch_executable);
 
+/// Remove selected products and controlled target intermediates, retaining the
+/// profile's project/configuration/API files and unrelated targets.
+void clean_xcode_targets(const Graph &graph,
+                         const std::vector<size_t> &target_indices);
+
 /// Build exactly the selected graph targets using the configured xcodebuild.
 /// Test targets are standalone executables; Clutch runs them after building.
 std::vector<std::string>

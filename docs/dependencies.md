@@ -25,8 +25,9 @@ Within `src/core/dependencies/`, start with the module matching your change:
 | Module | Responsibility |
 | --- | --- |
 | `manifest.*` | Read dependency fields, validate combinations and resolve declaration-relative paths |
-| `sources.*`, `git.*`, `vcpkg.*` | Locate live sources, fetch exact Git revisions and interpret catalog entries |
+| `sources.*`, `git.*`, `git_submodules.*`, `vcpkg.*` | Locate live sources, fetch exact Git revisions and nested gitlinks, and interpret catalog entries |
 | `version.*`, `resolve.*` | Compare versions, resolve transitive requirements and reject conflicts/cycles |
+| `updates.*` | Compare a proposed compatible resolution with current pins without publishing it |
 | `cmake.*`, `make.*`, `system.*` | Obtain external library interfaces from native metadata or explicit declarations |
 | `foreign.*`, `interface.hpp` | Apply evaluated interfaces and schedule reachable foreign build actions |
 
@@ -169,6 +170,26 @@ cmake_options = { FMT_TEST = "OFF", FMT_DOC = "OFF" }
 Use `targets = ["Vendor::Core", "Vendor::Extras"]` instead of `target` when you
 need several CMake libraries from the same import. Do not set both fields.
 
+You can omit both fields when the dependency exposes exactly one library.
+If several libraries are available, choose the ones your application needs.
+For example, JUCE provides separate module targets such as
+`juce::juce_gui_basics`; selecting that module also brings in its native
+dependencies. Clutch does not link every library in the repository automatically.
+
+To discover choices before configuring, run:
+
+```sh
+clutch . --targets
+```
+
+This lists project targets and CMake library names/types, including interface
+libraries. It may fetch dependencies and run their native configuration, but
+does not build application artifacts, update `clutch.lock`, or replace the
+saved Clutch build graph. Discovery metadata is kept in the profile directory.
+CMake aliases cannot be enumerated through its directory properties, so the
+list shows their underlying target names; documented aliases remain valid
+selectors. Use `clutch targets` to inspect an already configured Clutch graph.
+
 CMake 3.21+ configures the library under `<build>/.clutch/foreign/`. Clutch
 supplies the selected compilers, profile and Microsoft runtime policy. Ninja
 is preferred for this foreign build when available, independently of your main
@@ -181,6 +202,12 @@ Private upstream settings stay with the library. An upstream public language
 requirement can raise the consumer's C/C++ standard. When CMake exports a
 compilation database, its real source records are merged into Clutch's build-local
 database with their original working directories and private flags.
+
+Some interface libraries also publish implementation files through
+`INTERFACE_SOURCES`. Clutch builds these in a CMake-owned static archive and
+links it into the consumer; it does not guess implementation files from header
+names. Dependency `defines` apply to that archive and its Clutch consumers.
+Ordinary upstream library targets retain their own private definitions.
 
 Use `clutch build`, `clutch run` or `clutch test` to build these projects.
 Clutch first builds reachable foreign libraries, then invokes its native
@@ -223,6 +250,13 @@ must support this layout and quote/escape paths containing spaces.
 Clutch does not infer interfaces with `make -n`. An in-source-only Makefile
 needs an upstream wrapper or out-of-source rules. Try the
 [Make example](../examples/dependencies/makefile/clutch.toml) on a POSIX host.
+
+If a C application consumes a C++ Make library, declare `link_language = "cpp"`
+on that dependency. The application still compiles as C; its final link uses
+the C++ driver so the standard library is available. The same field works for
+explicit installed libraries. Omit it for C libraries or when the consumer's
+own C++ sources already select that driver. CMake determines the requirement
+from its target metadata and does not accept this override.
 
 ### Native Clutch libraries
 
@@ -339,7 +373,7 @@ entries must also be nonempty. CMake option values may be empty strings.
 | --- | --- |
 | `path` / string | Source directory read in place, relative to the declaring manifest or absolute. Must exist. Select exactly one of `path`, `git`, `system`, `vcpkg`. |
 | `git` / string | Remote Git URL or existing local repository path. Relative paths use the declaring manifest. Clutch downloads only the selected revisions into its local cache. |
-| `system` / string | Installed-package identity. With `target`/`targets`, also the default CMake discovery name. Without targets, labels the explicitly declared headers/libraries. |
+| `system` / string | Installed-package identity and default CMake discovery name. With explicit `include_dirs`/`libraries` and no discovery fields, labels that interface instead. |
 | `vcpkg` / string | Port name in the limited pinned source catalog. Requires `baseline`; does not require the vcpkg executable. |
 | `tag` / string | Exact Git tag, such as `"v1.2.3"`. Only for `git`; mutually exclusive with `branch` and `rev`. |
 | `branch` / string | Git branch. First resolution pins its current commit; normal configure keeps that pin. Only for `git`. |
@@ -350,15 +384,16 @@ entries must also be nonempty. CMake option values may be empty strings.
 
 | Field / type | Meaning, default and valid use |
 | --- | --- |
-| `build_system` / string | How source libraries are interpreted: `"auto"` (default), `"clutch"`, `"header-only"`, `"cmake"` or `"make"`. Installed packages accept `auto`/`cmake`; presence of imported targets selects discovery. |
-| `target` / string | Selected native library, CMake library target or Make goal. A native import defaults to its only exported library; otherwise select one. CMake imports require `target` or `targets`. Make uses its default goal when neither is set. |
+| `build_system` / string | How source libraries are interpreted: `"auto"` (default), `"clutch"`, `"header-only"`, `"cmake"` or `"make"`. Installed packages accept `auto`/`cmake`; target/package discovery fields select CMake, while explicit headers/libraries alone select a direct system interface. |
+| `target` / string | Selected native library, CMake library target or Make goal. Native and CMake imports default to their only exported library; select explicitly when several exist. Use `clutch . --targets` to discover CMake choices. Make uses its default goal when neither selector is set. |
 | `targets` / string array | Several CMake library targets or Make goals. Alternative to `target`, not an additional list. Native Clutch imports select one library with `target`; use explicit alias-qualified links for others. |
 | `include_dirs` / string array | Public header search folders. Source-relative for Git/path imports; SDK-prefix/manifest-relative for system imports. Header-only imports default to `include/` if present, otherwise the source root; an explicit list overrides that default. For Make, `{build}` can refer to generated headers. |
-| `defines` / string array | Extra definitions passed to consumers, without `-D` or `/D`; for example `["VENDOR_STATIC", "VENDOR_LEVEL=2"]`. Default: none. |
+| `defines` / string array | Extra definitions passed to consumers and CMake interface-source compilation, without `-D` or `/D`; for example `["VENDOR_STATIC", "VENDOR_LEVEL=2"]`. Does not alter ordinary upstream library targets. Default: none. |
 | `pch` / string array or table | Headers force-included and precompiled for consumers. An array selects C++; `{ c = ["prefix.h"], cpp = ["prefix.hpp"] }` separates languages. Paths use the source or SDK prefix. Default: no PCH. See [precompiled headers](manifest.md#precompiled-headers). |
 | `libraries` / string array | For Make: output file paths relative to its isolated build directory. For explicit system imports: existing library paths or bare linker names. Not a general extra-link-flags field. |
 | `runtime` / string array | Extra runtime DLL files to stage on Windows. Make paths are build-relative; other paths use the source directory or installed SDK prefix. Default: only runtime files supplied by imported target metadata. |
 | `build_arguments` / string array | Extra Make arguments, each a separate argument. `{source}`/`{build}` expand to absolute directories. Default: none; Make only. |
+| `link_language` / string | `"cpp"` requires a C++ link driver; `"c"` adds no C++ requirement. Optional for Make and explicit system interfaces, which cannot infer this from target metadata. Does not change source compilation language or force a C driver when other linked libraries require C++. Rejected for CMake/native/header-only imports. |
 
 ### Discovery and catalog fields
 
@@ -476,7 +511,29 @@ clutch .                           # Resolve missing imports; retain compatible 
 clutch . --locked                  # Require unchanged resolution
 clutch . --locked --offline        # Also require already-cached Git sources
 clutch . --auto-update-dependencies # Deliberately refresh eligible imports
+clutch outdated                    # Inspect compatible updates without changing pins
+clutch . --check-updates            # Configure normally, then report available updates
 ```
+
+`outdated` requires an existing `clutch.lock` when dependencies are declared;
+configure the project first. It uses the same transitive constraint solver as an
+update, rather than listing incompatible latest versions independently. Its
+report includes changed revisions and dependencies added or removed by the
+proposal. Exact tags/revisions and pinned catalog baselines remain fixed.
+
+Update checks can fetch candidate sources into `.clutch/` to read their manifests.
+They preserve the lock and saved graph, and do not run foreign configuration or
+compile code. Normal configuration remains free of automatic update queries.
+`--check-updates` is an explicit network check and cannot be combined with
+`--offline`, `--auto-update-dependencies` or `--targets`; it can accompany
+`--locked` because the proposal is not published. `outdated` accepts `--project`
+and `--release` without requiring an existing build directory. A successful
+report exits with zero even when updates are available; resolution/network
+failures return an error. A report does not prove the new version compiles with
+your application. Apply changes with `clutch . --auto-update-dependencies`, then
+build and test them.
+When an after-configuration update check fails, the completed configuration remains
+usable and the command returns an error for the failed check.
 
 `--auto-update-dependencies` refreshes branches and imports without an exact
 tag/revision, within their constraints. Exact tags and commits remain pinned;
@@ -496,10 +553,90 @@ a library. A project-local writer lock protects publication; if an interrupted
 operation leaves a lock directory, inspect it and confirm no writer is active
 before removing it.
 
+Git checks out directly into its final revision directory. A private
+`<revision>.pending.toml` record identifies an unfinished checkout; Clutch verifies
+its origin, commit and clean state before atomically publishing `resolution.toml`.
+The source directory is never moved, so a Windows reader holding a source file
+open does not block completion. Existing cache locations and locks remain valid.
+
+Configuration can finish a verified interrupted checkout offline. If an owned
+checkout is incomplete, ordinary configuration can discard and fetch that revision
+again; offline configuration preserves it and reports the problem. Incomplete
+directories without matching ownership records are preserved for inspection.
+Old `.clutch/download` leftovers are ignored and preserved; they no longer block
+new dependency fetches. Inspect retained files before removing them manually.
+
 Local source paths remain live, and installed libraries remain machine-local;
 the lock does not freeze their contents. Local Git repository origins are stored
 as absolute, machine-specific paths. Prefer remote URLs for a shared project's
 Git dependencies. See the [lock format](lock-files.md) for recorded fields.
+
+### Repositories with submodules
+
+Git imports automatically initialize nested submodules at the exact commits
+recorded by the selected repository. No extra manifest field is required:
+
+```toml
+[dependencies.vendor]
+git = "https://github.com/your-organization/your-library.git"
+tag = "v1.2.3"
+build_system = "cmake"
+target = "Vendor::Library"
+```
+
+Replace the example coordinates and target with the library's own values.
+Relative submodule URLs resolve against the parent repository's origin.
+Submodule branch settings never select a newer commit: updating the parent
+dependency selects its new recorded gitlinks. The parent lock commit therefore
+pins the nested source revisions without additional top-level package records.
+
+`--offline` requires initialized, unchanged submodule worktrees in the cache.
+Missing modules produce an error without starting a clone or fetch. Configure
+online to initialize absent modules; modified worktrees and unexpected files
+are preserved for inspection. A fully verified interrupted checkout can finish
+publication offline. Traversal is bounded to 64 nested levels and 4,096 modules.
+Git's normal transport and credential policies still apply, including restrictions
+on local file transport. On Windows, Clutch enables Git's long-path handling for
+its child processes without editing global Git configuration.
+
+Source bundles include checked-out submodule files and omit their Git metadata.
+The extracted snapshot uses local source imports, so rebuilding it offline does
+not require cloning the original repositories.
+
+## Contributing a foreign adapter
+
+Start with `NativeInterface` in `src/core/dependencies/interface.hpp`. An adapter
+must separate the library's evaluated public interface from its native build:
+
+- Keep include paths, definitions and options language-specific where the
+  upstream metadata requires it. Report the final link language independently
+  of the consumer's source language.
+- Retain absolute physical public-header roots for preparation stamps, including
+  generated include directories. Do not add a C-only include to C++ flags merely
+  to make its path observable.
+- Return argument arrays, an absolute working directory, complete generated
+  link artifacts, and a forced-build action. The upstream executor owns source
+  selection, generated files and its internal dependency graph.
+- Record configuration inputs and discovered runtime files. Installed packages
+  without a build action still need an accurate public interface.
+- Test fresh and incremental direct native builds, changed public headers,
+  native failure propagation, selected targets, clean builds and runtime repair.
+
+Generated Ninja and GNU Make graphs prepare reachable foreign actions before
+consumer compilation. MSBuild shares action targets across consuming projects;
+Xcode uses aggregate target dependencies and tracked imported libraries.
+NMake/JOM prepare configured foreign actions while reading the Makefile because
+they lack order-only/restat semantics. Direct action callbacks use one upstream
+job per outer executor slot; `clutch build` first prepares reachable dependencies
+with the CLI's selected job budget. Runtime staging also runs for direct Windows
+builds, including when no relink is needed.
+
+Preparation stamps record interface membership, sizes and native timestamps;
+they are not content hashes or remote caches. Public-interface scans are bounded
+to 100,000 entries per action. Native preparation callbacks serialize upstream
+operations within a profile and wait at most five minutes for its writer lock.
+After an interrupted operation, confirm no writer is active before removing a
+stale lock. Reconfigure once when upgrading a checkout's private saved format.
 
 ## Troubleshooting and current limits
 
@@ -511,7 +648,8 @@ Git dependencies. See the [lock format](lock-files.md) for recorded fields.
 | Make produces no declared library | Check its goal, out-of-source support and build-relative `libraries` paths. |
 | Dependency conflict or cycle | Follow the diagnostic's requester chain; align constraints or remove the circular import. |
 | Lock/cache check fails | Review manifest/lock changes and cached checkout state. Use normal configuration to fetch missing sources, or restore the required offline cache. |
+| Git completion record cannot be published | Verified source files are retained. Check the record's permissions/open handles and configure again; a complete retained checkout can also finish offline. |
 
-Automatic update notifications, Git submodules, general Bazel/Blaze adapters,
+Background update notifications, general Bazel/Blaze adapters,
 arbitrary vcpkg recipes and multiple simultaneous versions of one repository
 are not implemented. Unsupported adapters fail explicitly.

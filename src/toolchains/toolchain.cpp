@@ -129,6 +129,25 @@ Toolchain resolve_toolchain(const Options &options, const Project &project) {
     throw std::runtime_error(
         "C and C++ compilers must use the same driver family");
 
+  tools.microsoft_abi = tools.msvc;
+#ifdef _WIN32
+  // GNU-style Clang supports both MinGW and MSVC targets. Query the driver
+  // rather than assuming its ABI from its filename or the host operating
+  // system.
+  if (!tools.msvc) {
+    const auto uses_microsoft_abi = [&](const std::string &compiler) {
+      if (const auto output = capture({compiler, "-dumpmachine"}, project.root);
+          output.status == 0)
+        return output.text.find("-windows-msvc") != std::string::npos;
+
+      throw std::runtime_error("cannot determine compiler target: " + compiler);
+    };
+    tools.microsoft_abi = uses_microsoft_abi(cpp ? tools.cxx : tools.cc);
+    if (c && cpp && uses_microsoft_abi(tools.cc) != tools.microsoft_abi)
+      throw std::runtime_error("C and C++ compilers must target the same ABI");
+  }
+#endif
+
   if (cpp && tools.msvc && project.cxx_standard == "11")
     throw std::runtime_error("MSVC-style drivers require C++ std 14 or newer");
 
