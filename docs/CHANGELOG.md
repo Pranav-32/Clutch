@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Pranav-32/Clutch/compare/v0.4.0-beta.1...v0.4.0) (2026-10-22)
+
+
+### Features
+
+* add CMake project workflows and harden dependency builds ([#15](https://github.com/Pranav-32/Clutch/issues/15)) ([54d2619](https://github.com/Pranav-32/Clutch/commit/54d2619dd7c4e0a0b07a1ab1071c920a1079ba78))
+
 ## [0.4.0-beta.1](https://github.com/Pranav-32/Clutch/compare/v0.3.2...v0.4.0-beta.1) (2026-10-20)
 
 
