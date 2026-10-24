@@ -23,6 +23,11 @@ namespace clutch {
 struct Graph;
 struct Options;
 
+/// Reject executors lacking the GNU Make features and timestamp precision used
+/// by generated rules. Also used before automatic generator selection.
+void validate_gnu_make(const std::string &executable,
+                       const fs::path &directory);
+
 /// Write Makefile rules and compiler response files without compiling sources.
 void generate_make(const Graph &graph,
                    const Options &options,

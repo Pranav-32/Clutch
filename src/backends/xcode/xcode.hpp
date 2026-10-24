@@ -22,6 +22,10 @@
 namespace clutch {
 struct Graph;
 struct Options;
+struct Toolchain;
+
+/// Check that Xcode can honor the selected compiler identities.
+void validate_xcode_toolchain(const Toolchain &toolchain);
 
 /// Write a native command-line-tool project and shared schemes for the active
 /// profile. Xcode requires Apple's Clang drivers and a full macOS Xcode

@@ -145,6 +145,12 @@ else ()
     find_program(CLUTCH_API_CC NAMES cc clang gcc)
 endif ()
 if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    # Exercise omitted settings with real native tools and isolated availability.
+    add_test(NAME clutch.defaults
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/defaults_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.defaults PROPERTIES TIMEOUT 240)
     # Python independently checks ZIP headers/CRCs and rebuilds relocated sources.
     add_test(NAME clutch.bundle
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/bundle_integration.py"

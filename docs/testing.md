@@ -89,7 +89,8 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.files` | Generated-file content/timestamps, directory-output rejection, and artifact cleanup containment, preflight, redirection and metadata preservation |
 | `clutch.zip` | Archive path traversal, Windows device names, invalid UTF-8, case/hierarchy collisions, member bounds and existing-output preservation |
 | `clutch.bundle` | Independent ZIP/CRC parsing, repeatable bytes, Unicode/binary files, exclusions, workspace relocation and offline Git/local/CMake dependency snapshots; includes 256 files and a one-MiB binary fixture |
-| `clutch.source-files` | Recursive source matching, brace products, canonical paths, exclusions and invalid patterns without a compiler |
+| `clutch.source-files` | Local/recursive source matching, language-filtered discovery, brace products, canonical paths, nested-project/generated-tree exclusions and invalid patterns without a compiler |
+| `clutch.defaults` | Automatic generator/executor selection and fallback, cached choices, explicit override errors, manifest-relative glob depth, and real C/C++/mixed discovery with noncompiled IDE headers |
 | `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary and oversized-output rejection |
 | `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
 | `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |

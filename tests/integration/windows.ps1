@@ -453,6 +453,7 @@ name = "policy"
 version = "0.1.0"
 language = "cpp"
 std = 17
+entry = "src/main.cpp"
 
 [profile.debug]
 warnings = "$warnings"

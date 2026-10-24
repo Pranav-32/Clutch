@@ -43,9 +43,8 @@ void list_available_targets(const Options &options) {
   validate_build_directory(project.root, project.build, false);
   dependencies::resolve(project, options);
   prepare_build_directory(project);
-  const auto backend = resolve_backend(options, project);
+  const auto [backend, toolchain] = resolve_build_tools(options, project);
   project.generator = backend.name;
-  const auto toolchain = resolve_toolchain(options, project);
   dependencies::configure_foreign(project, toolchain, backend, options);
 
   std::cout << "Project targets:\n";
@@ -78,9 +77,8 @@ Graph configure(const Options &options, const fs::path &executable) {
     api.begin(project.build);
 
     // Normalize the generator before choosing its compatible compiler defaults.
-    const auto backend = resolve_backend(options, project);
+    auto [backend, toolchain] = resolve_build_tools(options, project);
     project.generator = backend.name;
-    auto toolchain = resolve_toolchain(options, project);
     dependencies::configure_foreign(project, toolchain, backend, options);
     resolve_pch_drivers(toolchain, project);
 

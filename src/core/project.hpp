@@ -32,13 +32,13 @@ struct WorkspaceProject {
 };
 
 /// Validated manifest settings with canonical inputs and an absolute output
-/// root. Defaults define C11/C++17, Ninja and extra warnings before profile
-/// overrides.
+/// root. Defaults define C11/C++17, automatic generation and extra warnings
+/// before profile overrides.
 struct Project {
   // Physical manifest root, active profile directory and application output.
   fs::path root, build, output;
   std::string name, cxx_standard = "17", c_standard = "11";
-  std::string language = "auto", generator = "ninja";
+  std::string language = "auto", generator;
   std::string optimize, warnings = "extra";
   std::string runtime = "static";
   // Inputs are resolved before generation; headers are found through includes.

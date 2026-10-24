@@ -32,7 +32,8 @@ single-configuration generators, or `build/Release/clutch.exe` with Visual Studi
 Add its directory to `PATH`.
 
 Your projects also need a C/C++ compiler and the selected native build tool;
-Ninja is the default. See [installation](docs/installation.md) for platform setup,
+Clutch selects an available compatible generator when omitted, preferring Ninja.
+See [installation](docs/installation.md) for platform setup,
 compiler environments and installation prefixes. Published downloads are listed
 on [GitHub Releases](https://github.com/Pranav-32/Clutch/releases).
 
@@ -89,8 +90,11 @@ optimize = "speed"
 warnings = "extra"
 ```
 
-Add source files to the array for a multi-file executable, or omit it to discover
-sources under `src/`. Choose compilers during configuration with
+Add source files to the array for a multi-file executable, or omit both sources
+and entry to discover files recursively from the manifest directory, filtered by
+the project's language. Omit `generator` to select an available compatible build
+tool automatically. `*.cpp` selects files beside the manifest; `**.cpp` includes
+subdirectories. Choose compilers during configuration with
 `clutch . --cc clang --cxx clang++`. Run `clutch generators` for generator choices
 and `clutch --help` for commands. Use `clutch . --targets` to discover project
 and CMake dependency library targets before selecting an import.

@@ -98,22 +98,28 @@ bool contains(const fs::path &parent, const fs::path &child) {
 }
 
 /// Ignore repository metadata and recognized Clutch/CMake output trees.
-bool excluded(const fs::path &directory, const fs::path &build) {
+bool excluded(const fs::path &directory,
+              const fs::path &build,
+              const bool project_boundaries) {
   const auto name = directory.filename();
   return contains(build, directory) || name == ".git" ||
          name == layout::environment ||
          fs::exists(directory / layout::owner_marker) ||
-         fs::exists(directory / "CMakeCache.txt");
+         fs::exists(directory / "CMakeCache.txt") ||
+         (project_boundaries && fs::exists(directory / layout::manifest));
 }
-}  // namespace
 
-SourceSelection expand_sources(const fs::path &root,
+/// Share bounded traversal and canonical deduplication between explicit
+/// patterns and implicit discovery, while keeping nested-project policy
+/// explicit.
+SourceSelection select_sources(const fs::path &root,
                                const std::vector<std::string> &patterns,
                                const fs::path &build,
-                               const bool require_matches) {
+                               const bool require_matches,
+                               const bool project_boundaries) {
   std::set<fs::path> compiled, additional;
   std::set<fs::path> appended;
-  std::map<fs::path, std::vector<fs::path>> directory_files;
+  std::map<std::pair<fs::path, bool>, std::vector<fs::path>> directory_files;
   size_t scanned = 0;
   const auto append = [&](const fs::path &path) {
     if (!appended.insert(path).second)
@@ -146,6 +152,8 @@ SourceSelection expand_sources(const fs::path &root,
       }
 
       auto folder = path.parent_path();
+      const bool recursive =
+          folder.filename() == "**" || filename.find("**") != std::string::npos;
       if (folder.filename() == "**")
         folder = folder.parent_path();
       if (folder.u8string().find_first_of("*?{}") != std::string::npos)
@@ -157,22 +165,26 @@ SourceSelection expand_sources(const fs::path &root,
       folder = fs::absolute(folder).lexically_normal();
       if (fs::canonical(folder) != folder)
         continue;
-      if (excluded(folder, build))
+      // The manifest root itself is a valid scan origin. Only descendants
+      // introduce another project's ownership boundary.
+      if (excluded(folder, build, project_boundaries && folder != root))
         continue;
 
       // Brace alternatives and overlapping selections share one traversal.
       // Count inspected entries rather than charging each filename filter for
       // the same filesystem work. Keep this cache local to configuration so a
       // later configure still discovers added/removed files.
-      if (!directory_files.count(folder)) {
-        auto &files = directory_files[folder];
+      const auto scan = std::pair{folder, recursive};
+      if (!directory_files.count(scan)) {
+        auto &files = directory_files[scan];
         for (auto it = fs::recursive_directory_iterator(folder);
              it != fs::recursive_directory_iterator();
              ++it) {
           // Do not follow directory links or Windows junction redirects.
           if (it->is_directory()) {
-            if (it->is_symlink() || fs::canonical(it->path()) != it->path() ||
-                excluded(it->path(), build))
+            if (!recursive || it->is_symlink() ||
+                fs::canonical(it->path()) != it->path() ||
+                excluded(it->path(), build, project_boundaries))
               it.disable_recursion_pending();
             continue;
           }
@@ -183,7 +195,7 @@ SourceSelection expand_sources(const fs::path &root,
             files.push_back(it->path());
         }
       }
-      for (const auto &file : directory_files.at(folder))
+      for (const auto &file : directory_files.at(scan))
         if (matches(filename, file.filename().u8string())) {
           append(file);
           found = true;
@@ -194,5 +206,33 @@ SourceSelection expand_sources(const fs::path &root,
   }
   return {{compiled.begin(), compiled.end()},
           {additional.begin(), additional.end()}};
+}
+}  // namespace
+
+SourceSelection expand_sources(const fs::path &root,
+                               const std::vector<std::string> &patterns,
+                               const fs::path &build,
+                               const bool require_matches) {
+  return select_sources(root, patterns, build, require_matches, false);
+}
+
+SourceSelection discover_sources(const fs::path &root,
+                                 const std::string &language,
+                                 const fs::path &build) {
+  // Headers are project files, never translation units. Uppercase .H is shared
+  // by both languages; source suffixes retain their documented exact spelling.
+  std::vector<std::string> patterns;
+  for (const auto *const suffix : source_extensions) {
+    const bool c = std::string_view(suffix) == ".c";
+    if ((language != "cpp" || !c) && (language != "c" || c))
+      patterns.push_back(std::string("**") + suffix);
+  }
+
+  for (const auto *const suffix : header_extensions)
+    if (language != "c" || std::string_view(suffix) == ".h" ||
+        std::string_view(suffix) == ".H")
+      patterns.push_back(std::string("**") + suffix);
+
+  return select_sources(root, patterns, build, false, true);
 }
 }  // namespace clutch

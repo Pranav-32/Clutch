@@ -21,6 +21,7 @@
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
+#include "platform/capture.hpp"
 #include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
@@ -32,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace clutch {
@@ -181,6 +183,32 @@ const BackendDriver &driver_for(const std::string &name) {
   throw std::runtime_error("unsupported build generator: " + name +
                            "; implemented generators: " + available);
 }
+
+/// Verify the executor understands the features emitted by its generator.
+void validate_executor(const std::string &name,
+                       const std::string &executable,
+                       const fs::path &root) {
+  if (name == "make") {
+    validate_gnu_make(executable, root);
+  } else if (name == "ninja") {
+    constexpr auto minimum_major = 1U, minimum_minor = 10U;
+    const auto result = capture({executable, "--version"}, root);
+    std::istringstream version(result.text);
+    unsigned major = 0, minor = 0;
+    char separator = '\0';
+    version >> major >> separator >> minor;
+    if (result.status || !version || separator != '.' ||
+        major < minimum_major ||
+        (major == minimum_major && minor < minimum_minor))
+      throw std::runtime_error(
+          "the Ninja generator requires Ninja 1.10 or newer");
+  } else if (name == "xcode") {
+    if (const auto result = capture({executable, "-version"}, root);
+        result.status)
+      throw std::runtime_error(
+          "xcodebuild requires an active full Xcode installation");
+  }
+}
 }  // namespace
 
 /// Map accepted display-name aliases onto stable Clutch generator identifiers.
@@ -265,31 +293,123 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
       requested.empty() && fs::exists(cache_path)) {
     if (const auto cache = toml::parse_file(cache_path.u8string());
         cache["name"].value_or(std::string{}) == driver.name)
-      requested = cache["executable"].value_or(std::string{});
+      if (const auto executable =
+              find_program(cache["executable"].value_or(std::string{}));
+          !executable.empty())
+        requested = executable;
   }
 
   if (!requested.empty()) {
-    if (const auto executable = find_program(requested); !executable.empty())
+    if (const auto executable = find_program(requested); !executable.empty()) {
+      validate_executor(driver.name, executable, project.root);
       return {driver.name, executable};
+    }
 
     throw std::runtime_error("cannot find build generator executable: " +
                              requested + "; use --build-tool when configuring");
   }
 
   // Search ordinary executable names before optional IDE-bundled installations.
+  std::string failures;
   for (const auto *const candidate : driver.executable_names) {
-    if (const auto executable = find_program(candidate); !executable.empty())
-      return {driver.name, executable};
+    if (const auto executable = find_program(candidate); !executable.empty()) {
+      try {
+        validate_executor(driver.name, executable, project.root);
+        return {driver.name, executable};
+      } catch (const std::runtime_error &error) {
+        failures += "\n  " + executable + ": " + error.what();
+      }
+    }
   }
 
   if (driver.discover) {
-    if (const auto executable = driver.discover(); !executable.empty())
+    if (const auto executable = driver.discover(); !executable.empty()) {
+      validate_executor(driver.name, executable, project.root);
       return {driver.name, executable};
+    }
   }
 
   throw std::runtime_error(
       "selected build generator was not found: " + driver.name +
-      "; install it or set --build-tool when configuring");
+      "; install it or set --build-tool when configuring" + failures);
+}
+
+BuildTools resolve_build_tools(const Options &options, const Project &project) {
+  // Resolve compilers against a concrete format before accepting it. In
+  // particular, MSBuild cannot honor GNU drivers and Xcode cannot honor GCC.
+  const auto resolve = [&](const std::string &name) {
+    auto selected = project;
+    selected.generator = name;
+    auto backend = resolve_backend(options, selected);
+    auto toolchain = resolve_toolchain(options, selected);
+    if (backend.name == "visual-studio" && !toolchain.msvc)
+      throw std::runtime_error(
+          "the Visual Studio backend requires an MSVC compiler");
+
+    if (backend.name == "xcode")
+      validate_xcode_toolchain(toolchain);
+
+    return BuildTools{std::move(backend), std::move(toolchain)};
+  };
+  if (!project.generator.empty())
+    return resolve(project.generator);
+
+  // An explicit executor is never tried against arbitrary output formats.
+  // Standard executable names identify their family; wrappers need a generator.
+  auto requested = options.build_tool_executable;
+  if (const auto value = environment_value("CLUTCH_BUILD_TOOL");
+      requested.empty() && value)
+    requested = *value;
+
+  if (!requested.empty()) {
+    auto name = fs::u8path(requested).filename().u8string();
+    std::transform(name.begin(),
+                   name.end(),
+                   name.begin(),
+                   [](const unsigned char c) {
+                     return static_cast<char>(std::tolower(c));
+                   });
+    if (fs::u8path(name).extension() == ".exe")
+      name = fs::u8path(name).stem().u8string();
+
+    for (const auto &driver : drivers())
+      if (std::find(driver.executable_names.begin(),
+                    driver.executable_names.end(),
+                    name) != driver.executable_names.end())
+        return resolve(driver.name);
+
+    throw std::runtime_error(
+        "cannot infer generator from build tool: " + requested +
+        "; specify --generator for a custom executor");
+  }
+
+  std::vector<std::string> candidates;
+  if (const auto cache_path = project.build / layout::backend_cache;
+      fs::exists(cache_path)) {
+    const auto cache = toml::parse_file(cache_path.u8string());
+    candidates.push_back(cache["name"].value_or(std::string{}));
+  }
+  for (const auto &driver : drivers())
+    if (supports(driver.host) &&
+        std::find(candidates.begin(), candidates.end(), driver.name) ==
+            candidates.end())
+      candidates.push_back(driver.name);
+
+  std::string failures;
+  for (const auto &name : candidates) {
+    if (name.empty())
+      continue;
+
+    try {
+      return resolve(name);
+    } catch (const std::runtime_error &error) {
+      failures += "\n  " + name + ": " + error.what();
+    }
+  }
+  throw std::runtime_error(
+      "no available compatible build generator; install a supported "
+      "executor or select --generator and --build-tool" +
+      failures);
 }
 
 /// Cache the selected format/executor for subsequent explicit configurations.

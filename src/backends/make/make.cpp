@@ -38,7 +38,6 @@
 #include <stdexcept>
 
 namespace clutch {
-namespace {
 /// Older GNU Make versions truncate prerequisite timestamps to whole seconds.
 /// Refuse those executors rather than silently reusing stale archives or PCH.
 void validate_gnu_make(const std::string &executable,
@@ -55,6 +54,8 @@ void validate_gnu_make(const std::string &executable,
         "the Make generator requires GNU Make 4 or newer; configure with "
         "--build-tool gmake or select Ninja");
 }
+
+namespace {
 
 /// Removing a generated result is safe only at its physical, owned location.
 void invalidate_output(const fs::path &output) {

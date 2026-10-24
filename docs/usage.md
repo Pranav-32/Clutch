@@ -54,7 +54,10 @@ downloaded sources, lock files and IDE query/reply metadata are retained.
 likewise runs tests only after a successful build. The separate `clutch clean`
 command removes the owned profile directory, requiring configuration afterward.
 
-Source arrays accept recursive patterns such as `sources = ["src/*.{cpp,c,h}"]`.
+Source arrays accept patterns such as `sources = ["src/**.{cpp,c,h}"]`.
+`*.cpp` selects files directly beside the manifest; `**.cpp` selects recursively.
+Omitting both sources and entry discovers language-appropriate C/C++ files and
+headers recursively from that manifest, stopping at nested Clutch manifests.
 Use the same syntax for library and test targets. Matched headers are IDE files;
 only C/C++ source extensions are compiled. See [source selection](manifest.md#sources-and-headers)
 for matching rules and generated-directory exclusions.
@@ -96,6 +99,17 @@ selections, then discovery. `--generator` overrides `[build].generator`.
 executable name/path, not a shell command or argument string. The equivalent
 generic environment override is `CLUTCH_BUILD_TOOL`; backend-specific fallbacks
 are `NINJA`, `MAKE`, `NMAKE`, `JOM`, `MSBUILD`, and `XCODEBUILD`.
+
+When neither generator nor generic build-tool override is supplied, Clutch first
+tries the profile's cached generator, then Ninja, GNU Make, NMake, JOM, Visual
+Studio and Xcode, skipping unsupported hosts, absent/old executors and incompatible
+compiler choices. Ninja requires 1.10+, GNU Make requires 4+, Visual Studio needs
+MSVC-style drivers, and Xcode needs Apple Clang and an active full installation.
+The selected pair is saved for subsequent builds. Explicit generator/tool choices
+fail if unusable rather than silently changing formats. Without a generator,
+`--build-tool` or `CLUTCH_BUILD_TOOL` can identify a standard executor by name
+(for example `ninja`, `gmake`, `nmake`, `MSBuild.exe`); custom wrapper names require
+`--generator` too. A stale missing cached executable is rediscovered.
 
 On Windows, Ninja discovery also checks the active Visual Studio installation,
 bundles beside CMake on `PATH`, and standard Visual Studio/CLion installation
@@ -148,7 +162,7 @@ std = 20                # Integer or quoted language-standard version
 
 [build]
 generator = "ninja"     # Native build-file format/backend
-# Optional: otherwise discover .c/.cc/.cpp/.cxx recursively under src/.
+# Optional: without sources or entry, discover recursively from this manifest.
 sources = ["src/main.cpp"]
 include_dirs = ["headers"]
 defines = ["APP_VERSION=1"]

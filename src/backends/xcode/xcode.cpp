@@ -199,11 +199,7 @@ bool apple_clang(const std::string &compiler) {
 
 /// Refuse compiler substitutions that native Xcode targets cannot honor.
 void validate_toolchain(const Graph &graph) {
-  if (graph.toolchain.msvc || !apple_clang(graph.toolchain.cc) ||
-      !apple_clang(graph.toolchain.cxx))
-    throw std::runtime_error(
-        "Xcode requires Apple's Clang toolchain; select --cc /usr/bin/clang "
-        "and --cxx /usr/bin/clang++, or use Ninja/Make for another compiler");
+  validate_xcode_toolchain(graph.toolchain);
 
   if (graph.targets.empty())
     throw std::runtime_error(
@@ -432,6 +428,14 @@ std::string scheme(const Graph &graph,
   return out.str();
 }
 }  // namespace
+
+void validate_xcode_toolchain(const Toolchain &toolchain) {
+  if (toolchain.msvc || !apple_clang(toolchain.cc) ||
+      !apple_clang(toolchain.cxx))
+    throw std::runtime_error(
+        "Xcode requires Apple's Clang toolchain; select --cc /usr/bin/clang "
+        "and --cxx /usr/bin/clang++, or use Ninja/Make for another compiler");
+}
 
 /// Clean only known target products/intermediates, never a product directory
 /// shared with metadata. Preflight every path before removing any artifact.

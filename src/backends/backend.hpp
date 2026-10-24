@@ -7,13 +7,14 @@
 
 /**
  * @file
- * @brief Register build generators and resolve executable locations
- * independently from compiler toolchains.
+ * @brief Register native build generators and resolve compatible executors
+ * and compiler toolchains.
  */
 
 #pragma once
 
 #include "core/paths.hpp"
+#include "toolchains/toolchain.hpp"
 
 #include <string>
 #include <vector>
@@ -27,6 +28,12 @@ struct Graph;
 struct BuildBackend {
   std::string name;
   std::string executable;
+};
+
+/// A generator/executor and the compiler drivers that its output can honor.
+struct BuildTools {
+  BuildBackend backend;
+  Toolchain toolchain;
 };
 
 /// Registry metadata; host support does not imply the executor is installed.
@@ -45,6 +52,9 @@ std::vector<GeneratorInfo> supported_generators();
 /// Resolve the selected generator executable using overrides, environment,
 /// cache and discovery.
 BuildBackend resolve_backend(const Options &options, const Project &project);
+/// Honor explicit selections or choose an installed, compatible generator.
+/// Automatic discovery retains a usable cached selection before registry order.
+BuildTools resolve_build_tools(const Options &options, const Project &project);
 /// Persist generator name and executable in the selected build directory.
 void save_backend(const BuildBackend &backend, const Project &project);
 /// Clean selected artifacts when a backend cannot force compilation directly.

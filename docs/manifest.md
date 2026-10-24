@@ -90,7 +90,7 @@ manifest fields and host-specific `backend.toml`/`configuration.toml` caches.
 | `version` | String | Required | Nonempty project metadata, recorded in `clutch.lock`; not added as a compiler macro. Standalone projects do not require SemVer, but dependency version constraints do. |
 | `language` | String | `"auto"` | `"c"`, `"cpp"`, `"c++"`, `"mixed"` or `"auto"`; `"c++"` is an alias for `"cpp"`. |
 | `std` | Integer, string or table | C `11`; C++ `17` | Select language standards; see the rules below. |
-| `entry` | String path | Omitted | Add one application source to explicit/discovered sources. This is additive, not a replacement for discovery. |
+| `entry` | String path | Omitted | Select one application source, optionally alongside `build.sources`. Suppresses implicit discovery. |
 
 Example for C++:
 
@@ -104,7 +104,8 @@ std = 17
 
 `language = "auto"` inspects application sources: C-only inputs select C,
 C++-only inputs select C++, and both select mixed. Explicit `"c"` and `"cpp"`
-must match application source types. Tests may use either language independently.
+filter implicit discovery to that language, and must match explicitly selected
+application source types. Tests may use either language independently.
 `"mixed"` permits both languages, including a project whose current application
 sources happen to use only one.
 
@@ -149,8 +150,8 @@ Clutch validates both standard values even if a language is currently unused.
 
 | Field | Type | Default | Behavior |
 | --- | --- | --- | --- |
-| `generator` | String | `"ninja"` | Native build-file format and executor family; the configuration CLI's `--generator` overrides it. |
-| `sources` | Array of string paths or patterns | Discover recursively under `src/` | Select application files; a nonempty array replaces discovery. An empty array also triggers discovery. |
+| `generator` | String | Automatic selection | Native build-file format and executor family; the configuration CLI's `--generator` overrides it. Omit it to discover an available compatible generator/executor. |
+| `sources` | Array of string paths or patterns | Discover recursively from the manifest directory when entry is also omitted | Select application files; a nonempty array replaces discovery. An empty array triggers discovery only without `project.entry`. |
 | `include_dirs` | Array of string paths | Empty, plus an existing root `include/` | Existing directories added to every target/test in the project; workspace-root directories are shared with members. |
 | `defines` | Array of strings | Empty | Preprocessor definitions for every target/test in the project; workspace-root definitions are shared with members. |
 | `links` | Array of target names | Empty | Private library dependencies of the default application named by `project.name`; accepts qualified workspace names. |
@@ -169,7 +170,7 @@ defines = ["APP_VERSION=1", "ENABLE_LOGGING"]
 
 Supported source extensions are `.c`, `.cc`, `.cpp` and `.cxx`, with these exact
 lowercase spellings. `.c` uses the C compiler; the other extensions use C++.
-Source arrays accept existing regular files and recursive filename patterns.
+Source arrays accept existing regular files and filename patterns.
 Only the extensions above produce compiler actions. Headers and other matched
 files appear as noncompiled project files in the file API and native IDE
 projects; they do not create compilation-database entries. Clutch sorts and
@@ -177,12 +178,15 @@ deduplicates canonical paths, including overlaps between patterns and files.
 
 ```toml
 [build]
-sources = ["src/*.{cpp,c,h,hpp}", "support/*.cpp"]
+sources = ["src/**.{cpp,c,h,hpp}", "support/*.cpp"]
 ```
 
-`folder/*` selects all regular files in that folder and its descendants.
-`folder/*.{cpp,c,h}` selects those suffixes recursively; `folder/**/*.cpp`
-also works. `*` matches any filename text and `?` matches one filename byte.
+`*.cpp` selects only files beside this manifest. `folder/*` selects only regular
+files directly in `folder/`, and `folder/*.{cpp,c,h}` filters that directory's
+files by suffix. `**.cpp` scans the manifest directory and all descendants;
+`folder/**.{cpp,c,h}` and `folder/**/*.cpp` recurse from `folder/`.
+`*` matches any filename text and `?` matches one filename byte. A double star
+in the filename, or a `**` directory immediately before it, enables recursion.
 Brace choices may be combined, but cannot be nested or empty. Directory
 components must be literal, apart from an optional `**` directly before the
 filename. Matching is case-sensitive on every platform. Use forward slashes
@@ -202,17 +206,24 @@ array. New or removed matches require another `clutch .`; changes to existing
 headers/sources use the backend's normal dependency tracking.
 
 Without `[[target]]`, all application sources form one executable and must provide
-one entry point. Discovery includes nested source directories; place independent
-test programs outside `src/` or select application sources explicitly. At least
-one application source is required in this implicit mode, even when tests are declared.
+one entry point. When both sources and entry are omitted, discovery starts at
+this manifest's directory and recurses. C selects `.c`, `.h` and `.H`; C++ selects
+`.cc`, `.cpp`, `.cxx`, `.h`, `.H`, `.hh`, `.hpp` and `.hxx`; mixed/auto select both
+sets. Headers remain noncompiled IDE files. Only recognized source/header
+suffixes are discovered implicitly; explicit patterns may also select other files.
+Nested directories containing their own `clutch.toml` are separate projects and
+are not traversed implicitly, including workspace members. Generated-tree and
+directory-link exclusions apply as above. Sources owned by declared tests and
+other explicit targets are excluded from the implicit application.
 
-For a single file outside `src/`, either specify `sources = ["main.cpp"]` under
-`[build]` or `entry = "main.cpp"` under `[project]`. `entry` alone still includes
-any sources found under `src/`.
+At least one application source is required, even when tests are declared.
+For several independent programs, declare targets/tests, split them into member
+manifests, or select application sources explicitly. `entry = "main.cpp"` selects
+just that file unless `build.sources` supplies additional files.
 
 With explicit targets, `project.entry`, `build.sources` or nonempty `build.links`
 enables the default application. It coexists with the declared libraries/executables. Files
-found automatically under `src/` are excluded from that application when another
+found automatically are excluded from that application when another
 explicit target owns them. Explicitly listed sources and the entry file remain
 deliberate selections; Clutch does not remove them. Each target compiles each of
 its sources only once.
@@ -241,6 +252,18 @@ providers. Local member/target definitions override inherited public requirement
 for that target's compilation; only declared public requirements are exported.
 
 ### Generators and compiler selection
+
+Omitting `build.generator` and `--generator` enables automatic selection when
+there is no generic build-tool override. Clutch tries a usable cached generator
+first, then Ninja, GNU Make, NMake, JOM, Visual Studio and Xcode in that order,
+skipping unsupported hosts, missing/old executors and incompatible compilers.
+If none work, configuration reports the attempted choices without publishing a
+build configuration. Explicit generator selections remain authoritative.
+
+An explicit `--build-tool` or `CLUTCH_BUILD_TOOL` can identify a standard executor
+family by its filename when the generator is omitted; custom-named wrappers
+require a generator too. See [tool selection](usage.md#configure-then-build)
+for override precedence and platform discovery.
 
 | `generator` | Native output | Requirements |
 | --- | --- | --- |
@@ -427,7 +450,7 @@ Names must also avoid platform device names and generated metadata locations.
 | --- | --- | --- | --- |
 | `name` | String | Required | Letters, digits, `_`, `-`; unique across all targets and tests |
 | `type` | String | `"executable"` | `"executable"`, `"static"` or `"shared"` |
-| `sources` | Array of string paths or patterns | Required except for the executable matching `project.name` with project source defaults | Select target files recursively; matching application defaults are merged and deduplicated |
+| `sources` | Array of string paths or patterns | Required except for the executable matching `project.name` with project source defaults | Select target files using literal paths or local/recursive patterns; matching application defaults are merged and deduplicated |
 | `include_dirs` | Array of string paths | Empty | Private header search directories |
 | `public_include_dirs` | Array of string paths | Empty | Header directories used here and by consumers |
 | `defines` | Array of strings | Empty | Private preprocessor definitions |

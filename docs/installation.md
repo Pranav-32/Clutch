@@ -9,7 +9,8 @@ compiler. The header-only CLI11, toml++ and JSON dependencies are included in
 
 Projects built with Clutch also need a C/C++ compiler and the native build tool
 selected by their generator. Install Git 2.29+ to configure
-[Git imports](dependencies.md). Ninja is the default; see the
+[Git imports](dependencies.md). When no generator or executor is selected,
+Clutch chooses an installed compatible pair, preferring Ninja; see the
 [generator requirements](usage.md#generators) for alternatives.
 
 Installation includes Clutch's license and the vendored-library notices under

@@ -117,7 +117,12 @@ void unit_cases(const Fixture &fixture) {
                                  "src/owned-tree/hidden.cpp"})
     fixture.write(path);
   const auto build = fixture.root / "src/output";
-  const auto all = clutch::expand_sources(fixture.root, {"src/*"}, build);
+  const auto local = clutch::expand_sources(fixture.root, {"src/*"}, build);
+  expect(local.sources, fixture.root, {"src/main.cpp"});
+  expect(local.additional_files,
+         fixture.root,
+         {"src/notes.txt", "src/UPPER.CPP"});
+  const auto all = clutch::expand_sources(fixture.root, {"src/**"}, build);
   expect(all.sources,
          fixture.root,
          {"src/main.cpp", "src/deep/worker.c", "src/output-sibling/kept.cpp"});
@@ -126,7 +131,7 @@ void unit_cases(const Fixture &fixture) {
          {"src/deep/api.hpp", "src/notes.txt", "src/UPPER.CPP"});
   const auto suffixes = clutch::expand_sources(
       fixture.root,
-      {"src/*.{cpp,c,hpp}", "src/**/*.cpp", "src/./main.cpp"},
+      {"src/**.{cpp,c,hpp}", "src/**/*.cpp", "src/./main.cpp"},
       build);
   require(suffixes.sources == all.sources,
           "overlapping patterns changed source membership");
@@ -134,6 +139,14 @@ void unit_cases(const Fixture &fixture) {
   expect(clutch::expand_sources(fixture.root, {"src/ma??.cpp"}, build).sources,
          fixture.root,
          {"src/main.cpp"});
+  expect(clutch::expand_sources(fixture.root, {"src/**.c"}, build).sources,
+         fixture.root,
+         {"src/deep/worker.c"});
+  const auto combined =
+      clutch::expand_sources(fixture.root, {"src/*", "src/**"}, build);
+  require(combined.sources == all.sources &&
+              combined.additional_files == all.additional_files,
+          "local and recursive traversal caches were conflated");
 
   for (const auto *const path : {"choices/one.cpp",
                                  "choices/two.cpp",
@@ -168,12 +181,45 @@ void unit_cases(const Fixture &fixture) {
                                fixture.root / "src/redirect",
                                error);
   if (!error)
-    require(clutch::expand_sources(fixture.root, {"src/*"}, build).sources ==
+    require(clutch::expand_sources(fixture.root, {"src/**"}, build).sources ==
                 all.sources,
             "directory link was traversed");
   else
     std::fputs("SKIP: directory symlink creation is unavailable on this host\n",
                stdout);
+}
+
+/// Implicit discovery respects language, nested manifests and shared headers.
+void discovery_cases(const Fixture &fixture) {
+  for (const auto *const path : {"automatic/main.cpp",
+                                 "automatic/helper.c",
+                                 "automatic/common.h",
+                                 "automatic/shared.H",
+                                 "automatic/deep/detail.hpp",
+                                 "automatic/deep/part.cc",
+                                 "automatic/readme.txt",
+                                 "automatic/member/clutch.toml",
+                                 "automatic/member/hidden.cpp",
+                                 "automatic/build/broken.c",
+                                 "automatic/.clutch/hidden.cpp"})
+    fixture.write(path);
+
+  const auto root = fs::canonical(fixture.root / "automatic");
+  const auto build = root / "build";
+  const auto c = clutch::discover_sources(root, "c", build);
+  expect(c.sources, root, {"helper.c"});
+  expect(c.additional_files, root, {"common.h", "shared.H"});
+  const auto cpp = clutch::discover_sources(root, "cpp", build);
+  expect(cpp.sources, root, {"main.cpp", "deep/part.cc"});
+  expect(cpp.additional_files,
+         root,
+         {"common.h", "shared.H", "deep/detail.hpp"});
+  for (const auto *const language : {"auto", "mixed"}) {
+    const auto mixed = clutch::discover_sources(root, language, build);
+    expect(mixed.sources, root, {"helper.c", "main.cpp", "deep/part.cc"});
+    require(mixed.additional_files == cpp.additional_files,
+            "mixed discovery lost language-appropriate headers");
+  }
 }
 
 /// Many brace alternatives and repeated selections must share a bounded
@@ -189,7 +235,7 @@ void stress_cases(const Fixture &fixture) {
     fixture.write(path);
     expected.insert(fixture.root / path);
   }
-  std::string pattern = "large/g{";
+  std::string pattern = "large/**/g{";
   for (size_t group = 0; group < group_count; ++group)
     pattern += (group ? "," : "") + std::to_string(group);
   pattern += "}--*.cpp";
@@ -226,6 +272,7 @@ int main(const int argc, char **const argv) {
     Fixture fixture(stress ? fs::temp_directory_path() / "clutch-source-stress"
                            : fs::u8path(argv[1]));
     unit_cases(fixture);
+    discovery_cases(fixture);
     if (stress)
       stress_cases(fixture);
     fixture.clean();
