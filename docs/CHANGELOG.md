@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/Pranav-32/Clutch/compare/v0.4.0...v0.5.0) (2026-10-24)
+
+
+### Features
+
+* add native developer workflows and profile safety ([bbe1c2f](https://github.com/Pranav-32/Clutch/commit/bbe1c2fd9fbe9902f2139bd25b4f987ebb0d255c))
+
 ## [0.4.0](https://github.com/Pranav-32/Clutch/compare/v0.4.0-beta.1...v0.4.0) (2026-10-22)
 
 
