@@ -224,6 +224,9 @@ Each target describes:
 - `directory`: compiler/linker working directory.
 - `sources`: source `path`, object path (`object`), `compileGroupIndex`, and the
   complete compiler `arguments` array, including its executable.
+  With Xcode, object paths describe logical editing commands; Xcode chooses its
+  physical intermediate layout separately. Do not treat those object paths as
+  guaranteed on-disk artifacts. Use `artifacts` for the target's products.
 - `additionalFiles` (optional): canonical header and other noncompiled paths
   selected by source declarations. These files have no object or compiler action.
 - `compileGroups`: `language` (`C`/`CXX`), `standard`, `includes` with `path` and

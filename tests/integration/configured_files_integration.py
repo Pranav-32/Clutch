@@ -136,8 +136,16 @@ class ConfiguredFileTests(unittest.TestCase):
                 target = json.loads((reply / model['targets'][0]['jsonFile']).read_text(encoding='utf-8'))
                 self.assertIn(header, set(map(Path, target['additionalFiles'])))
                 self.direct()
-                snapshots = {Path(item['output']): Path(item['output']).stat().st_mtime_ns
-                             for item in database}
+                # Xcode manages intermediates independently of the logical IDE
+                # commands. Inspect real objects rather than assuming graph paths.
+                if generator == 'xcode':
+                    objects = set((self.build / 'xcode-obj').rglob('*.o'))
+                    self.assertEqual({path.stem for path in objects},
+                                     {Path(item['file']).stem for item in database})
+                else:
+                    objects = {Path(item['output']) for item in database}
+                self.assertEqual(len(objects), len(database))
+                snapshots = {path: path.stat().st_mtime_ns for path in objects}
                 header_stamp = header.stat().st_mtime_ns
                 self.direct()
                 self.assertEqual(header.stat().st_mtime_ns, header_stamp)
