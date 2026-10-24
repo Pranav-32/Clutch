@@ -1,0 +1,30 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# One implementation supports normal builds, watched applications and tests.
+[project]
+name = "watch_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+
+[[target]]
+name = "message"
+type = "static"
+sources = ["message/message.cpp"]
+public_include_dirs = ["message"]
+
+[[target]]
+name = "hello"
+sources = ["app/main.cpp"]
+links = ["message"]
+
+[[test]]
+name = "message-test"
+sources = ["checks/message_test.cpp"]
+links = ["message"]

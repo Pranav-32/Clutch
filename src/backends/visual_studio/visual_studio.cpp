@@ -17,6 +17,7 @@
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
@@ -312,6 +313,11 @@ void write_unit(std::ostream &out, const Unit &unit) {
       continue;
     }
 
+    if (arg == "/Wall") {
+      settings["WarningLevel"] = "EnableAllWarnings";
+      continue;
+    }
+
     if (arg.size() == 3 && arg[0] == '/' && arg[1] == 'W' && arg[2] >= '0' &&
         arg[2] <= '4') {
       settings["WarningLevel"] =
@@ -577,6 +583,14 @@ void write_project(const Graph &graph,
               << "\" SkipUnchangedFiles=\"true\" />\n";
     project << "  </Target>\n";
   }
+  if (!graph.project.configured_files.empty())
+    project << "  <Target Name=\"ClutchConfigureFiles\" "
+               "BeforeTargets=\"PrepareForBuild\">\n"
+            << "    <Exec Command=\""
+            << literal(command_line(
+                   configured_files_command(graph, options, clutch_executable)))
+            << "\" />\n  </Target>\n";
+
   project << "  <ImportGroup Label=\"ExtensionTargets\" />\n</Project>\n";
   write_if_changed(graph.project.build / (project_name(index) + ".vcxproj"),
                    project.str());

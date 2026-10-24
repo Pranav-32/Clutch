@@ -157,9 +157,14 @@ Json target_object(const Graph &graph,
   if (options.release)
     build.emplace_back("--release");
   result["actions"] = {{"build", action(build, project.root)}};
-  if (target.type == TargetType::Executable)
+  if (target.type == TargetType::Executable) {
     result["actions"]["run"] =
         action({target.output.generic_u8string()}, target.source_root);
+    if (project.debug_symbols) {
+      build[1] = "debug";
+      result["actions"]["debug"] = action(build, project.root);
+    }
+  }
   return result;
 }
 
@@ -207,6 +212,12 @@ make_objects(const Graph &graph,
           {{"source", project.root.generic_u8string()},
            {"build", project.build.generic_u8string()}}},
          {"profile", options.release ? "release" : "debug"},
+         {"compilePolicy",
+          {{"debugSymbols", project.debug_symbols},
+           {"safety",
+            {{"sanitizers", project.safety.sanitizers},
+             {"lifetime", project.safety.lifetime},
+             {"strictness", project.safety.strictness}}}}},
          {"generator",
           {{"name", graph.backend.name},
            {"executable",
@@ -215,6 +226,9 @@ make_objects(const Graph &graph,
           (project.build / layout::compilation_database).generic_u8string()},
          {"targets", Json::array()}});
     model["workspace"] = project.is_workspace;
+    model["compilePolicy"]["warnings"] = project.warnings == "custom"
+                                             ? Json(project.warning_options)
+                                             : Json(project.warnings);
     model["projects"] = Json::array();
     for (const auto &[name, version, root] : project.projects)
       model["projects"].push_back({{"name", name},
@@ -294,19 +308,24 @@ make_objects(const Graph &graph,
 
   if (kinds.count("inputs")) {
     auto inputs = object("inputs");
+    std::vector<std::string> extensions(source_extensions.begin(),
+                                        source_extensions.end());
+    extensions.insert(extensions.end(),
+                      header_extensions.begin(),
+                      header_extensions.end());
     inputs.update({{"configurationInputs", configuration_inputs(project)},
                    {"sourceDiscovery",
-                    {{"directory", (project.root / "src").generic_u8string()},
+                    {{"directory", project.root.generic_u8string()},
                      {"recursive", true},
-                     {"extensions", source_extensions},
+                     {"extensions", extensions},
                      {"reconfigureOnAddRemove", true}}}});
     inputs["sourceDiscoveries"] = Json::array();
     for (const auto &member : project.projects)
       inputs["sourceDiscoveries"].push_back(
           {{"project", member.name},
-           {"directory", (member.root / "src").generic_u8string()},
+           {"directory", member.root.generic_u8string()},
            {"recursive", true},
-           {"extensions", source_extensions},
+           {"extensions", extensions},
            {"reconfigureOnAddRemove", true}});
     objects.emplace("inputs.json", std::move(inputs));
   }

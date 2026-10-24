@@ -1,0 +1,18 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Node is an explicitly chosen project tool, not a Clutch runtime dependency.
+[project]
+name = "node_commands"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[[command]]
+name = "hello"
+argv = ["node", "hello.mjs", "@PROFILE@", "@PROJECT_DIR@"]
+
+[[command]]
+name = "built"
+argv = ["node", "hello.mjs", "@PROFILE@", "@BUILD_DIR@"]
+phases = ["after-build"]

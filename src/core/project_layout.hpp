@@ -20,6 +20,8 @@ inline constexpr auto build_prefix = "Clutch-build-";
 // The owner marker protects user files from accidental build-directory cleanup.
 inline constexpr auto owner_marker = ".clutch-build-owner";
 inline constexpr auto configuration = "configuration.toml";
+// Failed lifecycle hooks must not leave an older saved graph runnable.
+inline constexpr auto configuration_pending = ".clutch/configuration-pending";
 inline constexpr auto backend_cache = "backend.toml";
 inline constexpr auto toolchain_cache = "toolchain.toml";
 inline constexpr auto compilation_database = "compile_commands.json";

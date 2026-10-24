@@ -1,0 +1,17 @@
+/* Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+ * SPDX-License-Identifier: BSD-3-Clause */
+
+/**
+ * @file
+ * @brief Template values become project-private compile-time metadata.
+ */
+#pragma once
+
+namespace build_info {
+inline constexpr auto name = "@PROJECT_NAME@";
+inline constexpr auto version = "@PROJECT_VERSION@";
+inline constexpr auto base_version = "@PROJECT_VERSION_BASE@";
+inline constexpr auto api_level = @API_LEVEL@;
+inline constexpr auto message = "@MESSAGE@";
+inline constexpr auto literal_token = "@@PROJECT_VERSION@@";
+}  // namespace build_info

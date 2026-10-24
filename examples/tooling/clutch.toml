@@ -1,0 +1,23 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Native developer tools and optimized builds with debug symbols.
+[project]
+name = "tooling_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[profile.debug]
+debug_symbols = true
+warnings = ["extra", "shadow", "conversion"]
+
+[profile.debug.safety]
+# Tool commands work without an optional sanitizer runtime. See ../safety/.
+sanitizers = []
+strictness = "strict"
+# Enable only with a compiler supporting Clang's newer lifetime-analysis groups.
+lifetime = false
+
+[profile.release]
+optimize = "speed"
+debug_symbols = true

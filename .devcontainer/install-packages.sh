@@ -32,7 +32,8 @@ printf '%s\n' \
 apt-get update
 apt-get install -y --no-install-recommends \
     "clang-${llvm_version}" "clang-format-${llvm_version}" \
-    "clang-tidy-${llvm_version}" "clangd-${llvm_version}" "lld-${llvm_version}"
+    "clang-tidy-${llvm_version}" "clangd-${llvm_version}" "lld-${llvm_version}" \
+    "libclang-rt-${llvm_version}-dev"
 
 # Unversioned names let editor settings survive future LLVM upgrades.
 for tool in clang clang++ clang-format clang-tidy clangd; do

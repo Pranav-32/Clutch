@@ -263,5 +263,5 @@ if __name__ == '__main__':
     OPTIONS, arguments = parser.parse_known_args()
     for option in ('clutch', 'cc', 'cxx', 'ninja'):
         value = getattr(OPTIONS, option)
-        setattr(OPTIONS, option, str(Path(shutil.which(value) or value).resolve()))
+        setattr(OPTIONS, option, os.path.abspath(shutil.which(value) or value))
     unittest.main(argv=[sys.argv[0], *arguments])

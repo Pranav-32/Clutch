@@ -14,12 +14,17 @@
 #include "project.hpp"
 
 #include "core/build_directory.hpp"
+#include "core/commands/manifest.hpp"
+#include "core/configured_files/manifest.hpp"
+#include "core/configured_files/version.hpp"
 #include "core/dependencies/manifest.hpp"
 #include "core/options.hpp"
 #include "core/pch/headers.hpp"
 #include "core/project_layout.hpp"
+#include "core/safety/manifest.hpp"
 #include "core/source_files.hpp"
 #include "core/targets/manifest.hpp"
+#include "core/warnings/policy.hpp"
 #include "core/workspace/workspace.hpp"
 #include <toml.hpp>
 
@@ -64,6 +69,19 @@ std::string require_string(const toml::node &node, const std::string &error) {
     return *value;
 
   throw std::runtime_error(error);
+}
+
+/// Copy ordered warning selections and validate even inactive profile arrays.
+std::vector<std::string> warning_names(const toml::node &node) {
+  std::vector<std::string> names;
+  for (const auto &entry :
+       require_array(&node,
+                     "warnings must be a preset string or an array of names"))
+    names.push_back(
+        require_string(entry, "warning array entries must be strings"));
+
+  validate_warning_names(names);
+  return names;
 }
 
 /// Accept existing regular files with one of Clutch's C/C++ source suffixes.
@@ -122,8 +140,11 @@ Project load_project_manifest(const Options &options,
         "dependencies",
         "test",
         "target",
-        "workspace"},
+        "workspace",
+        "configure_file",
+        "command"},
        "manifest");
+  p.commands = read_project_commands(doc);
   const toml::table empty_project;
   const auto &project =
       virtual_workspace
@@ -134,7 +155,9 @@ Project load_project_manifest(const Options &options,
     throw std::runtime_error("replace project.edition/c_standard with "
                              "project.language and project.std");
 
-  keys(project, {"name", "version", "language", "std", "entry"}, "project");
+  keys(project,
+       {"name", "version", "version_file", "language", "std", "entry"},
+       "project");
   for (const auto &[key, node] : project) {
     if (key.str() != "std" && !node.is_string())
       throw std::runtime_error("project." + std::string(key.str()) +
@@ -175,10 +198,24 @@ Project load_project_manifest(const Options &options,
           require_table(&value, "profile must contain tables");
 
       keys(profile,
-           {"optimize", "warnings", "build_dir"},
+           {"optimize", "warnings", "build_dir", "debug_symbols", "safety"},
            "profile." + std::string(name.str()));
       for (const auto &[key, setting] : profile) {
-        if (!setting.is_string())
+        if (key == "warnings") {
+          if (const auto preset = setting.value<std::string>(); preset) {
+            if (*preset != "none" && *preset != "default" && *preset != "extra")
+              throw std::runtime_error(
+                  "warnings preset must be none, default or extra");
+          } else {
+            warning_names(setting);
+          }
+        } else if (key == "safety") {
+          read_safety(
+              require_table(&setting, "profile safety must be a table"));
+        } else if (key == "debug_symbols") {
+          if (!setting.is_boolean())
+            throw std::runtime_error("profile.debug_symbols must be a boolean");
+        } else if (!setting.is_string())
           throw std::runtime_error("profile." + std::string(name.str()) + "." +
                                    std::string(key.str()) +
                                    " must be a string");
@@ -196,8 +233,20 @@ Project load_project_manifest(const Options &options,
         "project.name must contain only letters, digits, '_' or '-'");
 
   p.version = project["version"].value_or(std::string{});
+  if (const auto file = project["version_file"].value<std::string>()) {
+    if (file->empty() || project.contains("version"))
+      throw std::runtime_error(
+          "select project.version or a nonempty project.version_file");
+
+    const auto path = fs::canonical(p.root / fs::u8path(*file));
+    p.inputs.push_back({path, input_signature(path)});
+    p.version = read_project_version(path);
+  }
   if (!virtual_workspace && p.version.empty())
-    throw std::runtime_error("project.version must be a nonempty string");
+    throw std::runtime_error("project.version must be a nonempty string, or "
+                             "select project.version_file");
+
+  read_configured_files(p, doc);
 
   if (virtual_workspace && doc.contains("dependencies"))
     throw std::runtime_error("dependency imports require a [project] or belong "
@@ -396,13 +445,23 @@ Project load_project_manifest(const Options &options,
   // Apply only the selected profile and keep its artifacts in its own
   // directory.
   const auto profile = doc["profile"][options.release ? "release" : "debug"];
+  p.debug_symbols = profile["debug_symbols"].value_or(!options.release);
+  if (const auto *const safety = profile["safety"].as_table())
+    p.safety = read_safety(*safety);
+
   p.optimize = profile["optimize"].value_or(
       std::string(options.release ? "speed" : "none"));
   p.warnings = profile["warnings"].value_or(std::string("extra"));
+  if (const auto *const node = profile["warnings"].node();
+      node && node->is_array()) {
+    p.warnings = "custom";
+    p.warning_options = warning_names(*node);
+  }
   if (p.optimize != "speed" && p.optimize != "size" && p.optimize != "none")
     throw std::runtime_error("optimize must be speed, size or none");
 
-  if (p.warnings != "extra" && p.warnings != "default" && p.warnings != "none")
+  if (p.warnings != "extra" && p.warnings != "default" &&
+      p.warnings != "none" && p.warnings != "custom")
     throw std::runtime_error("warnings must be extra, default or none");
 
   p.output = p.build / p.name;

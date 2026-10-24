@@ -13,9 +13,11 @@
 #include "configuration_store.hpp"
 
 #include "core/build_directory.hpp"
+#include "core/commands/manifest.hpp"
 #include "core/dependencies/git.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
+#include "core/safety/manifest.hpp"
 #include "core/workspace/inputs.hpp"
 #include "platform/files.hpp"
 #include <toml.hpp>
@@ -30,9 +32,9 @@
 namespace clutch {
 namespace {
 // Increment this version when persisted graph fields or semantics change.
-// Version 12 retains foreign public-header roots for direct backend
-// preparation. Older resolved commands require explicit reconfiguration.
-constexpr auto configuration_schema_version = 12;
+// Version 15 retains named commands and their CLI lifecycle phases.
+// Older resolved commands require explicit reconfiguration.
+constexpr auto configuration_schema_version = 15;
 
 /// Serialize paths as UTF-8 strings and preserve ordinary string argument
 /// values.
@@ -127,6 +129,12 @@ void save_configuration(const Graph &graph, const Options &options) {
       {"cpp_std", project.cxx_standard},
       {"optimize", project.optimize},
       {"warnings", project.warnings},
+      {"warning_options", values(project.warning_options)},
+      {"debug_symbols", project.debug_symbols},
+      {"safety",
+       toml::table{{"sanitizers", values(project.safety.sanitizers)},
+                   {"lifetime", project.safety.lifetime},
+                   {"strictness", project.safety.strictness}}},
       {"runtime", project.runtime},
       {"sources", values(project.sources)},
       {"includes", values(project.includes)},
@@ -139,6 +147,14 @@ void save_configuration(const Graph &graph, const Options &options) {
       {"microsoft_abi", graph.toolchain.microsoft_abi}};
 
   data.insert("workspace", project.is_workspace);
+  toml::array commands;
+  for (const auto &command : project.commands)
+    commands.push_back(toml::table{{"name", command.name},
+                                   {"argv", values(command.argv)},
+                                   {"working_dir", command.working_dir},
+                                   {"phases", values(command.phases)}});
+
+  data.insert("command", std::move(commands));
   toml::array inputs, projects;
   for (const auto &[path, signature] : project.inputs)
     inputs.push_back(
@@ -151,6 +167,22 @@ void save_configuration(const Graph &graph, const Options &options) {
 
   data.insert("inputs", std::move(inputs));
   data.insert("projects", std::move(projects));
+  toml::array configured_files;
+  for (const auto &file : project.configured_files) {
+    toml::table variables;
+    for (const auto &[key, value] : file.variables)
+      variables.insert(key, value);
+
+    configured_files.push_back(
+        toml::table{{"input", file.input.u8string()},
+                    {"output", file.output.u8string()},
+                    {"source_root", file.source_root.u8string()},
+                    {"name", file.project_name},
+                    {"version", file.project_version},
+                    {"git_version", file.git_version},
+                    {"variables", std::move(variables)}});
+  }
+  data.insert("configured_files", std::move(configured_files));
   toml::array foreign_builds;
   for (const auto &build : project.foreign_builds)
     foreign_builds.push_back(toml::table{
@@ -229,6 +261,10 @@ Graph load_configuration(const Options &options) {
   const auto path = directory / layout::configuration;
   const auto configure_hint = "run clutch \"" + root.u8string() + "\"" +
                               (options.release ? " --release" : "");
+  if (fs::exists(directory / layout::configuration_pending))
+    throw std::runtime_error("configuration did not complete; " +
+                             configure_hint);
+
   if (!fs::is_regular_file(path))
     throw std::runtime_error("project is not configured; " + configure_hint);
 
@@ -280,6 +316,16 @@ Graph load_configuration(const Options &options) {
   project.cxx_standard = read_string(data, "cpp_std");
   project.optimize = read_string(data, "optimize");
   project.warnings = read_string(data, "warnings");
+  project.warning_options = read_strings(data, "warning_options");
+  if (!data["command"].is_array())
+    throw std::runtime_error("invalid saved project commands");
+
+  project.commands = read_project_commands(data);
+  if (!data["debug_symbols"].is_boolean() || !data["safety"].is_table())
+    throw std::runtime_error("invalid saved profile policy");
+
+  project.debug_symbols = data["debug_symbols"].as_boolean()->get();
+  project.safety = read_safety(*data["safety"].as_table());
   project.runtime = read_string(data, "runtime");
   project.sources = read_paths(data, "sources");
   project.includes = read_paths(data, "includes");
@@ -291,6 +337,35 @@ Graph load_configuration(const Options &options) {
                      data["msvc"].value_or(false)};
   graph.toolchain.microsoft_abi =
       data["microsoft_abi"].value_or(graph.toolchain.msvc);
+  const auto *const configured_files = data["configured_files"].as_array();
+  if (!configured_files)
+    throw std::runtime_error("invalid saved configured files");
+
+  for (const auto &entry : *configured_files) {
+    const auto &record = read_table(entry, "invalid saved configured file");
+    ConfiguredFile file;
+    file.input = fs::u8path(read_string(record, "input"));
+    file.output = fs::u8path(read_string(record, "output"));
+    file.source_root = fs::u8path(read_string(record, "source_root"));
+    file.project_name = read_string(record, "name");
+    file.project_version = read_string(record, "version");
+    if (!record["git_version"].is_boolean() || !file.input.is_absolute() ||
+        !file.source_root.is_absolute())
+      throw std::runtime_error("invalid saved configured-file metadata");
+
+    file.git_version = record["git_version"].value_or(false);
+    const auto *const variables = record["variables"].as_table();
+    if (!variables)
+      throw std::runtime_error("invalid saved configured-file variables");
+
+    for (const auto &[name, value] : *variables) {
+      if (const auto text = value.value<std::string>())
+        file.variables.emplace_back(name.str(), *text);
+      else
+        throw std::runtime_error("invalid saved configured-file variable");
+    }
+    project.configured_files.push_back(std::move(file));
+  }
   const auto *const foreign_builds = data["foreign_builds"].as_array();
   if (!foreign_builds)
     throw std::runtime_error("invalid saved foreign build actions");

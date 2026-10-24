@@ -18,6 +18,7 @@
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
 #include "core/targets/archive.hpp"
@@ -191,6 +192,31 @@ void generate_ninja(const Graph &graph,
            "Staging $out\n";
   std::set<fs::path> staged;
 
+  if (!p.configured_files.empty()) {
+    ninja << "rule configure_files\n  command = "
+          << ninja_value(command_line(
+                 configured_files_command(graph, options, executable)))
+          << "\n  description = Refreshing configured files\n  restat = 1\n"
+             "build clutch-configure-force: phony\nbuild";
+    for (const auto &file : p.configured_files)
+      // Ninja's MSVC include parser records headers under its cwd relatively.
+      // Use that exact node spelling, so dynamic deps share the producer edge.
+      ninja << ' '
+            << path(graph.toolchain.msvc
+                        ? file.output.lexically_relative(p.build)
+                        : file.output);
+
+    ninja << ": configure_files clutch-configure-force\n"
+             "build clutch-configured-files: phony";
+    for (const auto &file : p.configured_files)
+      ninja << ' '
+            << path(graph.toolchain.msvc
+                        ? file.output.lexically_relative(p.build)
+                        : file.output);
+
+    ninja << "\n\n";
+  }
+
   if (!p.foreign_builds.empty() ||
       std::any_of(graph.targets.begin(),
                   graph.targets.end(),
@@ -261,6 +287,10 @@ void generate_ninja(const Graph &graph,
         ninja << ' ' << path(prefix.header);
       foreign_prerequisites();
 
+      if (!p.configured_files.empty()) {
+        ninja << " || clutch-configured-files";
+      }
+
       ninja << "\n  compiler = "
             << ninja_value(command_line({prefix.creator.arguments.front()}))
             << "\n  args = "
@@ -280,6 +310,10 @@ void generate_ninja(const Graph &graph,
       else if (!target.foreign_dependencies.empty())
         ninja << " |";
       foreign_prerequisites();
+
+      if (!p.configured_files.empty()) {
+        ninja << " || clutch-configured-files";
+      }
 
       ninja << "\n  compiler = "
             << ninja_value(command_line({arguments.front()})) << "\n  args = "

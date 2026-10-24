@@ -14,6 +14,15 @@ generator such as Ninja, GNU Make, Visual Studio or Xcode, subject to host suppo
 It can also [drive an existing CMake project](docs/cmake-projects.md), keeping
 that project's native rules, framework helpers and presets intact.
 
+Optional [developer commands](docs/usage.md#format-analyze-and-debug) provide
+`clutch fmt`, `clutch lint` and `clutch debug`. Profiles can independently choose
+debug symbols and request supported [safety checks](docs/manifest.md#safety).
+Named [commands and lifecycle hooks](docs/manifest.md#commands-and-lifecycle-hooks)
+run project scripts before or after CLI configuration/builds, or through
+`clutch exec <name>`.
+Use [`clutch watch`](docs/usage.md#watch-for-changes) for debounced rebuilds while
+editing, optionally running an application or tests after each build.
+
 **Status: early development.** This README describes the checkout. See
 [feature status](#feature-status) for the tagged baseline and newer capabilities.
 
@@ -115,17 +124,18 @@ The build directory contains `compile_commands.json`; see
 | Try a complete project | [Examples](examples/README.md) |
 | Integrate an IDE or developer tool | [File API](docs/file-api.md) |
 | Share sources and resolved source dependencies | [Source bundles](docs/usage.md#source-bundles) |
+| Build Clutch using Clutch | [Native self-hosting](docs/installation.md#build-clutch-with-clutch) |
 
 ## Feature status
 
-This table compares the checkout with the repository's `v0.3.2` source tag.
+This table compares the checkout with the repository's `v0.4.0` release.
 See the [changelog](docs/CHANGELOG.md) for release-specific changes.
 
 | Availability | Features |
 | --- | --- |
-| In `v0.3.2` and this checkout | C/C++ executable/library/test targets; native generators and `--jobs`; separate profiles; workspaces and local locks; compilation databases, DOT graphs and the native file API |
-| In this checkout, beyond `v0.3.2` | Flexible application/member manifests; recursive sources; Git resolution, recursive submodules and update reports; local/installed imports; CMake/Make library adapters with native preparation; complete CMake project delegation with presets, tests, install and packaging; limited named source catalogs; PCH; parallel builds and `--clean`; relocatable source bundles |
-| Not implemented | Translating arbitrary CMake functions into native manifests, arbitrary foreign build systems/vcpkg recipes, CUDA device compilation, GUI telemetry and self-hosting |
+| In `v0.4.0` and this checkout | C/C++ executable/library/test targets; native generators and `--jobs`; separate profiles; flexible application/member manifests; workspaces and locks; compilation databases, DOT graphs and the native file API; Git resolution, recursive submodules and update reports; local/installed imports; CMake/Make library adapters; complete CMake project delegation with presets, tests, install and packaging; limited named source catalogs; PCH; `--clean`; relocatable source bundles |
+| In this checkout, beyond `v0.4.0` | Language-aware automatic source discovery and flat/recursive patterns; automatic generator selection; configured metadata files and native self-hosting; `fmt`/`lint`/`debug`; independent debug symbols, warning arrays and opt-in profile safety; named commands and CLI lifecycle hooks; debounced native watch |
+| Not implemented | Translating arbitrary CMake functions into native manifests, arbitrary foreign build systems/vcpkg recipes, CUDA device compilation and GUI telemetry |
 
 ## Contribute
 

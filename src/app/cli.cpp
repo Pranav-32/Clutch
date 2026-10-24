@@ -13,11 +13,15 @@
 
 #include "cli.hpp"
 
+#include "app/tooling.hpp"
+#include "app/watch/watch.hpp"
 #include "app/workflow.hpp"
 #include "backends/backend.hpp"
 #include "core/bundle/bundle.hpp"
+#include "core/commands/commands.hpp"
 #include "core/configuration_store.hpp"
 #include "core/configure.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/dependencies/foreign.hpp"
 #include "core/dependencies/updates.hpp"
 #include "core/file_api/file_api.hpp"
@@ -36,6 +40,14 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <tuple>
+
+#ifdef _MSC_VER
+// CLI11's native wide-command-line normalization calls the Windows Shell API.
+// Embed the SDK import for MSVC and MSVC-ABI Clang in native self-hosted
+// builds.
+#pragma comment(lib, "shell32.lib")
+#endif
 
 namespace clutch {
 namespace {
@@ -144,6 +156,82 @@ int run_cli(const int argc, char *const *const argv) {
                          "Build and run; pass program arguments after --");
   auto *const test =
       app.add_subcommand("test", "Build and run declared test executables");
+  auto *const format = app.add_subcommand(
+      "fmt",
+      "Format project sources and headers with clang-format");
+  auto *const lint = app.add_subcommand(
+      "lint",
+      "Analyze configured translation units with clang-tidy");
+  auto *const debug = app.add_subcommand(
+      "debug",
+      "Build and launch a native debugger for an executable");
+  auto *const watch = app.add_subcommand(
+      "watch",
+      "Build immediately and rebuild after debounced source edits");
+  WatchSettings watch_settings;
+  watch->add_flag("--run",
+                  watch_settings.run,
+                  "Run a short-lived application after each successful build");
+  watch->add_flag("--test",
+                  watch_settings.test,
+                  "Build and execute declared tests after each change");
+  watch
+      ->add_option("--interval",
+                   watch_settings.interval_ms,
+                   "Polling interval in milliseconds (default 250)")
+      ->check(CLI::Range(1, maximum_watch_delay_ms));
+  watch
+      ->add_option(
+          "--debounce",
+          watch_settings.debounce_ms,
+          "Quiet period in milliseconds before rebuilding (default 200)")
+      ->check(CLI::Range(0, maximum_watch_delay_ms));
+  for (const auto &[flag, values, help] :
+       {std::tuple{
+            "--path",
+            &watch_settings.paths,
+            "Additional file/directory to watch, relative to the project"},
+        std::tuple{"--ignore",
+                   &watch_settings.ignores,
+                   "File/directory to exclude from watching"}})
+    watch->add_option(flag, *values, help)
+        ->expected(1)
+        ->allow_extra_args(false)
+        ->take_all();
+
+  watch->add_option("args",
+                    watch_settings.arguments,
+                    "Program arguments for --run (use -- before flags)");
+  watch
+      ->add_option("-t,--target",
+                   watch_settings.targets,
+                   "Select a configured target (repeatable)")
+      ->expected(1)
+      ->allow_extra_args(false)
+      ->take_all();
+  auto *const command_runner = app.add_subcommand(
+      "exec",
+      "Run a named manifest command; pass extra arguments after --");
+  std::string command_name;
+  std::vector<std::string> command_arguments;
+  command_runner->add_option("name", command_name, "Declared command name")
+      ->required();
+  command_runner->add_option("args",
+                             command_arguments,
+                             "Literal extra command arguments");
+  std::string developer_tool, lint_checks;
+  bool format_check = false;
+  for (auto *const command : {format, lint, debug})
+    command->add_option("--tool",
+                        developer_tool,
+                        "Developer tool executable path or name");
+
+  format->add_flag("--check",
+                   format_check,
+                   "Report formatting differences without modifying files");
+  lint->add_option("--checks",
+                   lint_checks,
+                   "clang-tidy check selection (also reads .clang-tidy)");
   auto *const clean =
       app.add_subcommand("clean",
                          "Remove the selected profile's build artifacts");
@@ -193,6 +281,10 @@ int run_cli(const int argc, char *const *const argv) {
   auto *const foreign_runtime =
       app.add_subcommand("__foreign-runtime", "Internal dependency DLL staging")
           ->group("");
+  auto *const configured_files =
+      app.add_subcommand("__configure-files",
+                         "Internal native template refresh")
+          ->group("");
   std::string foreign_id;
   foreign->add_option("--dependency", foreign_id)->required();
   foreign->add_option("--jobs", options.jobs)->check(CLI::PositiveNumber);
@@ -221,6 +313,11 @@ int run_cli(const int argc, char *const *const argv) {
   for (auto *const command : {build,
                               execute,
                               test,
+                              format,
+                              lint,
+                              debug,
+                              watch,
+                              command_runner,
                               clean,
                               locate,
                               targets,
@@ -229,6 +326,7 @@ int run_cli(const int argc, char *const *const argv) {
                               copy_runtime,
                               foreign,
                               foreign_runtime,
+                              configured_files,
                               bundle}) {
     command->add_option("--project",
                         root,
@@ -261,7 +359,7 @@ int run_cli(const int argc, char *const *const argv) {
         cmake_request.preset,
         "Explicit native build/test/package preset (names are independent)");
 
-  for (auto *const command : {build, execute, test, install, package}) {
+  for (auto *const command : {build, execute, test, debug, install, package}) {
     command->add_flag(
         "--clean",
         options.clean_build,
@@ -273,8 +371,14 @@ int run_cli(const int argc, char *const *const argv) {
         ->check(CLI::PositiveNumber);
   }
 
+  watch
+      ->add_option("-j,--jobs",
+                   options.jobs,
+                   "Maximum concurrent compilation jobs")
+      ->check(CLI::PositiveNumber);
+
   for (auto *const command :
-       {build, execute, test, archive, copy_runtime, foreign_runtime})
+       {build, execute, test, debug, archive, copy_runtime, foreign_runtime})
     command
         ->add_option("-t,--target",
                      target_names,
@@ -286,6 +390,9 @@ int run_cli(const int argc, char *const *const argv) {
   execute->add_option("args",
                       runtime_args,
                       "Program arguments (use -- before flags)");
+  debug->add_option("args",
+                    runtime_args,
+                    "Program arguments (use -- before flags)");
   test->add_option("--filter",
                    filter,
                    "Run tests whose names contain this text");
@@ -344,6 +451,35 @@ int run_cli(const int argc, char *const *const argv) {
         fs::absolute(fs::u8path(has_command                ? root
                                 : source_directory.empty() ? "."
                                                            : source_directory));
+    // Formatting does not resolve dependencies or require an existing build.
+    if (*format)
+      return format_project(options, developer_tool, format_check);
+
+    if (*lint)
+      return lint_project(options, developer_tool, lint_checks);
+
+    if (*command_runner)
+      return execute_project_command(options, command_name, command_arguments);
+
+    if (*watch) {
+      if (!provider.empty() && provider != "clutch")
+        throw std::runtime_error(
+            "watch currently requires the native clutch provider");
+
+      if (watch_settings.run && watch_settings.test)
+        throw std::runtime_error(
+            "watch --run and --test are mutually exclusive");
+
+      if (!watch_settings.run && !watch_settings.arguments.empty())
+        throw std::runtime_error("watch program arguments require --run");
+
+      const auto executable = current_executable(arguments[0]);
+      if (executable.empty())
+        throw std::runtime_error("cannot resolve Clutch executable path");
+
+      return watch_project(options, watch_settings, executable);
+    }
+
     // Complete foreign projects retain their native generator and executor.
     // Native manifests take precedence when both project formats are present.
     if ((has_command || !source_directory.empty() ||
@@ -420,6 +556,10 @@ int run_cli(const int argc, char *const *const argv) {
     // targets.
     const auto start = std::chrono::steady_clock::now();
     const auto graph = load_configuration(options);
+    if (*configured_files) {
+      refresh_configured_files(graph.project);
+      return 0;
+    }
     if (*foreign)
       return dependencies::prepare_foreign(graph, options, foreign_id);
     if (*targets) {
@@ -431,11 +571,12 @@ int run_cli(const int argc, char *const *const argv) {
                   << '\n';
       return 0;
     }
-    const auto selected = select_targets(graph,
-                                         target_names,
-                                         static_cast<bool>(*test),
-                                         static_cast<bool>(*execute),
-                                         filter);
+    const auto selected =
+        select_targets(graph,
+                       target_names,
+                       static_cast<bool>(*test),
+                       static_cast<bool>(*execute) || static_cast<bool>(*debug),
+                       filter);
     if (*foreign_runtime) {
       dependencies::stage_foreign_runtime(graph, selected);
       return 0;
@@ -465,11 +606,18 @@ int run_cli(const int argc, char *const *const argv) {
 
     // Build failures stop execution before launching an application or any
     // tests.
+    if (*debug && !graph.project.debug_symbols)
+      throw std::runtime_error("debug requires profile.debug_symbols = true; "
+                               "reconfigure the selected profile");
+
     if (options.clean_build) {
       status("Cleaning", "selected build artifacts");
       if (const int result = clean_backend_artifacts(graph, selected))
         return result;
     }
+
+    run_command_hooks(graph.project, options, "before-build");
+    validate_inputs(graph.project.inputs);
 
     if (const int result =
             dependencies::build_foreign(graph, options, selected))
@@ -480,6 +628,7 @@ int run_cli(const int argc, char *const *const argv) {
       return result;
 
     dependencies::stage_foreign_runtime(graph, selected);
+    run_command_hooks(graph.project, options, "after-build");
 
     const auto elapsed =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
@@ -495,6 +644,12 @@ int run_cli(const int argc, char *const *const argv) {
                " (" + duration.str() + "s)");
     // Forward program arguments as separate values and run from the source
     // root.
+    if (*debug)
+      return debug_target(graph,
+                          selected.front(),
+                          developer_tool,
+                          runtime_args);
+
     if (*execute) {
       const auto &target = graph.targets[selected.front()];
       std::vector invocation{target.output.u8string()};
@@ -526,6 +681,9 @@ int run_cli(const int argc, char *const *const argv) {
     }
   } catch (const CLI::ParseError &error) {
     return app.exit(error);
+  } catch (const CommandFailure &error) {
+    std::cerr << "error: " << error.what() << '\n';
+    return error.status();
   } catch (const std::exception &error) {
     std::cerr << "error: " << error.what() << '\n';
     return 1;

@@ -3,6 +3,7 @@
 #
 # Register native tests by purpose. CTest names remain stable across platforms;
 # compiler-backed suites require their actual host tools and a built Clutch.
+option(CLUTCH_TEST_SELF_HOSTING "Build two additional native Clutch generations" OFF)
 
 add_test(NAME clutch.help COMMAND clutch --help)
 add_test(NAME clutch.version COMMAND clutch --version)
@@ -63,6 +64,9 @@ endif ()
 # development container), also parse and render the real DOT output as SVG.
 add_executable(clutch_graph_tests
         unit/graph_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/core/warnings/policy.cpp"
+        "${PROJECT_SOURCE_DIR}/src/toolchains/safety.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/capture.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/build_graph.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/dependencies/dependency.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/pch/pch.cpp"
@@ -144,7 +148,48 @@ elseif (CLUTCH_TEST_CC)
 else ()
     find_program(CLUTCH_API_CC NAMES cc clang gcc)
 endif ()
+if (CLUTCH_TEST_SELF_HOSTING AND NOT (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC))
+    message(FATAL_ERROR "Self-hosting verification requires Python 3.9+, Ninja and a C compiler")
+endif ()
 if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    # Opt in explicitly: this compiles the complete tool twice, independently of
+    # the short functional suites used in ordinary edit/test cycles.
+    if (CLUTCH_TEST_SELF_HOSTING)
+        add_test(NAME clutch.self-hosting
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/self_hosting.py"
+                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}"
+                --work-root "${CMAKE_CURRENT_BINARY_DIR}/self-hosting")
+        set_tests_properties(clutch.self-hosting PROPERTIES LABELS "self-hosting" TIMEOUT 1800)
+    endif ()
+    add_test(NAME clutch.tooling-safety
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/tooling_safety_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.tooling-safety PROPERTIES TIMEOUT 180)
+    # Script commands are explicit user tools, with lifecycle/failure gates.
+    add_test(NAME clutch.commands
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/commands_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.commands PROPERTIES TIMEOUT 180)
+    # Live processes use bounded rendezvous/cleanup, not timestamp assumptions.
+    add_test(NAME clutch.watch
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/watch_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.watch PROPERTIES TIMEOUT 240)
+    # Compile shipped feature examples unchanged, including relocated source bundles.
+    add_test(NAME clutch.feature-examples
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/feature_examples_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.feature-examples PROPERTIES TIMEOUT 240)
+    add_test(NAME clutch.configured-files
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/configured_files_integration.py"
+            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    set_tests_properties(clutch.configured-files PROPERTIES TIMEOUT 180)
     # Exercise omitted settings with real native tools and isolated availability.
     add_test(NAME clutch.defaults
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/defaults_integration.py"

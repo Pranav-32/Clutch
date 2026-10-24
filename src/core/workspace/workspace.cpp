@@ -27,6 +27,12 @@ void append_project(Project &workspace, Project member) {
                              member.name);
 
   workspace.projects.push_back({member.name, member.version, member.root});
+  workspace.inputs.insert(workspace.inputs.end(),
+                          member.inputs.begin(),
+                          member.inputs.end());
+  workspace.configured_files.insert(workspace.configured_files.end(),
+                                    member.configured_files.begin(),
+                                    member.configured_files.end());
   workspace.dependency_requests.insert(workspace.dependency_requests.end(),
                                        member.dependency_requests.begin(),
                                        member.dependency_requests.end());
@@ -152,7 +158,7 @@ Project load_project(const Options &options) {
   if (!document.contains("workspace")) {
     auto project = load_project_manifest(options, document);
     project.projects.push_back({project.name, project.version, project.root});
-    project.inputs = std::move(inputs);
+    project.inputs.insert(project.inputs.end(), inputs.begin(), inputs.end());
     validate_inputs(project.inputs);
     return project;
   }
@@ -181,6 +187,10 @@ Project load_project(const Options &options) {
   workspace.generator = settings.generator;
   workspace.optimize = settings.optimize;
   workspace.warnings = settings.warnings;
+  workspace.warning_options = settings.warning_options;
+  workspace.debug_symbols = settings.debug_symbols;
+  workspace.safety = settings.safety;
+  workspace.commands = settings.commands;
   workspace.runtime = settings.runtime;
   workspace.is_workspace = true;
   workspace.language = "mixed";
@@ -210,6 +220,10 @@ Project load_project(const Options &options) {
       throw std::runtime_error("nested workspaces are not supported: " +
                                input.u8string());
 
+    if (child.contains("command"))
+      throw std::runtime_error("workspace root owns command declarations; "
+                               "move member commands to the root manifest");
+
     if (child.contains("profile") || child["build"]["generator"] ||
         child["build"]["runtime"])
       throw std::runtime_error(
@@ -224,7 +238,7 @@ Project load_project(const Options &options) {
         load_project_manifest(member_options, child, false, workspace.build));
   }
 
-  workspace.inputs = std::move(inputs);
+  workspace.inputs.insert(workspace.inputs.end(), inputs.begin(), inputs.end());
   validate_inputs(workspace.inputs);
   return workspace;
 }

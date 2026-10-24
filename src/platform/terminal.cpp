@@ -49,7 +49,10 @@ void status(const std::string &action, const std::string &message) {
 #endif
   // Redirected logs remain plain text; an explicit NO_COLOR disables ANSI too.
   color = color && !environment_value("NO_COLOR");
+  // A child inherits stdout: flush before launching it so redirected logs
+  // preserve the lifecycle status line ahead of the child's output.
   std::cout << (color ? status_color : "") << action
-            << (color ? reset_color : "") << " " << message << '\n';
+            << (color ? reset_color : "") << " " << message << '\n'
+            << std::flush;
 }
 }  // namespace clutch

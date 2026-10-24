@@ -13,8 +13,11 @@
 
 #pragma once
 
+#include "core/commands/commands.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/dependencies/dependency.hpp"
 #include "core/paths.hpp"
+#include "core/safety/settings.hpp"
 #include "core/targets/target.hpp"
 #include "core/workspace/inputs.hpp"
 
@@ -40,10 +43,19 @@ struct Project {
   std::string name, cxx_standard = "17", c_standard = "11";
   std::string language = "auto", generator;
   std::string optimize, warnings = "extra";
+  std::vector<std::string> warning_options{};
+  bool debug_symbols = true;
+  SafetySettings safety{};
+  // Compiler-reported Windows sanitizer DLLs; persisted on each resolved
+  // target.
+  std::vector<fs::path> safety_runtime_libraries{};
   std::string runtime = "static";
   // Inputs are resolved before generation; headers are found through includes.
   std::vector<fs::path> sources, includes;
   std::vector<fs::path> additional_files{};
+  std::vector<ConfiguredFile> configured_files{};
+  // Root-owned commands are never inherited from imported dependencies.
+  std::vector<ProjectCommand> commands{};
   std::vector<fs::path> pch_c, pch_cpp;
   // Definitions omit driver prefixes; graph construction supplies -D or /D.
   std::vector<std::string> defines;

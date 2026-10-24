@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Shell syntax is evaluated only because a shell is explicitly selected.
+[project]
+name = "posix_commands"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[[command]]
+name = "hello"
+argv = ["sh", "-c", "printf '%s\\n' \"$1\"", "clutch-example", "Hello from the POSIX shell"]

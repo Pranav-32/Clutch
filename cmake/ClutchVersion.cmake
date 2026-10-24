@@ -71,6 +71,9 @@ function(clutch_generate_version source_dir binary_dir)
     endif ()
 
     file(MAKE_DIRECTORY "${binary_dir}/generated/core")
+    # Native Clutch template generation uses the same public variable spelling.
+    # Function scope keeps Git build identity separate from numeric project data.
+    set(PROJECT_VERSION "${CLUTCH_VERSION}")
     configure_file("${source_dir}/src/core/version.hpp.in"
             "${binary_dir}/generated/core/version.hpp" @ONLY)
     # Packaging reads the same identity compiled into --version.

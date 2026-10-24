@@ -31,8 +31,10 @@ clutch build --release --jobs 4
 ```
 
 `clutch .` validates the manifest, discovers sources and tools, and writes build
-files without building project artifacts. External-library configuration may run
-compiler probes or upstream configure scripts; see [dependencies](dependencies.md#cmake-libraries).
+files without building project artifacts. Optional safety checks compile/link
+small probes; external-library configuration may also run compiler probes or
+upstream configure scripts. See [profile safety](manifest.md#safety) and
+[dependencies](dependencies.md#cmake-libraries).
 `build`, `run`, and `test` load the saved configuration
 and execute the selected native backend. They require configuration first.
 Changes to `clutch.toml` require another explicit `clutch .` invocation; adding
@@ -130,6 +132,130 @@ forced-build actions as well as rebuilding selected native targets; see
 [dependency adapters](dependencies.md#contributing-a-foreign-adapter) for scheduling
 and NMake/JOM behavior.
 
+## Format, analyze and debug
+
+These native-manifest commands run optional tools installed on your machine:
+
+```sh
+clutch fmt --check                  # Report differences without editing
+clutch fmt                          # Apply clang-format
+clutch .                            # Produce the compilation database
+clutch lint                         # Run clang-tidy using that database
+clutch lint --checks=-*,bugprone-*
+clutch debug --target my_app -- "argument with spaces"
+clutch debug --release --target my_app
+```
+
+`fmt` reads the manifest without configuring, fetching dependencies or compiling.
+It formats selected project/workspace sources, selected headers and sibling
+headers in those source directories. Add headers in other directories to the
+source patterns when you want them included. It follows `.clang-format` discovery
+and does not traverse dependency caches or unrelated repository directories.
+
+`lint` requires a current configuration, reads `.clang-tidy`, and processes the
+project/workspace translation units using the profile's compilation database.
+Dependency targets are excluded; included headers can still produce diagnostics
+according to the analyzer configuration. It stops on a failing tool invocation
+and preserves that exit status. It does not apply automatic source fixes.
+Build dependency-generated headers first if the project needs them for analysis.
+
+`debug` builds the selected executable using the same target selection, `--jobs`
+and `--clean` options as `run`, then opens an interactive LLDB, GDB or CDB session
+in that order of availability. Use `--tool <executable>` to select a debugger,
+formatter or analyzer explicitly. Debuggers must retain their supported executable
+name (`lldb`, `gdb`, versioned variants or `cdb`), even when given by absolute path.
+Program arguments go after `--`. The selected profile must have
+`debug_symbols = true`; release profiles can enable this without changing
+optimization. The native debugger owns stepping, breakpoints and startup behavior.
+
+In CLion, add `clutch fmt --check` or `clutch lint` as an External Tool with the
+project directory as its working directory. Run interactive `clutch debug` from
+the IDE terminal. These commands do not install a CLion plugin or embed the CLI
+debugger into CLion's debugger UI. IDE integration can use the
+[File API](file-api.md) executable paths, working directories, exact compiler
+arguments and debug actions. A dedicated extension can consume that API separately.
+
+All three commands accept `--project <directory>` and `--release`; they add no
+formatter, analyzer, debugger or Python runtime requirement to ordinary Clutch
+builds. See [profile safety](manifest.md#safety) for opt-in compile diagnostics and
+runtime sanitizers, and the [tooling example](../examples/tooling/README.md).
+
+## Project commands
+
+Use `[[command]]` declarations for scripts or other executables. Run a named
+command with `clutch exec <name> -- <extra arguments>`, even before the project
+has sources or a saved configuration. An optional `phases` array attaches it to
+`before-configure`, `after-configure`, `before-build` or `after-build`.
+
+Commands use separate argv elements, inherit the environment and stop the
+operation if they fail. They do not require an embedded interpreter. Build hooks
+wrap `clutch build`, `run`, `test` and `debug`, including no-op builds; direct
+native executor invocations do not run them. See the [field reference](manifest.md#commands-and-lifecycle-hooks)
+and [runnable example](../examples/commands/README.md) for ordering, context
+tokens, workspace ownership and generated-file limitations.
+
+## Watch for changes
+
+For a native `clutch.toml` project, leave Clutch running while you edit:
+
+```sh
+clutch watch
+clutch watch --test
+clutch watch --run --target my_app -- "argument with spaces"
+clutch watch --project my_project --release --jobs 4
+clutch watch --path assets --path scripts --ignore assets/generated
+```
+
+Watch performs an initial build, configuring first if saved settings are absent
+or stale. It reuses cached compiler/generator selections. For explicit tool
+choices, run `clutch . --cc ... --cxx ... --generator ...` before starting watch.
+Each cycle uses the normal build/run/test workflow, including lifecycle hooks,
+target selection and runtime staging. Failed configuration, compilation, hooks
+or application/tests do not end the watch session; another edit starts a new
+attempt. A source, header or watched-file addition/removal triggers configuration
+again. Content edits to a manifest, lock, version/template input or recognized
+CMake/Make rule also reconfigure; ordinary source/header edits only rebuild.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--run` | Off | Build and run a short-lived application after each change; program arguments follow `--`. |
+| `--test` | Off | Build and run selected test executables. Cannot be combined with `--run`. |
+| `--target`, `-t` | Normal target selection | Repeatable target names, including qualified workspace names. |
+| `--project`, `--release`, `--jobs` | Normal project/profile/job defaults | Select the native root, configured profile and compiler concurrency. |
+| `--interval` | `250` | Poll interval in milliseconds, from 1 to 60000. |
+| `--debounce` | `200` | Quiet interval in milliseconds after the last observed edit, from 0 to 60000. A burst of saves becomes one cycle. |
+| `--path` | Empty | Extra file/directory to observe; repeatable, relative to the project or absolute. Explicit directories include all regular files. |
+| `--ignore` | Empty | Exclude a file or directory subtree; repeatable, relative to the project or absolute. Uses paths, not glob expressions. |
+
+Default coverage includes C/C++ sources and headers beneath the root, workspace
+members and local path dependencies, plus saved configuration inputs and selected
+additional files. Unrelated nested Clutch projects are skipped. Add `--path` for
+scripts, resources, include trees outside these roots or other inputs. Installed
+SDKs are not recursively scanned automatically. Output directories for both
+profiles, recognized Clutch/CMake build trees, `.clutch` caches, `.git`, ignored
+paths, symlinks and redirected directories are excluded. Explicit paths do not
+override those output/cache exclusions.
+
+Polling compares content signatures, so touching unchanged files does not rebuild.
+When changed content retains or moves back its timestamp, the watcher requests
+`--clean` for the next build so a timestamp-based executor cannot reuse old
+objects. Hashing cost grows with watched bytes; increase `--interval` for large
+trees. Traversal is bounded to 256 source roots and 100000 inspected entries per
+snapshot. Missing/unreadable inputs remain observable states; directory scans
+skip inaccessible entries instead of following redirected paths.
+
+Cycles never overlap. Edits made during a build are checked afterward and queued
+for another debounced cycle. `--run` waits for the program to exit; it does not
+restart a long-running server. Ctrl+C requests shutdown; an active child must
+finish or handle the signal before the parent returns. Watch does not force-kill
+running tools. Keep generated output in the build directory or exclude it with
+`--ignore` to avoid a hook repeatedly changing its own watched inputs.
+
+The watcher is native C++ with no Python, Node or platform-watcher dependency.
+It currently covers native manifests; whole-project CMake provider watching is
+not implemented. It adds no manifest fields and does not update Git dependencies
+to newer revisions implicitly.
+
 ## A project
 
 For several manifest directories, add root `[workspace].members` and configure
@@ -148,7 +274,8 @@ examples for standards, profiles, sources and tests.
 | `[project]` | `name`, `version`, `language`, `std`, `entry` |
 | `[workspace]` | `members` |
 | `[build]` | `generator`, `sources`, `links`, `include_dirs`, `defines`, `pch`, `runtime` |
-| `[profile.debug]`, `[profile.release]` | `build_dir`, `optimize`, `warnings` |
+| `[profile.debug]`, `[profile.release]` | `build_dir`, `optimize`, `warnings`, `debug_symbols`, `safety` |
+| `[[command]]` | `name`, `argv`, `working_dir`, `phases` |
 | `[[target]]` | `name`, `type`, `sources`, `include_dirs`, `public_include_dirs`, `defines`, `public_defines`, `links`, `public_links`, `default`, `pch` |
 | `[[test]]` | Target fields except `default`; executable only |
 | `[dependencies]` | Aliased Git, local, installed-package or catalog imports; see [dependency fields](dependencies.md#dependency-field-reference) |
@@ -173,7 +300,7 @@ build_dir = "Clutch-build-debug"
 [profile.release]
 build_dir = "Clutch-build-release"
 optimize = "speed"       # none, speed, size
-warnings = "extra"       # none, default, extra
+warnings = "extra"       # Preset, or an array such as ["extra", "shadow"]
 ```
 
 A generator chooses native build files and their executor. A toolchain means
@@ -273,11 +400,13 @@ file. Invalidation follows dependencies through libraries and executables, inclu
 staged Windows DLL copies. This prevents stale flags or archive members when Make
 observes equal file timestamps, even after recompiling an object within the same tick.
 Unchanged commands keep existing outputs for incremental builds. Configuration
-still performs no compilation; the next build recreates invalidated outputs.
+does not build project artifacts; optional safety and external-adapter probes may
+compile small checks. The next build recreates invalidated project outputs.
 
 ## Build directories and IDEs
 
-Debug builds generate symbols automatically. MSVC-style executable/DLL links
+Profiles control symbols through `debug_symbols`: debug defaults to `true`,
+release to `false`, independently of optimization. MSVC-style executable/DLL links
 produce PDBs; GCC/MinGW and Unix Clang normally embed debug information instead.
 Static libraries retain object symbols. Symbol-file paths and sidecar tracking
 are not yet configurable; see [debug symbols](manifest.md#debug-symbols) for

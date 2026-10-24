@@ -18,6 +18,7 @@
 #include "platform/arguments.hpp"
 
 #include "core/build_graph.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/options.hpp"
 #include "core/project_layout.hpp"
@@ -348,6 +349,20 @@ void generate_make(const Graph &graph,
   // Import libraries are secondary linker outputs. NMake treats a recipe as
   // an update even when it leaves a file unchanged; depend on the DLL normally
   // and request repair only if the import library is absent at parse time.
+  if (!graph.project.configured_files.empty()) {
+    const auto command =
+        recipe(configured_files_command(graph, options, clutch_executable));
+    // Refresh before parsing depfiles or evaluating timestamps, including
+    // direct executor invocations. The callback emits no stdout on success.
+    if (gnu)
+      make << "ifneq ($(strip $(shell " << command
+           << " && echo CLUTCH_CONFIGURED)),CLUTCH_CONFIGURED)\n"
+              "$(error Configured-file generation failed)\nendif\n\n";
+    else
+      make << "!IF [" << command
+           << "] != 0\n!ERROR Configured-file generation failed\n!ENDIF\n\n";
+  }
+
   for (size_t index = 0; index < graph.targets.size(); ++index) {
     const auto &library = graph.targets[index];
     if (library.import_library.empty())
