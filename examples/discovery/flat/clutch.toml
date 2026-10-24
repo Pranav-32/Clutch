@@ -1,0 +1,17 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Each '*' scans only its named directory; add nested directories explicitly.
+[project]
+name = "flat_example"
+version = "0.1.0"
+language = "mixed"
+std = { c = 11, cpp = 17 }
+
+[build]
+sources = ["../src/*.{cpp,c,h,hpp}", "../src/detail/*.{cpp,hpp}"]
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"

@@ -9,8 +9,14 @@ compiler. The header-only CLI11, toml++ and JSON dependencies are included in
 
 Projects built with Clutch also need a C/C++ compiler and the native build tool
 selected by their generator. Install Git 2.29+ to configure
-[Git imports](dependencies.md). Ninja is the default; see the
+[Git imports](dependencies.md). When no generator or executor is selected,
+Clutch chooses an installed compatible pair, preferring Ninja; see the
 [generator requirements](usage.md#generators) for alternatives.
+
+Named [project commands](manifest.md#commands-and-lifecycle-hooks) can run Python,
+Node or other installed tools. Install only the executables your command `argv`
+declares; Clutch does not require or install a script interpreter for ordinary
+configuration/building. Use an executable on `PATH` or an explicit path.
 
 Installation includes Clutch's license and the vendored-library notices under
 `share/licenses/clutch/`. Keep these with binary redistributions; see
@@ -82,10 +88,53 @@ own build directory. Keep native and container build trees separate.
 
 Projects configured by Clutch select their own generator and compilers
 independently; see [compiler selection](usage.md#configure-then-build).
-Self-hosting remains deferred: build Clutch itself with CMake. Runnable Clutch
+The checkout also contains a native `clutch.toml` for self-hosting. Runnable user
 projects live under [examples/](../examples/README.md), each with its own manifest.
 The normal CMake build does not publish a compilation database to the
 repository root.
+
+## Build Clutch with Clutch
+
+First build the bootstrap executable with CMake using the instructions above.
+Then use it to configure the repository's native manifest and compile Clutch:
+
+```sh
+./build/clutch . --release
+./build/clutch build --release --jobs 4
+./Clutch-build-release/clutch --version
+```
+
+The release executable can then build another copy using the debug profile:
+
+```sh
+./Clutch-build-release/clutch .
+./Clutch-build-release/clutch build --jobs 4
+./Clutch-build-debug/clutch --version
+```
+
+For the Visual Studio bootstrap layout shown earlier, the equivalent commands
+in a developer PowerShell are:
+
+```powershell
+.\build-msvc\Release\clutch.exe . --release
+.\build-msvc\Release\clutch.exe build --release --jobs 4
+.\Clutch-build-release\clutch.exe .
+.\Clutch-build-release\clutch.exe build --jobs 4
+.\Clutch-build-debug\clutch.exe --version
+```
+
+Use separate output profiles or keep the executable doing the build outside its
+destination directory. Windows cannot replace an executable that is running.
+Native self-hosting uses the host compiler and selected generator directly;
+CMake and Python are not invoked. `VERSION` is the shared release-version source,
+and native [configured files](manifest.md#configured-files) generate the Git-aware
+version header. Unchanged generated contents preserve object timestamps.
+
+CMake remains supported for contributor builds, CTest and installation. When
+using Clutch to drive this repository's CMake project, select `--provider cmake`
+explicitly because the native manifest takes precedence when both files exist.
+The [self-hosting test](testing.md#self-hosting-verification) checks two native
+generations in an isolated source copy.
 
 ## Optional dependency adapters
 

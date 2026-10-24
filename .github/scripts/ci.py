@@ -8,8 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import tomllib
@@ -57,6 +59,15 @@ def test_example(manifest, work, binary, cc, cxx, generator, output):
     settings = tomllib.loads(manifest.read_text(encoding='utf-8'))
     shutil.copytree(manifest.parent, project,
                     ignore=shutil.ignore_patterns('Clutch-build-*', '.clutch'))
+    # Script examples declare an interpreter explicitly. Use the Python running
+    # CI in the disposable copy; Windows need not provide a python3 alias.
+    if any(command.get('argv', [])[:1] == ['python3']
+           for command in settings.get('command', [])):
+        copied_manifest = project / 'clutch.toml'
+        content = copied_manifest.read_text(encoding='utf-8')
+        content = re.sub(r'(?m)^(\s*argv\s*=\s*\[\s*)"python3"(?=\s*[,\]])',
+                         lambda match: match[1] + json.dumps(sys.executable), content)
+        copied_manifest.write_text(content, encoding='utf-8')
     # Checked-in resolution must already match; CI must not silently repair it.
     frozen = ('--locked',) if (project / 'clutch.lock').is_file() else ()
     for profile in ((), ('--release',)):
@@ -130,6 +141,8 @@ def build(target, build_dir, output):
     required = {'clutch.help', 'clutch.version', 'clutch.files', 'clutch.graph', 'clutch.file-api', 'clutch.targets',
                 'clutch.workspace', 'clutch.dependencies', 'clutch.foreign-dependencies', 'clutch.cmake-projects', 'clutch.git-submodules',
                 'clutch.package-examples', 'clutch.version-ranges', 'clutch.bundle', 'clutch.zip',
+                'clutch.configured-files', 'clutch.tooling-safety', 'clutch.commands',
+                'clutch.watch', 'clutch.feature-examples', 'clutch.defaults',
                 'clutch.source-files', 'clutch.capture', 'clutch.stress-source-files',
                 'clutch.stress-capture', 'clutch.stress-integration'}
     if windows:

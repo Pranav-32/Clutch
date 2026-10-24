@@ -1,0 +1,21 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Both presets are independent of the absence of debug information.
+[project]
+name = "no_symbols_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+optimize = "none"
+debug_symbols = false
+warnings = "none"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "size"
+debug_symbols = false
+warnings = "default"

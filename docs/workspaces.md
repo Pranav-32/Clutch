@@ -76,7 +76,10 @@ public_include_dirs = ["."]
 Source/include paths resolve from the member's manifest directory. Its language
 and standards apply to its own targets and tests. Existing implicit application
 discovery works in members too, including application shorthand beside explicit
-libraries. Member-wide include paths and definitions extend the root defaults
+libraries. Omitted sources/entry discover recursively from that member's manifest,
+filtered by language. A real root's implicit scan stops at nested manifests, so
+it does not also compile member sources. Explicit `*.cpp` stays in its manifest
+directory; `**.cpp` recurses. Member-wide include paths and definitions extend the root defaults
 and stay private to that project's targets; public target requirements propagate
 through declared links. Members retain their own language standards: root compile
 defaults do not change a member's `project.std`.

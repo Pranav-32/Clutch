@@ -553,6 +553,10 @@ links=["base"]
 
     def test_build_links_enables_discovery_beside_library_targets(self):
         """Application links opt into discovery without requiring an entry path."""
+        # Root-wide discovery requires independent applications to be explicitly
+        # selected or kept in another project, rather than merely outside src/.
+        for folder in ('apps', 'checks', 'shared'):
+            shutil.rmtree(self.root / folder)
         (self.root / 'src').mkdir()
         self.write('src/main.cpp', '#include "base.h"\nint main() { return base() == BASE_API ? 0 : 1; }\n')
         library = self.targets.split('[[target]]\nname = "left"')[0]
@@ -564,6 +568,10 @@ links=["base"]
 
     def test_application_links_and_source_defaults_are_validated(self):
         """Mixing declarations preserves type, dependency and empty-source checks."""
+        for folder in ('checks', 'shared'):
+            shutil.rmtree(self.root / folder)
+        for name in ('left.cpp', 'right.cpp'):
+            (self.root / 'base' / name).unlink()
         library = self.targets.split('[[target]]\nname = "left"')[0]
         self.manifest(targets=library)
         original = (self.root / 'clutch.toml').read_text()
@@ -576,6 +584,8 @@ links=["base"]
                 manifest = original.replace('[build]', '[build]\n' + setting)
                 if 'missing' in setting:
                     manifest = manifest.replace('[build]', 'entry="apps/optional.cpp"\n[build]')
+                if setting == 'links=["base"]':
+                    shutil.rmtree(self.root / 'apps')
                 self.write('clutch.toml', manifest)
                 result = self.cli('.', '--cc', OPTIONS.cc, '--cxx', OPTIONS.cxx,
                                   '--build-tool', OPTIONS.ninja, success=False)
@@ -658,7 +668,7 @@ links=["base"]
         self.write('pattern lib/nested/detail.hxx', '#pragma once\n')
         self.write('pattern lib/nested/ignored.txt', 'not C++\n')
         target = ('[[target]]\nname="library"\ntype="static"\n'
-                  'sources=["pattern lib/*.{cpp,c,h,hxx}", "headers/*.h", "pattern lib/value.cpp"]\n'
+                  'sources=["pattern lib/**.{cpp,c,h,hxx}", "headers/*.h", "pattern lib/value.cpp"]\n'
                   '[[test]]\nname="pattern_test"\nsources=["checks/*.cpp"]\n'
                   'links=["library"]\n')
         self.write('checks/check.cpp', 'extern "C" int nested(void);\nint value();\n'
@@ -702,7 +712,7 @@ links=["base"]
                 self.write(f'sources/{directory}/{marker}', '')
         self.manifest(targets='', build_dir='sources/output')
         self.write('clutch.toml', (self.root / 'clutch.toml').read_text(encoding='utf-8').replace(
-            '[build]', '[build]\nsources=["sources/*", "sources/**/*.cpp"]'))
+            '[build]', '[build]\nsources=["sources/**", "sources/**/*.cpp"]'))
         self.configure()
         app = self.configured_targets['target_probe']
         self.assertEqual(len(app['sources']), 2)

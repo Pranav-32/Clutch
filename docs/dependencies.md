@@ -273,7 +273,7 @@ manifests currently support one project, without a nested `[workspace]`.
 
 Native dependency sources accept the same
 [recursive source patterns](manifest.md#sources-and-headers) as application
-targets, for example `sources = ["src/*.{cpp,c,h}"]`. External adapters leave
+targets, for example `sources = ["src/**.{cpp,c,h}"]`. External adapters leave
 source selection to the library's own build system.
 
 ## Installed SDKs and packages

@@ -85,6 +85,12 @@ void write_graph_visualization(const Graph &graph) {
 
   // Inputs point to their produced objects, which point to the linked
   // executable.
+  for (const auto &file : graph.project.configured_files) {
+    const auto input = node(file.input, "box", "slategray");
+    const auto output = node(file.output, "box", "purple");
+    dot << "  n" << input << " -> n" << output << " [label=\"configure\"];\n";
+  }
+
   for (const auto &target : graph.targets) {
     const auto output = node(target.output, "doubleoctagon", "forestgreen");
     for (const auto &prefix : target.precompiled_headers) {

@@ -152,8 +152,15 @@ class Snapshot {
     auto document = toml::parse_file((source / layout::manifest).u8string());
     const auto target = destination(source);
     if (auto *const project = document["project"].as_table())
-      if (auto *const entry = (*project)["entry"].as_string())
-        entry->get() = relocate(entry->get(), source, target);
+      for (const auto *const key : {"entry", "version_file"})
+        if (auto *const entry = (*project)[key].as_string())
+          entry->get() = relocate(entry->get(), source, target);
+
+    if (auto *const files = document["configure_file"].as_array())
+      for (auto &file : *files)
+        if (auto *const table = file.as_table())
+          if (auto *const input = (*table)["input"].as_string())
+            input->get() = relocate(input->get(), source, target);
 
     const auto settings = [&](toml::table &table) {
       for (const auto *const key :
@@ -357,6 +364,10 @@ fs::path bundle_project(const Options &options,
     for (const auto &path : paths)
       require_path(path);
   };
+  for (const auto &[input, signature] : project.inputs) {
+    (void)signature;
+    require_path(input);
+  }
   for (const auto *const paths : {&project.sources,
                                   &project.additional_files,
                                   &project.includes,

@@ -1,0 +1,31 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Optimization, symbols, warnings and safety policy are independent choices.
+[project]
+name = "profiles_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "main.cpp"
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+optimize = "none"
+debug_symbols = true
+warnings = ["extra", "shadow", "conversion", "error"]
+
+[profile.debug.safety]
+sanitizers = []
+lifetime = false
+strictness = "normal"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+optimize = "speed"
+debug_symbols = true
+warnings = ["default", "shadow", "no-shadow", "error"]
+
+[profile.release.safety]
+sanitizers = []
+lifetime = false
+strictness = "strict"

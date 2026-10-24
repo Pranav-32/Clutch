@@ -1,0 +1,22 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Render a private header without Python or another script interpreter.
+[project]
+name = "configured_example"
+version_file = "VERSION"
+language = "cpp"
+std = 17
+entry = "main.cpp"
+
+[[configure_file]]
+input = "build_info.hpp.in"
+output = "build_info.hpp"
+git_version = true
+variables = { API_LEVEL = "3", MESSAGE = "Configured by Clutch" }
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+debug_symbols = true

@@ -16,18 +16,33 @@ clutch test
 
 Configuration validates the manifest, resolves tools and sources, and writes
 native build files, saved configuration, `compile_commands.json` and
-`build-graph.dot` in the selected profile's build directory. External adapters may
-run compiler/configuration probes; project artifacts are built by build/run/test.
+`build-graph.dot` in the selected profile's build directory. Safety settings and
+external adapters may run compiler/configuration probes; project artifacts are
+built by build/run/test.
 Run `clutch .` again after changing the manifest or adding/removing sources.
 Existing source/header edits only need another build.
+
+Use [clutch watch](usage.md#watch-for-changes) to repeat this workflow as files
+change. Its CLI options control debounce, extra paths and exclusions; there is
+no watch table in the manifest.
 
 Point your IDE at the selected profile's compilation database. See
 [using Clutch](usage.md#build-directories-and-ides) for setup. The [file API](file-api.md)
 uses client query files in the profile directory; no extra manifest fields are
 required.
 
-Try the [runnable examples](../examples/README.md) for complete single-file, multi-file,
-C and mixed-language projects using these fields.
+Try the [examples by use case](../examples/README.md#find-a-scenario) for runnable
+manifests and commands. Start with a small project, then add one feature at a time:
+
+| Feature | Example |
+| --- | --- |
+| Source discovery and language-specific patterns | [Discovery](../examples/discovery/README.md) |
+| Static/shared targets and workspaces | [Targets](../examples/targets/README.md), [shared library](../examples/shared-library/README.md), [workspace](../examples/workspace/README.md) |
+| Dependencies and foreign build systems | [Dependency collection](../examples/dependencies/README.md), [CMake projects](../examples/cmake-project/README.md) |
+| Optimization, warnings, symbols and safety | [Profiles](../examples/profiles/README.md), [safety variants](../examples/safety/README.md) |
+| Generated files and lifecycle commands | [Configured files](../examples/configured-files/README.md), [commands](../examples/commands/README.md) |
+| Edit/build cycles and portable source archives | [Watch](../examples/watch/README.md), [bundle](../examples/bundle/README.md) |
+| IDE integration and native build files | [File API](../examples/file-api/README.md), [generators](../examples/generators/README.md) |
 
 ## Tables and value rules
 
@@ -35,11 +50,13 @@ C and mixed-language projects using these fields.
 | --- | --- | --- |
 | `[project]` | Yes, except a virtual workspace root | Project name/version, language, standards and optional entry source |
 | `[build]` | No | Generator, application sources/links, include directories and definitions |
-| `[profile.debug]` | No | Debug build directory, optimization and warnings |
-| `[profile.release]` | No | Release build directory, optimization and warnings |
+| `[profile.debug]` | No | Debug build directory, optimization, warnings, symbols and safety checks |
+| `[profile.release]` | No | Release build directory, optimization, warnings, symbols and safety checks |
 | `[workspace]` | No | Compose explicit member projects; a virtual root may omit `[project]` |
 | `[[target]]` | No; repeatable | Explicit executable, static or shared library |
 | `[[test]]` | No; repeatable | Independent executable test name and sources |
+| `[[configure_file]]` | No; repeatable | Generate project-private headers/text from literal templates |
+| `[[command]]` | No; repeatable | Named commands and optional configure/build lifecycle hooks |
 | `[dependencies]` | No | Git, local, installed SDK and supported named source-catalog imports |
 
 Unknown keys and unsupported profile names are errors. Values use the types
@@ -87,10 +104,11 @@ manifest fields and host-specific `backend.toml`/`configuration.toml` caches.
 | Field | Type | Required/default | Behavior |
 | --- | --- | --- | --- |
 | `name` | String | Required | Nonempty name containing letters, digits, `_` or `-`. Also names the default application created from project source settings, with `.exe` appended on Windows. |
-| `version` | String | Required | Nonempty project metadata, recorded in `clutch.lock`; not added as a compiler macro. Standalone projects do not require SemVer, but dependency version constraints do. |
+| `version` | String | Required unless `version_file` is supplied | Nonempty project metadata, recorded in `clutch.lock`; not added as a compiler macro. Standalone projects do not require SemVer, but dependency version constraints do. |
+| `version_file` | String path | Omitted; mutually exclusive with `version` | Existing text file containing canonical `major.minor.patch[-prerelease]`. Read relative to this manifest and fingerprinted as configuration input; also supplies a native dependency's declared version. |
 | `language` | String | `"auto"` | `"c"`, `"cpp"`, `"c++"`, `"mixed"` or `"auto"`; `"c++"` is an alias for `"cpp"`. |
 | `std` | Integer, string or table | C `11`; C++ `17` | Select language standards; see the rules below. |
-| `entry` | String path | Omitted | Add one application source to explicit/discovered sources. This is additive, not a replacement for discovery. |
+| `entry` | String path | Omitted | Select one application source, optionally alongside `build.sources`. Suppresses implicit discovery. |
 
 Example for C++:
 
@@ -104,7 +122,8 @@ std = 17
 
 `language = "auto"` inspects application sources: C-only inputs select C,
 C++-only inputs select C++, and both select mixed. Explicit `"c"` and `"cpp"`
-must match application source types. Tests may use either language independently.
+filter implicit discovery to that language, and must match explicitly selected
+application source types. Tests may use either language independently.
 `"mixed"` permits both languages, including a project whose current application
 sources happen to use only one.
 
@@ -149,8 +168,8 @@ Clutch validates both standard values even if a language is currently unused.
 
 | Field | Type | Default | Behavior |
 | --- | --- | --- | --- |
-| `generator` | String | `"ninja"` | Native build-file format and executor family; the configuration CLI's `--generator` overrides it. |
-| `sources` | Array of string paths or patterns | Discover recursively under `src/` | Select application files; a nonempty array replaces discovery. An empty array also triggers discovery. |
+| `generator` | String | Automatic selection | Native build-file format and executor family; the configuration CLI's `--generator` overrides it. Omit it to discover an available compatible generator/executor. |
+| `sources` | Array of string paths or patterns | Discover recursively from the manifest directory when entry is also omitted | Select application files; a nonempty array replaces discovery. An empty array triggers discovery only without `project.entry`. |
 | `include_dirs` | Array of string paths | Empty, plus an existing root `include/` | Existing directories added to every target/test in the project; workspace-root directories are shared with members. |
 | `defines` | Array of strings | Empty | Preprocessor definitions for every target/test in the project; workspace-root definitions are shared with members. |
 | `links` | Array of target names | Empty | Private library dependencies of the default application named by `project.name`; accepts qualified workspace names. |
@@ -169,7 +188,7 @@ defines = ["APP_VERSION=1", "ENABLE_LOGGING"]
 
 Supported source extensions are `.c`, `.cc`, `.cpp` and `.cxx`, with these exact
 lowercase spellings. `.c` uses the C compiler; the other extensions use C++.
-Source arrays accept existing regular files and recursive filename patterns.
+Source arrays accept existing regular files and filename patterns.
 Only the extensions above produce compiler actions. Headers and other matched
 files appear as noncompiled project files in the file API and native IDE
 projects; they do not create compilation-database entries. Clutch sorts and
@@ -177,12 +196,15 @@ deduplicates canonical paths, including overlaps between patterns and files.
 
 ```toml
 [build]
-sources = ["src/*.{cpp,c,h,hpp}", "support/*.cpp"]
+sources = ["src/**.{cpp,c,h,hpp}", "support/*.cpp"]
 ```
 
-`folder/*` selects all regular files in that folder and its descendants.
-`folder/*.{cpp,c,h}` selects those suffixes recursively; `folder/**/*.cpp`
-also works. `*` matches any filename text and `?` matches one filename byte.
+`*.cpp` selects only files beside this manifest. `folder/*` selects only regular
+files directly in `folder/`, and `folder/*.{cpp,c,h}` filters that directory's
+files by suffix. `**.cpp` scans the manifest directory and all descendants;
+`folder/**.{cpp,c,h}` and `folder/**/*.cpp` recurse from `folder/`.
+`*` matches any filename text and `?` matches one filename byte. A double star
+in the filename, or a `**` directory immediately before it, enables recursion.
 Brace choices may be combined, but cannot be nested or empty. Directory
 components must be literal, apart from an optional `**` directly before the
 filename. Matching is case-sensitive on every platform. Use forward slashes
@@ -202,17 +224,24 @@ array. New or removed matches require another `clutch .`; changes to existing
 headers/sources use the backend's normal dependency tracking.
 
 Without `[[target]]`, all application sources form one executable and must provide
-one entry point. Discovery includes nested source directories; place independent
-test programs outside `src/` or select application sources explicitly. At least
-one application source is required in this implicit mode, even when tests are declared.
+one entry point. When both sources and entry are omitted, discovery starts at
+this manifest's directory and recurses. C selects `.c`, `.h` and `.H`; C++ selects
+`.cc`, `.cpp`, `.cxx`, `.h`, `.H`, `.hh`, `.hpp` and `.hxx`; mixed/auto select both
+sets. Headers remain noncompiled IDE files. Only recognized source/header
+suffixes are discovered implicitly; explicit patterns may also select other files.
+Nested directories containing their own `clutch.toml` are separate projects and
+are not traversed implicitly, including workspace members. Generated-tree and
+directory-link exclusions apply as above. Sources owned by declared tests and
+other explicit targets are excluded from the implicit application.
 
-For a single file outside `src/`, either specify `sources = ["main.cpp"]` under
-`[build]` or `entry = "main.cpp"` under `[project]`. `entry` alone still includes
-any sources found under `src/`.
+At least one application source is required, even when tests are declared.
+For several independent programs, declare targets/tests, split them into member
+manifests, or select application sources explicitly. `entry = "main.cpp"` selects
+just that file unless `build.sources` supplies additional files.
 
 With explicit targets, `project.entry`, `build.sources` or nonempty `build.links`
 enables the default application. It coexists with the declared libraries/executables. Files
-found automatically under `src/` are excluded from that application when another
+found automatically are excluded from that application when another
 explicit target owns them. Explicitly listed sources and the entry file remain
 deliberate selections; Clutch does not remove them. Each target compiles each of
 its sources only once.
@@ -241,6 +270,18 @@ providers. Local member/target definitions override inherited public requirement
 for that target's compilation; only declared public requirements are exported.
 
 ### Generators and compiler selection
+
+Omitting `build.generator` and `--generator` enables automatic selection when
+there is no generic build-tool override. Clutch tries a usable cached generator
+first, then Ninja, GNU Make, NMake, JOM, Visual Studio and Xcode in that order,
+skipping unsupported hosts, missing/old executors and incompatible compilers.
+If none work, configuration reports the attempted choices without publishing a
+build configuration. Explicit generator selections remain authoritative.
+
+An explicit `--build-tool` or `CLUTCH_BUILD_TOOL` can identify a standard executor
+family by its filename when the generator is omitted; custom-named wrappers
+require a generator too. See [tool selection](usage.md#configure-then-build)
+for override precedence and platform discovery.
 
 | `generator` | Native output | Requirements |
 | --- | --- | --- |
@@ -272,6 +313,174 @@ selections, then discovery. Build executor precedence is `--build-tool`,
 discovery. Generator variables are `NINJA`, `MAKE`, `NMAKE`, `JOM`, `MSBUILD` and
 `XCODEBUILD`. These values are executable names/paths, not commands with flags.
 Reconfigure to change selections; `build`, `run` and `test` use saved settings.
+
+## Configured files
+
+Use `[[configure_file]]` to create a version header or other small text file
+without a script interpreter. For example:
+
+```toml
+[project]
+name = "hello"
+version_file = "VERSION"
+
+[[configure_file]]
+input = "build_info.hpp.in"
+output = "build_info.hpp"
+git_version = true
+variables = { API_LEVEL = "3" }
+```
+
+`VERSION` contains a line such as `1.2.3`. A template can contain:
+
+```cpp
+#pragma once
+inline constexpr auto app_version = "@PROJECT_VERSION@";
+inline constexpr auto api_level = @API_LEVEL@;
+```
+
+Clutch writes the output beneath the profile's `generated/` directory in an
+automatically scoped subdirectory. Its owning project's targets can simply
+`#include <build_info.hpp>`: the generated include root is added automatically.
+Workspace members and native dependencies keep separate namespaces, even when
+they choose the same output filename. Outputs are noncompiled IDE files and do
+not add translation units to `compile_commands.json`.
+
+| Field | Type / default | Meaning |
+| --- | --- | --- |
+| `input` | Required nonempty string path | Existing template, relative to its manifest or absolute. It is a configuration input. |
+| `output` | Required nonempty relative string path | Name beneath this project's generated directory; absolute paths, escaping `..` paths and duplicate outputs are rejected. |
+| `variables` | Table of strings; empty | Literal `@NAME@` substitutions. Keys are ASCII identifiers. Values are inserted once, without recursive expansion, shell execution or language-specific escaping. |
+| `git_version` | Boolean; `false` | Resolve `PROJECT_VERSION` using local Git state. Requires a canonical release version. No fetching or network access. |
+
+Built-in variables are `PROJECT_NAME`, `PROJECT_VERSION_BASE` and
+`PROJECT_VERSION`. The latter normally equals the base version. With
+`git_version = true`, a clean matching `v<version>` tag uses the release version;
+other commits include `.dev`/`-dev` and a Git abbreviation, with `.dirty` and
+`.shallow` where applicable. Without Git or in a source archive, it uses
+`<version>+source`. Worktrees are supported; an unrelated parent repository is
+not used. `PROJECT_` variable names are reserved.
+
+Unknown well-formed `@NAME@` tokens are errors. `@@` writes a literal `@`;
+Doxygen commands and other unpaired `@` text are retained. Template values are
+plain text, so use values appropriate to the output language's quoting rules.
+
+Configure again after changing a template or version file. Git commit/tag/dirty
+state is refreshed during both CLI and direct native builds. Files are written
+only when bytes change, preserving no-op builds; missing outputs are recreated.
+Competing callbacks serialize publication and report a persistent writer lock
+rather than waiting indefinitely. The lock wait is bounded to ten seconds;
+Windows handles still closing after lock deletion are retried within that bound.
+An inaccessible lock that persists reports an error rather than bypassing the
+lock or writing concurrently.
+
+Use configured files for simple text substitution, such as a version header or
+feature constants. No interpreter is needed. Use [commands](#commands-and-lifecycle-hooks)
+when a task needs a script, resource processor or other executable instead.
+Neither facility is a declaration of compiler-generated source outputs.
+Initial PCH inputs must already exist when the manifest is read.
+Virtual workspace roots place templates in real members instead. Limits are
+256 declarations per manifest, one MiB per input, four MiB per expanded output
+and sixteen MiB per refresh batch. Source bundles retain the templates and
+version files and regenerate their outputs after extraction.
+
+## Commands and lifecycle hooks
+
+Declare a named argument-vector command once, then run it manually or attach it
+to one or more CLI lifecycle phases:
+
+```toml
+[[command]]
+name = "generate-resources"
+argv = ["python3", "scripts/generate.py", "@BUILD_DIR@/resources"]
+working_dir = "@PROJECT_DIR@"
+phases = ["before-build"]
+
+[[command]]
+name = "check-assets"
+argv = ["node", "scripts/check-assets.mjs"]
+# No phases: this command runs only through clutch exec.
+```
+
+```sh
+clutch exec check-assets
+clutch exec generate-resources -- --verbose
+clutch build
+```
+
+| Field | Type/default | Meaning |
+| --- | --- | --- |
+| `name` | Required nonempty string | Unique name containing ASCII letters, digits, `_` or `-`; selects `clutch exec <name>`. |
+| `argv` | Required nonempty string array | Executable followed by separate arguments. The executable must be nonempty; empty later arguments are preserved. Bare executable names use `PATH`; explicit relative executable paths resolve against `working_dir`. |
+| `working_dir` | Nonempty string, `"."` | Child working directory, relative to the root manifest or absolute. It must exist when the command starts; Clutch does not create it. |
+| `phases` | Array of strings, `[]` | Any of the four phases below. Duplicate phases and unknown names are errors. An empty list means manual-only. |
+
+There are at most 256 commands per manifest and 1024 elements in each argv or
+phase array. Unknown fields, duplicate names, wrong types and embedded NUL bytes
+are rejected before hooks execute. `clutch exec` parses the root command table
+without requiring source discovery, dependency resolution, compilers or saved
+configuration. This makes it usable for generating initial source files before
+the first `clutch .`. It accepts `--project`, `--release` and literal extra
+arguments after `--`.
+
+| Phase | When it runs |
+| --- | --- |
+| `before-configure` | After validating the manifest/sources and claiming the profile directory, before dependency resolution, configured-file rendering and compiler probes. |
+| `after-configure` | After native rules, compilation database, graph, lock and tool selections are written, before committing saved configuration and a successful File API reply. |
+| `before-build` | After target selection and optional artifact cleaning, before foreign dependency builds and native compilation/linking. |
+| `after-build` | After a successful native build and runtime staging, before running an application, tests or a debugger. |
+
+Build phases apply to `clutch build`, `run`, `test` and `debug`; they run once per
+invocation, including a no-op build, rather than once per translation unit or
+target. Hooks run serially in declaration order for each phase. A command with
+multiple phases runs once in each matching phase. Hooks do not run for target
+listing, formatting, linting, bundles, manual commands or internal callbacks.
+Direct Ninja/Make/MSBuild/Xcode invocations do not execute these CLI hooks;
+automatic Ninja/Make reconfiguration can invoke configure hooks through Clutch.
+Whole-project CMake provider builds keep their own native custom commands.
+
+Each `clutch watch` cycle invokes the ordinary configure/build/run/test workflow,
+so matching hooks run for that cycle too. Use the watcher's `--path` option to
+observe script/resource edits and `--ignore` for generated inputs that would
+otherwise create a rebuild loop.
+
+Every argument and working directory supports these single-pass substitutions:
+
+| Token | Value |
+| --- | --- |
+| `@PROJECT_DIR@` | Absolute root manifest directory, including for workspaces |
+| `@BUILD_DIR@` | Absolute selected profile directory; it exists for configure/build hooks |
+| `@PROFILE@` | `debug` or `release` |
+| `@@` | Literal `@`; use `@@PROFILE@@` to pass the token text itself |
+
+Unknown paired tokens are errors. Substituted values and extra CLI arguments are
+not recursively expanded. Other text is passed literally: `$HOME`, `%VAR%`, `*`,
+`&&`, pipes and redirection are not interpreted. Commands inherit the environment
+and standard streams. Python, Node and similar programs are needed only when a
+declared command uses them; Clutch does not embed an interpreter. To use shell
+syntax, explicitly invoke an installed shell and supply its command argument.
+
+A failed hook stops the operation and preserves its child exit status. Later
+hooks and application/test/debugger execution do not run. Configure failures
+leave a profile-local pending marker; saved builds are blocked until a successful
+`clutch .`, and active File API clients receive a failed configuration reply.
+Commands' own filesystem side effects are not rolled back.
+
+The root manifest owns commands for the entire workspace. Move member hooks into
+the root rather than declaring them per member; dependency commands are not
+inherited or automatically executed. Source bundles retain command declarations,
+but opaque argv strings and external tool installations are not relocated or
+packaged: prefer relative script paths/context tokens and retain needed scripts.
+
+These hooks are lifecycle actions, not dependency-aware generated-output rules.
+Configuration validates sources, include directories, PCH and template inputs
+before running configure hooks. To create such initial inputs, first run a manual
+`clutch exec` command. Do not rewrite manifests, version files or template inputs
+from hooks: configuration fingerprints reject changes made during an operation.
+Build hooks may refresh existing generated headers/resources, but cannot add
+translation units to a saved graph. Reconfigure after changing source membership.
+Commands should be repeatable; avoid overlapping operations in the same profile.
+See the [runnable command example](../examples/commands/README.md).
 
 ## Precompiled headers
 
@@ -317,7 +526,7 @@ field, transitive resolution, conflict/cycle diagnostics and offline operation.
 
 ## [profile.debug] and [profile.release]
 
-Both profiles accept the same three string fields. Debug is selected by default;
+Both profiles accept the same fields. Debug is selected by default;
 `--release` selects release during configuration and execution. Profiles apply
 their own defaults independently and do not inherit overrides from each other.
 Custom profiles and per-test profile overrides are not implemented.
@@ -326,7 +535,9 @@ Custom profiles and per-test profile overrides are not implemented.
 | --- | --- | --- | --- |
 | `build_dir` | `"Clutch-build-debug"` | `"Clutch-build-release"` | Nonempty relative/absolute output directory for native rules, caches, IDE metadata, objects and executable outputs |
 | `optimize` | `"none"` | `"speed"` | `"none"`, `"speed"` or `"size"`; mapping below |
-| `warnings` | `"extra"` | `"extra"` | `"none"`, `"default"` or `"extra"`; mapping below |
+| `warnings` | `"extra"` | `"extra"` | Preset `"none"`, `"default"`, `"extra"`, or an array of warning names; mappings below |
+| `debug_symbols` | `true` | `false` | Boolean controlling compiler/linker debug information independently of optimization and CRT selection |
+| `safety` | Empty table | Empty table | Explicit static diagnostics and runtime detectors; described below |
 
 ```toml
 [profile.debug]
@@ -350,19 +561,83 @@ warnings = "none"
 | `warnings = "extra"` | `-Wall -Wextra` | `/W4` |
 
 `warnings = "none"` suppresses compiler warnings; errors still fail the build.
-Debug builds also enable debugging information (`-g` or `/Z7`, plus the applicable
+The `debug_symbols` setting enables debugging information (`-g` or `/Z7`, plus the applicable
 linker debug settings). Optimization and warning overrides do not change which
 profile is active. Native IDE generators express corresponding settings through
 their project formats while preserving Clutch's selected policies.
 
+### Warning arrays
+
+Use an array when you want individual categories instead of a preset:
+
+```toml
+[profile.debug]
+warnings = ["extra", "shadow", "conversion", "no-unused", "error"]
+```
+
+An optional `"default"`, `"extra"` or `"all"` baseline is applied first. Choose at
+most one baseline; omit it to keep the compiler's basic warning level. `[]` adds
+no GCC/Clang warning switches and explicitly uses MSVC's `/W1` basic level. It is
+different from `"none"`, which suppresses warnings. Baseline strings outside an
+array retain their existing behavior.
+
+Category entries then apply in array order. Prefix a category with `no-` to
+disable it: `"no-shadow"`, for example. `"error"` promotes warnings to errors;
+`"no-error"` restores ordinary warning severity. Exact duplicate names, multiple
+baselines, unknown names, non-string entries and `"none"` inside arrays are errors.
+Use the string preset `warnings = "none"` when suppression is intended.
+
+| Array name | GCC / GNU-style Clang | Microsoft-style drivers |
+| --- | --- | --- |
+| `default` | `-Wall` | `/W3` |
+| `extra` | `-Wall -Wextra` | `/W4` |
+| `all` | `-Wall` | `/Wall` |
+| `shadow` | `-Wshadow` | C4456, C4457, C4458, C4459 |
+| `conversion` | `-Wconversion` | C4244, C4267, C4305 |
+| `sign-conversion` | `-Wsign-conversion` | C4245, C4365 |
+| `unused` | `-Wunused` | C4100, C4101, C4189, C4505 |
+| `format` | `-Wformat=2` | C4475, C4477 |
+| `deprecated` | `-Wdeprecated-declarations` | C4996 |
+| `pedantic` | `-Wpedantic` | Configuration error: no supported equivalent |
+| `error` | `-Werror` | `/WX` |
+
+MSVC categories enable each listed diagnostic at level one (`/w1<number>`);
+disabled categories use `/wd<number>`. GCC/Clang disabled categories use `-Wno-`,
+with `no-format` mapped to `-Wno-format`. These are documented category mappings,
+not a promise that different compilers diagnose exactly the same programs.
+clang-cl keeps Microsoft-style baseline levels and uses Clang's diagnostic groups
+for individual categories, passed through `/clang:`. Its category mappings follow
+the GCC/Clang column, including `pedantic`; MSVC diagnostic numbers apply to `cl`.
+In particular, GCC/Clang `-Wall` is a conventional group, not every warning; MSVC
+`/Wall` includes diagnostics disabled by default. A compiler-native raw warning
+flag is not accepted as a portable array name.
+
+Workspace roots own the policy, and every native target/PCH receives the same
+resolved warning options. Exact flags appear in the compilation database and IDE
+project files. Foreign libraries retain their native warning policies. See the
+[GCC warning reference](https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html)
+and [MSVC warning controls](https://learn.microsoft.com/en-us/cpp/build/reference/compiler-option-warning-level).
+
 ### Debug symbols
 
-The debug profile enables symbol generation automatically; there is no separate
-manifest field for choosing a symbol format or output path.
+The debug profile defaults to symbols enabled and release defaults to disabled.
+Set `debug_symbols = true` in release for optimized debugging, or set it to `false`
+in debug to omit Clutch-generated symbols. This does not switch optimization,
+`NDEBUG`, Microsoft CRT selection or the active build directory. Existing artifacts
+such as a PDB from an earlier configuration may remain until cleaned; their mere
+presence does not prove the current invocation generated symbols. Symbol format
+and output paths follow the selected compiler/generator.
+
+```toml
+[profile.release]
+optimize = "speed"
+debug_symbols = true
+```
 
 | Compiler/generator | Current debug output |
 | --- | --- |
 | MSVC or clang-cl with an MSVC-style linker | `/Z7` embeds symbols in `.obj` files; `/DEBUG` produces a linker PDB for each executable or DLL. Static libraries retain their objects' symbols without a separate compiler PDB. |
+| GNU-style Clang targeting the Microsoft ABI | `-g -gcodeview` emits CodeView information; the linker receives `/DEBUG` to produce a PDB for each executable or DLL. |
 | GCC/MinGW or Unix Clang | `-g` requests debugging information, normally embedded DWARF in objects and the linked executable/library on these toolchains. A `.pdb` file is not expected from MinGW's usual debug configuration. |
 | Xcode | Debugging symbols are enabled with `DEBUG_INFORMATION_FORMAT = dwarf`; Clutch does not currently request a separate `.dSYM` bundle. |
 
@@ -385,6 +660,85 @@ See Microsoft's documentation for
 [`/Z7` and `/Zi`](https://learn.microsoft.com/en-us/cpp/build/reference/z7-zi-zi-debug-information-format)
 and [`/PDB`](https://learn.microsoft.com/en-us/cpp/build/reference/pdb-use-program-database),
 and GCC's [debugging options](https://gcc.gnu.org/onlinedocs/gcc/Debugging-Options.html).
+
+### Safety
+
+Safety checks help find defects; they do not change C++ ownership rules or prove
+memory safety. Static diagnostics run during compilation. Sanitizers instrument
+the executable and report defects only when the relevant code runs. Exercise
+instrumented applications with `clutch run` and `clutch test`.
+
+```toml
+[profile.debug]
+debug_symbols = true
+
+[profile.debug.safety]
+sanitizers = ["address"]
+strictness = "strict"
+lifetime = false
+```
+
+| Field | Type/default | Behavior |
+| --- | --- | --- |
+| `sanitizers` | Array of strings, `[]` | `"address"` detects many out-of-bounds accesses and use-after-free; `"undefined"` checks supported undefined behavior; `"leak"` checks leaks at runtime; `"thread"` checks data races. Request only detectors supported by the installed compiler, target and runtime. |
+| `lifetime` | Boolean, `false` | Enables Clang's newer C++ lifetime-analysis warning groups. Requires a compiler that actually accepts them; no version or filename assumption is made. C units are unaffected. |
+| `strictness` | `"normal"` or `"strict"`, `"normal"` | Normal lifetime mode requests high-confidence `-Wlifetime-safety-permissive`. Strict mode requests `-Wlifetime-safety` and treats its diagnostics as errors. GNU-style sanitizer builds also disable recovery, and `clutch lint` treats selected analyzer warnings as errors. This is not a safety score or a guarantee that more defects will be found. |
+
+#### Safety strictness levels
+
+Only `"normal"` and `"strict"` are accepted. Choose the detectors separately:
+strictness alone does not enable lifetime analysis or any sanitizer.
+
+| Behavior | `"normal"` (default) | `"strict"` |
+| --- | --- | --- |
+| C++ lifetime diagnostics, when `lifetime = true` | Request the high-confidence `-Wlifetime-safety-permissive` group; diagnostics remain warnings unless another warning policy promotes them. | Request `-Wlifetime-safety` plus `-Werror=lifetime-safety`, making this group's diagnostics compile errors. |
+| GNU-style sanitizer instrumentation, when requested | Use the detector's ordinary recovery/termination policy. Some detectors already terminate on an error. | Add `-fno-sanitize-recover=all` during compilation; detected nonrecoverable faults terminate when the program runs. |
+| Microsoft-style sanitizer instrumentation | Use supported `/fsanitize=address` behavior. | Same runtime behavior; no extra recovery-control flag is added. |
+| `clutch lint` | Keep the selected clang-tidy checks' ordinary severity and exit policy. | Add `--warnings-as-errors=*` to promote diagnostics from the selected checks. |
+
+The lint rule applies even when `sanitizers = []` and `lifetime = false`.
+Sanitizers report only while instrumented code executes, not before compilation.
+Strict mode does not add a borrow checker, enable all clang-tidy checks, or assign
+a safety score. Compiler/runtime support probes still apply in either mode.
+
+Clutch compiles and links small probes during configuration to check requested
+flags and runtime availability, without executing the probe. Unsupported requests
+fail configuration instead of silently disappearing. Installed compiler/runtime
+updates can change availability. Probes do not demonstrate that every defect is
+detectable. Supported Windows Clang/MSVC AddressSanitizer DLLs are located in the
+selected compiler installation and added to the normal runtime staging graph
+beside executable targets. This does not change machine-wide PATH. Other
+dependencies still need their normal runtime setup.
+
+Some clang-cl installations reject AddressSanitizer with the debug CRT
+(`/MTd` or `/MDd`). The probe reports that incompatibility without silently
+changing your runtime selection. Use a supported compiler/profile combination;
+for example, enable `profile.release.debug_symbols = true` and the release
+profile's address sanitizer to debug an optimized instrumented build.
+
+Microsoft-style drivers currently support the `address` detector through
+`/fsanitize=address`. Other listed detectors require compatible GNU-style drivers
+and runtimes. LeakSanitizer is not available on Windows. ThreadSanitizer cannot be
+combined with address or leak detection; configure a separate build to use it.
+Address/undefined detectors can be combined on supported toolchains. An explicit
+lifetime request remains active even with `warnings = "none"`.
+
+The workspace root owns safety policy. Native Clutch dependencies and PCH use the
+same profile flags. CMake source adapters receive the requested safety flags;
+upstream target overrides remain under CMake's control. Installed/prebuilt
+libraries cannot be retroactively instrumented. Explicit Makefile adapters retain
+their own build commands and flags; configure those libraries consistently when
+whole-program instrumentation is needed. Full CMake project-provider workflows
+continue to use their CMake presets/options instead of native Clutch profiles.
+
+Clang's analysis uses annotations such as `[[clang::lifetimebound]]` supplied by
+the library author. Clutch does not insert attributes or implement a custom borrow
+checker. Lifetime analysis has limitations and can produce false positives;
+experimental invalidation and translation-unit-wide inference are not enabled.
+See the [Clang lifetime reference](https://clang.llvm.org/docs/LifetimeSafety.html),
+[AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html),
+[LeakSanitizer](https://clang.llvm.org/docs/LeakSanitizer.html) and
+[Microsoft sanitizer documentation](https://learn.microsoft.com/en-us/cpp/sanitizers/asan).
 
 Use distinct directories for debug/release and for different host/compiler
 setups. There is no command-line build-directory override. Clutch marks owned
@@ -427,7 +781,7 @@ Names must also avoid platform device names and generated metadata locations.
 | --- | --- | --- | --- |
 | `name` | String | Required | Letters, digits, `_`, `-`; unique across all targets and tests |
 | `type` | String | `"executable"` | `"executable"`, `"static"` or `"shared"` |
-| `sources` | Array of string paths or patterns | Required except for the executable matching `project.name` with project source defaults | Select target files recursively; matching application defaults are merged and deduplicated |
+| `sources` | Array of string paths or patterns | Required except for the executable matching `project.name` with project source defaults | Select target files using literal paths or local/recursive patterns; matching application defaults are merged and deduplicated |
 | `include_dirs` | Array of string paths | Empty | Private header search directories |
 | `public_include_dirs` | Array of string paths | Empty | Header directories used here and by consumers |
 | `defines` | Array of strings | Empty | Private preprocessor definitions |

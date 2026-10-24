@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Windows shell builtins require an explicit command interpreter.
+[project]
+name = "windows_commands"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[[command]]
+name = "hello"
+argv = ["cmd", "/d", "/c", "hello.cmd"]

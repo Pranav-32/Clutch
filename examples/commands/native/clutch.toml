@@ -1,0 +1,13 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# An ordinary native executable can be a command without any interpreter.
+[project]
+name = "native_commands"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[[command]]
+name = "git-version"
+argv = ["git", "--version"]

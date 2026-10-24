@@ -14,12 +14,17 @@
 #include "project.hpp"
 
 #include "core/build_directory.hpp"
+#include "core/commands/manifest.hpp"
+#include "core/configured_files/manifest.hpp"
+#include "core/configured_files/version.hpp"
 #include "core/dependencies/manifest.hpp"
 #include "core/options.hpp"
 #include "core/pch/headers.hpp"
 #include "core/project_layout.hpp"
+#include "core/safety/manifest.hpp"
 #include "core/source_files.hpp"
 #include "core/targets/manifest.hpp"
+#include "core/warnings/policy.hpp"
 #include "core/workspace/workspace.hpp"
 #include <toml.hpp>
 
@@ -64,6 +69,19 @@ std::string require_string(const toml::node &node, const std::string &error) {
     return *value;
 
   throw std::runtime_error(error);
+}
+
+/// Copy ordered warning selections and validate even inactive profile arrays.
+std::vector<std::string> warning_names(const toml::node &node) {
+  std::vector<std::string> names;
+  for (const auto &entry :
+       require_array(&node,
+                     "warnings must be a preset string or an array of names"))
+    names.push_back(
+        require_string(entry, "warning array entries must be strings"));
+
+  validate_warning_names(names);
+  return names;
 }
 
 /// Accept existing regular files with one of Clutch's C/C++ source suffixes.
@@ -122,8 +140,11 @@ Project load_project_manifest(const Options &options,
         "dependencies",
         "test",
         "target",
-        "workspace"},
+        "workspace",
+        "configure_file",
+        "command"},
        "manifest");
+  p.commands = read_project_commands(doc);
   const toml::table empty_project;
   const auto &project =
       virtual_workspace
@@ -134,7 +155,9 @@ Project load_project_manifest(const Options &options,
     throw std::runtime_error("replace project.edition/c_standard with "
                              "project.language and project.std");
 
-  keys(project, {"name", "version", "language", "std", "entry"}, "project");
+  keys(project,
+       {"name", "version", "version_file", "language", "std", "entry"},
+       "project");
   for (const auto &[key, node] : project) {
     if (key.str() != "std" && !node.is_string())
       throw std::runtime_error("project." + std::string(key.str()) +
@@ -175,10 +198,24 @@ Project load_project_manifest(const Options &options,
           require_table(&value, "profile must contain tables");
 
       keys(profile,
-           {"optimize", "warnings", "build_dir"},
+           {"optimize", "warnings", "build_dir", "debug_symbols", "safety"},
            "profile." + std::string(name.str()));
       for (const auto &[key, setting] : profile) {
-        if (!setting.is_string())
+        if (key == "warnings") {
+          if (const auto preset = setting.value<std::string>(); preset) {
+            if (*preset != "none" && *preset != "default" && *preset != "extra")
+              throw std::runtime_error(
+                  "warnings preset must be none, default or extra");
+          } else {
+            warning_names(setting);
+          }
+        } else if (key == "safety") {
+          read_safety(
+              require_table(&setting, "profile safety must be a table"));
+        } else if (key == "debug_symbols") {
+          if (!setting.is_boolean())
+            throw std::runtime_error("profile.debug_symbols must be a boolean");
+        } else if (!setting.is_string())
           throw std::runtime_error("profile." + std::string(name.str()) + "." +
                                    std::string(key.str()) +
                                    " must be a string");
@@ -196,8 +233,20 @@ Project load_project_manifest(const Options &options,
         "project.name must contain only letters, digits, '_' or '-'");
 
   p.version = project["version"].value_or(std::string{});
+  if (const auto file = project["version_file"].value<std::string>()) {
+    if (file->empty() || project.contains("version"))
+      throw std::runtime_error(
+          "select project.version or a nonempty project.version_file");
+
+    const auto path = fs::canonical(p.root / fs::u8path(*file));
+    p.inputs.push_back({path, input_signature(path)});
+    p.version = read_project_version(path);
+  }
   if (!virtual_workspace && p.version.empty())
-    throw std::runtime_error("project.version must be a nonempty string");
+    throw std::runtime_error("project.version must be a nonempty string, or "
+                             "select project.version_file");
+
+  read_configured_files(p, doc);
 
   if (virtual_workspace && doc.contains("dependencies"))
     throw std::runtime_error("dependency imports require a [project] or belong "
@@ -223,12 +272,23 @@ Project load_project_manifest(const Options &options,
 
   const bool application_sources =
       doc["project"]["entry"] || doc["build"]["sources"];
+  // Language filtering must happen before implicit discovery, rather than
+  // rejecting an unrelated language's files after they have been selected.
+  p.language = project["language"].value_or(std::string("auto"));
+  if (p.language == "c++")
+    p.language = "cpp";
+
+  if (p.language != "auto" && p.language != "c" && p.language != "cpp" &&
+      p.language != "mixed")
+    throw std::runtime_error(
+        "project.language must be c, cpp (or c++), mixed or auto");
+
   std::set<fs::path> discovered_sources;
   fs::path explicit_entry;
   if (!virtual_workspace && (!doc.contains("target") || application_sources ||
                              doc["build"]["links"])) {
-    // Prefer explicit sources; otherwise discover src/ and add any explicit
-    // entry.
+    // Explicit selections are authoritative. With neither sources nor entry,
+    // discover this manifest's tree without crossing nested project boundaries.
     std::vector<std::string> patterns;
     array("sources", [&](const std::string &s) {
       patterns.push_back(s);
@@ -236,16 +296,11 @@ Project load_project_manifest(const Options &options,
     auto selected = expand_sources(p.root, patterns, p.build);
     p.sources = std::move(selected.sources);
     p.additional_files = std::move(selected.additional_files);
-    if (patterns.empty() && fs::is_directory(p.root / "src")) {
-      // Automatic discovery shares generated-tree exclusions with explicit
-      // globs. An empty src/ is permitted when project.entry supplies the
-      // program.
-      if (!fs::is_empty(p.root / "src")) {
-        auto discovered = expand_sources(p.root, {"src/*"}, p.build, false);
-        discovered_sources.insert(discovered.sources.begin(),
-                                  discovered.sources.end());
-        p.additional_files = std::move(discovered.additional_files);
-      }
+    if (patterns.empty() && !doc["project"]["entry"]) {
+      auto discovered = discover_sources(p.root, p.language, p.build);
+      discovered_sources.insert(discovered.sources.begin(),
+                                discovered.sources.end());
+      p.additional_files = std::move(discovered.additional_files);
       p.sources.insert(p.sources.end(),
                        discovered_sources.begin(),
                        discovered_sources.end());
@@ -268,24 +323,20 @@ Project load_project_manifest(const Options &options,
     // Explicit targets own their discovered files. Deliberately listed build
     // sources and the entry remain in the application even if another target
     // also compiles them; only automatic discovery yields ownership.
-    p.sources.erase(
-        std::remove_if(p.sources.begin(),
-                       p.sources.end(),
-                       [&](const fs::path &source) {
-                         return source != explicit_entry &&
-                                discovered_sources.count(source) &&
-                                std::any_of(p.targets.begin(),
-                                            p.targets.end(),
-                                            [&](const TargetSpec &target) {
-                                              return target.name != p.name &&
-                                                     std::find(
-                                                         target.sources.begin(),
-                                                         target.sources.end(),
-                                                         source) !=
-                                                         target.sources.end();
-                                            });
-                       }),
-        p.sources.end());
+    std::set<fs::path> owned_sources;
+    for (const auto *const group : {&p.targets, &p.tests})
+      for (const auto &target : *group)
+        if (target.name != p.name)
+          owned_sources.insert(target.sources.begin(), target.sources.end());
+
+    p.sources.erase(std::remove_if(p.sources.begin(),
+                                   p.sources.end(),
+                                   [&](const fs::path &source) {
+                                     return source != explicit_entry &&
+                                            discovered_sources.count(source) &&
+                                            owned_sources.count(source);
+                                   }),
+                    p.sources.end());
     complete_application_target(doc, p);
   }
 
@@ -303,7 +354,7 @@ Project load_project_manifest(const Options &options,
                   p.sources.end());
   if (!virtual_workspace && p.sources.empty())
     throw std::runtime_error(
-        "no sources: add src/main.cpp, src/main.c or build.sources");
+        "no sources: add C/C++ files or select project.entry/build.sources");
 
   for (const auto &source : p.sources) {
     if (!supported_source(source))
@@ -311,10 +362,6 @@ Project load_project_manifest(const Options &options,
   }
 
   // Infer the application's languages independently from declared test sources.
-  p.language = doc["project"]["language"].value_or(std::string("auto"));
-  if (p.language == "c++")
-    p.language = "cpp";
-
   const bool has_c = std::any_of(p.sources.begin(),
                                  p.sources.end(),
                                  [](const fs::path &source) {
@@ -365,7 +412,7 @@ Project load_project_manifest(const Options &options,
 
   // CLI generator selection takes precedence over the manifest's default.
   p.generator = options.generator.empty()
-                    ? doc["build"]["generator"].value_or(std::string("ninja"))
+                    ? doc["build"]["generator"].value_or(std::string{})
                     : options.generator;
   p.runtime = doc["build"]["runtime"].value_or(std::string("static"));
   if (p.runtime != "static" && p.runtime != "dynamic")
@@ -376,7 +423,7 @@ Project load_project_manifest(const Options &options,
                  [](const unsigned char c) {
                    return static_cast<char>(std::tolower(c));
                  });
-  if (p.generator.empty())
+  if (p.generator.empty() && doc["build"]["generator"])
     throw std::runtime_error("build.generator must not be empty");
 
   // Resolve shared search paths and definitions once for application/test
@@ -398,13 +445,23 @@ Project load_project_manifest(const Options &options,
   // Apply only the selected profile and keep its artifacts in its own
   // directory.
   const auto profile = doc["profile"][options.release ? "release" : "debug"];
+  p.debug_symbols = profile["debug_symbols"].value_or(!options.release);
+  if (const auto *const safety = profile["safety"].as_table())
+    p.safety = read_safety(*safety);
+
   p.optimize = profile["optimize"].value_or(
       std::string(options.release ? "speed" : "none"));
   p.warnings = profile["warnings"].value_or(std::string("extra"));
+  if (const auto *const node = profile["warnings"].node();
+      node && node->is_array()) {
+    p.warnings = "custom";
+    p.warning_options = warning_names(*node);
+  }
   if (p.optimize != "speed" && p.optimize != "size" && p.optimize != "none")
     throw std::runtime_error("optimize must be speed, size or none");
 
-  if (p.warnings != "extra" && p.warnings != "default" && p.warnings != "none")
+  if (p.warnings != "extra" && p.warnings != "default" &&
+      p.warnings != "none" && p.warnings != "custom")
     throw std::runtime_error("warnings must be extra, default or none");
 
   p.output = p.build / p.name;

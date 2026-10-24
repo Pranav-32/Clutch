@@ -15,7 +15,8 @@ tests in projects built by Clutch use the [project workflow](usage.md#project-wo
 
 Windows target and dependency fixtures use `tests/work/` because MSBuild excludes
 the system TEMP tree from header read tracking. POSIX fixtures use local temporary
-storage to avoid bind-mount overhead. Each suite removes its own fixture directories.
+storage to avoid bind-mount overhead. Ordinary suites remove their own fixtures;
+the optional self-hosting check retains its source copies and binaries for inspection.
 
 ## Linux, macOS and containers
 
@@ -63,6 +64,54 @@ runs MSVC/Clang integration checks with an initialized environment.
 
 ## Select checks
 
+### Self-hosting verification
+
+The root native manifest can build Clutch after the initial CMake bootstrap.
+Enable this longer test explicitly on an existing CMake test build:
+
+```sh
+cmake -S . -B build-native -DCLUTCH_TEST_SELF_HOSTING=ON
+cmake --build build-native --parallel 2
+ctest --test-dir build-native -R '^clutch.self-hosting$' --output-on-failure
+```
+
+It copies only native source inputs into a fresh fixture, blocks CMake lookup,
+builds a native release executable, then uses that executable to build a debug
+copy. Both versions must agree with the source archive's `VERSION`; unchanged
+rebuilds must retain every object timestamp. The final copy scaffolds, compiles
+and runs a separate C++ program. CTest retains outputs and `verification.json`
+under its binary test directory; the standalone runner defaults to `tests/work/`.
+CMake remains supported for normal development.
+
+The runner also accepts explicit `--clutch`, `--cc`, `--cxx`, `--ninja`, `--jobs`
+and `--work-root` arguments. For container checks, choose a work root on the
+container's local filesystem to avoid source bind-mount compilation overhead.
+This check is off by default so ordinary CI does not compile the entire project
+two extra times on every platform. See [native build commands](installation.md#build-clutch-with-clutch).
+
+### Functional suites
+
+`clutch.watch` starts real watchers, edits source/header/manifest inputs and waits
+for flushed cycle-completion lines. It checks debounce, source membership,
+timestamp-preserving saves, ignored output/cache trees, additional resource paths,
+workspace/local dependency roots, test/release selection and failure recovery.
+A blocking pre-build hook provides a rendezvous for edits made during compilation;
+the next cycle must not lose them. POSIX tests verify idle interrupt status;
+Windows cleanup uses a separate process group and CTRL_BREAK. Every subprocess
+and rendezvous has a timeout and cleanup path.
+
+`clutch.commands` checks named commands before source discovery, literal/empty
+argument forwarding, context tokens, working directories, profile selection,
+workspace ownership and ordered configure/build hooks. It verifies no-op/clean
+builds, failure exit codes, suppression of later hooks/application execution,
+and failed-configuration blocking plus File API error replies. These fixtures use
+Python as an explicitly declared user command; the Clutch runner is native.
+Run just this suite with:
+
+```sh
+ctest --test-dir build-native -R '^clutch.commands$' --output-on-failure
+```
+
 `clutch.cmake-projects` exercises the whole-project provider with framework-like
 target helpers, generated resources, top-level source identity, preset directories
 and environment, multiple configurations, native failure codes, CTest filters,
@@ -89,7 +138,11 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.files` | Generated-file content/timestamps, directory-output rejection, and artifact cleanup containment, preflight, redirection and metadata preservation |
 | `clutch.zip` | Archive path traversal, Windows device names, invalid UTF-8, case/hierarchy collisions, member bounds and existing-output preservation |
 | `clutch.bundle` | Independent ZIP/CRC parsing, repeatable bytes, Unicode/binary files, exclusions, workspace relocation and offline Git/local/CMake dependency snapshots; includes 256 files and a one-MiB binary fixture |
-| `clutch.source-files` | Recursive source matching, brace products, canonical paths, exclusions and invalid patterns without a compiler |
+| `clutch.source-files` | Local/recursive source matching, language-filtered discovery, brace products, canonical paths, nested-project/generated-tree exclusions and invalid patterns without a compiler |
+| `clutch.defaults` | Automatic generator/executor selection and fallback, cached choices, explicit override errors, manifest-relative glob depth, and real C/C++/mixed discovery with noncompiled IDE headers |
+| `clutch.configured-files` | Template/schema/path limits, Git identity parity, direct native refresh and no-op builds, missing outputs, workspace/dependency namespaces, version constraints, source bundles, concurrent callbacks and Windows delete-pending lock recovery |
+| `clutch.tooling-safety` | Independent symbols/optimization, warning-array diagnostics and workspace persistence, policy validation, optional real sanitizer runtimes and lifetime support, formatter scope, analyzer database forwarding and debugger argument/exit handling |
+| `clutch.self-hosting` | Optional complete native release/debug generations, source-archive version identity, no-op object preservation and final executable smoke check without CMake |
 | `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary and oversized-output rejection |
 | `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
 | `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |
@@ -213,6 +266,26 @@ Add `--cuda` only on a machine with a compatible installed CUDA Toolkit. Without
 these opt-in flags, the corresponding tests report explicit skips. Python drives
 the checks and sample-repository setup; it is not part of the Clutch executable.
 Each example also provides a `[[test]]` entry for direct `clutch test` use.
+
+## Feature examples
+
+`clutch.feature-examples` copies the shipped examples into temporary projects and
+compiles their actual manifests without network access. It checks generated
+headers, automatic/flat/recursive C/C++ discovery, profile combinations, shared
+libraries and runtime loading, source-bundle relocation, manual commands and a
+live resource-watch cycle. This complements the dependency-specific
+`clutch.package-examples` suite above.
+
+```sh
+ctest --test-dir build-native -R feature-examples --output-on-failure
+```
+
+Optional Node commands and sanitizer variants run when their tools/runtime are
+available. Unsupported compiler capabilities report explicit skips after their
+configuration rejection is checked. ThreadSanitizer may also report an explicit
+skip when host sandbox/ASLR restrictions prevent runtime initialization. Windows
+and POSIX shell variants run on their respective hosts. The suite does not claim
+to validate Xcode, JOM or external SDKs on hosts without those tools.
 
 ## Clean fixtures
 

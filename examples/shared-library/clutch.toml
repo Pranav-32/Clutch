@@ -1,0 +1,31 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# A shared library supplies one public API to an application and a test.
+[project]
+name = "shared_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+
+[[target]]
+name = "answer"
+type = "shared"
+sources = ["answer/answer.cpp"]
+public_include_dirs = ["answer"]
+defines = ["ANSWER_BUILD"]
+
+[[target]]
+name = "hello"
+sources = ["app/main.cpp"]
+links = ["answer"]
+
+[[test]]
+name = "answer-test"
+sources = ["checks/answer_test.cpp"]
+links = ["answer"]

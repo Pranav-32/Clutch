@@ -1,0 +1,27 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Optional combined policy; configure probes the selected compiler/runtime.
+[project]
+name = "safety_combined"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+debug_symbols = true
+
+[profile.debug.safety]
+sanitizers = ["address","undefined"]
+lifetime = false
+strictness = "strict"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+debug_symbols = true
+
+[profile.release.safety]
+sanitizers = ["address","undefined"]
+lifetime = false
+strictness = "normal"

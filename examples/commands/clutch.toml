@@ -1,0 +1,32 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Optional script tools are launched explicitly, without a shell.
+[project]
+name = "command_example"
+version = "0.1.0"
+language = "cpp"
+std = 17
+
+[[command]]
+name = "prepare"
+argv = ["python3", "scripts/lifecycle.py", "prepare", "@BUILD_DIR@", "@PROFILE@"]
+phases = ["before-configure"]
+
+[[command]]
+name = "configured"
+argv = ["python3", "scripts/lifecycle.py", "configured", "@BUILD_DIR@", "@PROFILE@"]
+phases = ["after-configure"]
+
+[[command]]
+name = "resources"
+argv = ["python3", "scripts/lifecycle.py", "resources", "@BUILD_DIR@", "@PROFILE@"]
+phases = ["before-build"]
+
+[[command]]
+name = "finished"
+argv = ["python3", "scripts/lifecycle.py", "finished", "@BUILD_DIR@", "@PROFILE@"]
+phases = ["after-build"]
+
+[[command]]
+name = "hello"
+argv = ["python3", "scripts/lifecycle.py", "hello", "@BUILD_DIR@", "@PROFILE@"]

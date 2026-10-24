@@ -8,6 +8,7 @@
  */
 
 #include "resolve.hpp"
+#include "core/configured_files/version.hpp"
 #include "core/options.hpp"
 #include "core/pch/headers.hpp"
 #include "core/project.hpp"
@@ -36,6 +37,7 @@ struct Metadata {
   Candidate candidate;
   std::vector<Requirement> requirements;
   bool declared_version = false;
+  std::vector<ConfigurationInput> inputs{};
 };
 
 /// One decision variable per Git identity prevents duplicate-version ABI
@@ -89,6 +91,7 @@ class Solver {
       if (!fs::is_regular_file(manifest) || fs::is_symlink(manifest))
         throw std::runtime_error(
             "dependency clutch.toml must be a regular file");
+      result.inputs.push_back({manifest, input_signature(manifest)});
       const auto document = toml::parse_file(manifest.u8string());
       if (document.contains("workspace"))
         throw std::runtime_error("Git imports currently require one library "
@@ -107,6 +110,17 @@ class Solver {
               document["project"]["version"].value<std::string>();
           version) {
         result.candidate.version = *version;
+        result.declared_version = true;
+      }
+      if (const auto *const node = document["project"]["version_file"].node()) {
+        const auto file = node->value<std::string>();
+        if (!file || file->empty() || document["project"]["version"])
+          throw std::runtime_error(
+              "dependency must select project.version or project.version_file");
+
+        const auto path = fs::canonical(candidate.source / fs::u8path(*file));
+        result.inputs.push_back({path, input_signature(path)});
+        result.candidate.version = read_project_version(path);
         result.declared_version = true;
       }
     }
@@ -432,6 +446,9 @@ void resolve(Project &project, const Options &options) {
   std::set<std::string> identities;
   for (const auto &[git, metadata] : packages) {
     const auto &candidate = metadata.candidate;
+    project.inputs.insert(project.inputs.end(),
+                          metadata.inputs.begin(),
+                          metadata.inputs.end());
     const auto id = source_key(git);
     if (!identities.insert(id).second ||
         std::any_of(project.projects.begin(),
@@ -501,6 +518,12 @@ void resolve(Project &project, const Options &options) {
           toml::parse_file((candidate.source / layout::manifest).u8string());
       auto child =
           load_project_manifest(child_options, document, false, project.build);
+      project.inputs.insert(project.inputs.end(),
+                            child.inputs.begin(),
+                            child.inputs.end());
+      project.configured_files.insert(project.configured_files.end(),
+                                      child.configured_files.begin(),
+                                      child.configured_files.end());
       if (document["build"]["runtime"] && child.runtime != project.runtime)
         throw std::runtime_error("dependency runtime conflicts with the "
                                  "consuming project's build.runtime");

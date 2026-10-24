@@ -10,5 +10,5 @@
 #pragma once
 
 namespace clutch {
-inline constexpr auto version = "@CLUTCH_VERSION@";
+inline constexpr auto version = "@PROJECT_VERSION@";
 }  // namespace clutch

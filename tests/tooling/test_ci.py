@@ -117,6 +117,24 @@ class WorkflowExecutionTests(unittest.TestCase):
             for name in names:
                 self.assertIn('fixture output: ' + name, captured.getvalue())
 
+    def test_script_examples_use_ci_interpreter_only_in_disposable_copy(self):
+        """An absent python3 alias must not break examples on a Python-enabled host."""
+        with tempfile.TemporaryDirectory(prefix='clutch interpreter example ') as temporary:
+            root = Path(temporary)
+            example = root / 'source'
+            example.mkdir()
+            manifest = example / 'clutch.toml'
+            original = ('[project]\nname="probe"\n[[command]]\nname="prepare"\n'
+                        'argv = ["python3", "script.py", "python3"]\n')
+            manifest.write_text(original, encoding='utf-8')
+            work = root / 'work'
+            work.mkdir()
+            with patch.object(ci, 'run'):
+                ci.test_example(manifest, work, 'clutch', 'cc', 'c++', 'ninja', None)
+            copied = ci.tomllib.loads((work / 'source/clutch.toml').read_text(encoding='utf-8'))
+            self.assertEqual(copied['command'][0]['argv'], [sys.executable, 'script.py', 'python3'])
+            self.assertEqual(manifest.read_text(encoding='utf-8'), original)
+
 
 if __name__ == '__main__':
     unittest.main()

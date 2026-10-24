@@ -287,6 +287,33 @@
                 "executable"
               ]
             },
+            "compilePolicy": {
+              "type": "object",
+              "description": "Optional profile overview; exact commands remain authoritative.",
+              "required": ["debugSymbols", "safety"],
+              "properties": {
+                "debugSymbols": {"type": "boolean"},
+                "warnings": {
+                  "oneOf": [
+                    {"enum": ["none", "default", "extra"]},
+                    {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+                  ]
+                },
+                "safety": {
+                  "type": "object",
+                  "required": ["sanitizers", "lifetime", "strictness"],
+                  "properties": {
+                    "sanitizers": {
+                      "type": "array",
+                      "items": {"enum": ["address", "undefined", "leak", "thread"]},
+                      "uniqueItems": true
+                    },
+                    "lifetime": {"type": "boolean"},
+                    "strictness": {"enum": ["normal", "strict"]}
+                  }
+                }
+              }
+            },
             "compilationDatabase": {
               "type": "string"
             },
@@ -610,7 +637,7 @@
             "additionalFiles": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Canonical noncompiled project files selected by source declarations."
+                "description": "Canonical noncompiled project files selected by source declarations or produced by configured-file templates."
             },
             "foreignDependencies": {
               "type": "array",

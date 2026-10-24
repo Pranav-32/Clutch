@@ -4,7 +4,8 @@ Audience: Contributors using the shared Linux development environment.
 
 The checked-in container provides a shared Ubuntu development environment on
 Linux, macOS and Windows hosts. It includes CMake, Ninja, GNU Make, GCC, LLVM 22,
-Graphviz, Git, GitHub CLI, debugging tools and Python for tests. Windows and
+Clang's sanitizer runtimes, Graphviz, Git, GitHub CLI, debugging tools and Python
+for tests. Windows and
 macOS generators still require their native hosts.
 
 Install Git and Docker with a running Linux container engine. Clone your fork,

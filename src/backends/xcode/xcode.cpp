@@ -22,6 +22,7 @@
 
 #include "core/build_directory.hpp"
 #include "core/build_graph.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/encoding_constants.hpp"
 #include "core/hash_constants.hpp"
 #include "core/options.hpp"
@@ -199,11 +200,7 @@ bool apple_clang(const std::string &compiler) {
 
 /// Refuse compiler substitutions that native Xcode targets cannot honor.
 void validate_toolchain(const Graph &graph) {
-  if (graph.toolchain.msvc || !apple_clang(graph.toolchain.cc) ||
-      !apple_clang(graph.toolchain.cxx))
-    throw std::runtime_error(
-        "Xcode requires Apple's Clang toolchain; select --cc /usr/bin/clang "
-        "and --cxx /usr/bin/clang++, or use Ninja/Make for another compiler");
+  validate_xcode_toolchain(graph.toolchain);
 
   if (graph.targets.empty())
     throw std::runtime_error(
@@ -319,8 +316,7 @@ void list(std::ostream &out,
 void target_settings(std::ostream &out,
                      const Graph &graph,
                      const Target &target,
-                     const size_t index,
-                     const Options &options) {
+                     const size_t index) {
   const auto &p = graph.project;
   out << "\t\t\t\tPRODUCT_NAME = "
       << literal(target.output.filename().u8string()) << ";\n"
@@ -346,9 +342,9 @@ void target_settings(std::ostream &out,
                                         : "0")
       << ";\n"
       << "\t\t\t\tGCC_GENERATE_DEBUGGING_SYMBOLS = "
-      << (options.release ? "NO" : "YES") << ";\n"
+      << (p.debug_symbols ? "YES" : "NO") << ";\n"
       << "\t\t\t\tGCC_WARN_INHIBIT_ALL_WARNINGS = "
-      << (p.warnings == "none" ? "YES" : "NO") << ";\n"
+      << (p.warnings == "none" && !p.safety.lifetime ? "YES" : "NO") << ";\n"
       << "\t\t\t\tDEBUG_INFORMATION_FORMAT = dwarf;\n"
       << "\t\t\t\tCOPY_PHASE_STRIP = NO;\n"
       << "\t\t\t\tSTRIP_INSTALLED_PRODUCT = NO;\n"
@@ -433,6 +429,14 @@ std::string scheme(const Graph &graph,
 }
 }  // namespace
 
+void validate_xcode_toolchain(const Toolchain &toolchain) {
+  if (toolchain.msvc || !apple_clang(toolchain.cc) ||
+      !apple_clang(toolchain.cxx))
+    throw std::runtime_error(
+        "Xcode requires Apple's Clang toolchain; select --cc /usr/bin/clang "
+        "and --cxx /usr/bin/clang++, or use Ninja/Make for another compiler");
+}
+
 /// Clean only known target products/intermediates, never a product directory
 /// shared with metadata. Preflight every path before removing any artifact.
 void clean_xcode_targets(const Graph &graph,
@@ -516,10 +520,38 @@ void generate_xcode(const Graph &graph,
 
   // Each target owns source references, build phases, a product and
   // configuration.
+  if (!graph.project.configured_files.empty()) {
+    out << "\t\t" << ids.get("configured-files:script")
+        << " = { isa = PBXShellScriptBuildPhase; buildActionMask = "
+        << all_build_actions_mask
+        << "; alwaysOutOfDate = 1; files = (); "
+           "inputPaths = (); outputPaths = (";
+    for (const auto &file : graph.project.configured_files)
+      out << literal(file.output.generic_u8string()) << ',';
+
+    out << "); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/sh; "
+           "shellScript = "
+        << quoted(
+               "exec " +
+               command_line(
+                   configured_files_command(graph, options, clutch_executable)))
+        << "; };\n\t\t" << ids.get("configured-files")
+        << " = { isa = PBXAggregateTarget; buildConfigurationList = "
+        << ids.get("project:config-list") << "; buildPhases = ("
+        << ids.get("configured-files:script")
+        << "); dependencies = (); "
+           "name = clutch_configure_files; productName = "
+           "clutch_configure_files; };\n";
+  }
+
   for (size_t index = 0; index < graph.targets.size(); ++index) {
     const auto &target = graph.targets[index];
     const auto key = target_key(index);
     const auto foreign_prefix = key + ":foreign:";
+    if (!graph.project.configured_files.empty())
+      out << "\t\t" << ids.get(key + ":configured-files")
+          << " = { isa = PBXTargetDependency; target = "
+          << ids.get("configured-files") << "; };\n";
     const auto *const product_type =
         target.type == TargetType::StaticLibrary
             ? "com.apple.product-type.library.static"
@@ -618,6 +650,8 @@ void generate_xcode(const Graph &graph,
         << ";\n\t\t\tbuildPhases = (" << ids.get(key + ":sources") << ", "
         << ids.get(key + ":frameworks") << ");\n"
         << "\t\t\tbuildRules = ();\n\t\t\tdependencies = (";
+    if (!graph.project.configured_files.empty())
+      out << ids.get(key + ":configured-files") << ',';
     for (const auto dependency : target.dependencies)
       out << ids.get(key + ":dependency:" + std::to_string(dependency)) << ',';
     for (const auto &action : target.foreign_dependencies)
@@ -629,7 +663,7 @@ void generate_xcode(const Graph &graph,
         << ";\n\t\t\tproductType = " << quoted(product_type) << ";\n\t\t};\n"
         << "\t\t" << ids.get(key + ":config") << " = {\n"
         << "\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = {\n";
-    target_settings(out, graph, target, index, options);
+    target_settings(out, graph, target, index);
     out << "\t\t\t};\n\t\t\tname = " << quoted(configuration) << ";\n\t\t};\n"
         << "\t\t" << ids.get(key + ":config-list") << " = {\n"
         << "\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = ("
@@ -692,6 +726,9 @@ void generate_xcode(const Graph &graph,
     out << "\t\t\t\t" << ids.get(target_key(index)) << ",\n";
   for (const auto &action : graph.project.foreign_builds)
     out << "\t\t\t\t" << ids.get("foreign:" + action.id) << ",\n";
+
+  if (!graph.project.configured_files.empty())
+    out << "\t\t\t\t" << ids.get("configured-files") << ",\n";
 
   out << "\t\t\t);\n\t\t};\n\t};\n\trootObject = " << project << ";\n}\n";
   write_if_changed(project_path(graph) / "project.pbxproj", out.str());

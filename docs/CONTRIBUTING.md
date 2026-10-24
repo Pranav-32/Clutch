@@ -92,6 +92,9 @@ response deadline. A passing CI run does not guarantee acceptance of a proposal.
 Develop Clutch with its CMake project. Keep changes focused, demonstrate the
 resulting behavior with appropriate checks, and update affected documentation
 and examples.
+You can also exercise the [native self-hosting build](installation.md#build-clutch-with-clutch)
+after bootstrapping. Its longer verification check is optional; ordinary CTest
+and analysis workflows remain available through CMake.
 
 ## Build and test
 

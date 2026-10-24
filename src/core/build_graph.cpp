@@ -12,6 +12,8 @@
  */
 
 #include "build_graph.hpp"
+#include "core/warnings/policy.hpp"
+#include "toolchains/safety.hpp"
 
 #include "core/options.hpp"
 #include "core/pch/pch.hpp"
@@ -31,6 +33,22 @@
 
 namespace clutch {
 namespace {
+/// clang-cl accepts Microsoft syntax but uses Clang diagnostic groups.
+WarningDriver warning_driver(const std::string &compiler,
+                             const bool microsoft) {
+  if (!microsoft)
+    return WarningDriver::Gnu;
+
+  auto name = fs::u8path(compiler).stem().u8string();
+  std::transform(name.begin(),
+                 name.end(),
+                 name.begin(),
+                 [](const unsigned char ch) {
+                   return static_cast<char>(std::tolower(ch));
+                 });
+  return name == "clang-cl" ? WarningDriver::ClangCl : WarningDriver::Microsoft;
+}
+
 /// Windows artifact identity is case-insensitive even when manifest names
 /// differ.
 fs::path artifact_key(const fs::path &path) {
@@ -80,6 +98,16 @@ void validate_build_graph(const Graph &graph) {
   };
 
   std::set<std::string> foreign_ids;
+  for (const auto &file : graph.project.configured_files) {
+    const auto relative =
+        file.output.lexically_relative(graph.project.build / "generated");
+    if (relative.empty() || relative == "." || *relative.begin() == "..")
+      throw std::runtime_error("configured file escapes generated output tree");
+
+    produce(file.output);
+    connect(file.input, file.output);
+  }
+
   for (const auto &build : graph.project.foreign_builds) {
     if (build.id.empty() || !foreign_ids.insert(build.id).second ||
         build.arguments.empty() || !build.directory.is_absolute() ||
@@ -247,6 +275,7 @@ Graph make_build_graph(Project project,
     target.output = target_output(p, spec, toolchain.msvc);
     target.import_library =
         target_import_library(target.output, spec.type, toolchain.msvc);
+    target.runtime_libraries = p.safety_runtime_libraries;
 
     // Per-target objects let an application and tests share a source safely.
     const auto objects =
@@ -288,12 +317,9 @@ Graph make_build_graph(Project project,
         a.emplace_back(p.optimize == "speed"  ? "/O2"
                        : p.optimize == "size" ? "/O1"
                                               : "/Od");
-        if (!options.release)
+        if (p.debug_symbols)
           a.emplace_back("/Z7");
 
-        a.emplace_back(p.warnings == "extra"  ? "/W4"
-                       : p.warnings == "none" ? "/W0"
-                                              : "/W3");
         for (const auto &inc : target.includes)
           a.push_back("/I" + inc.u8string());
 
@@ -316,16 +342,13 @@ Graph make_build_graph(Project project,
         a.emplace_back(p.optimize == "speed"  ? "-O3"
                        : p.optimize == "size" ? "-Os"
                                               : "-O0");
-        if (!options.release)
+        if (p.debug_symbols)
           a.emplace_back("-g");
-
-        if (p.warnings == "none")
-          a.emplace_back("-w");
         else
-          a.emplace_back("-Wall");
+          a.emplace_back("-g0");
 
-        if (p.warnings == "extra")
-          a.emplace_back("-Wextra");
+        if (p.debug_symbols && toolchain.microsoft_abi)
+          a.emplace_back("-gcodeview");
 
         for (const auto &inc : target.includes)
           a.push_back("-I" + inc.u8string());
@@ -352,6 +375,14 @@ Graph make_build_graph(Project project,
         const auto &flags = c ? usage.c_options : usage.cpp_options;
         u.arguments.insert(u.arguments.begin() + 1, flags.begin(), flags.end());
       }
+      const auto warnings =
+          warning_flags(p.warnings,
+                        p.warning_options,
+                        warning_driver(u.arguments.front(), toolchain.msvc),
+                        p.safety.lifetime);
+      u.arguments.insert(u.arguments.end(), warnings.begin(), warnings.end());
+      const auto safety = safety_compile_flags(p, toolchain, c);
+      u.arguments.insert(u.arguments.end(), safety.begin(), safety.end());
       target.units.push_back(std::move(u));
     }
 
@@ -402,6 +433,8 @@ Graph make_build_graph(Project project,
         target.link.insert(target.link.begin() + 1, "--rsp-quoting=posix");
     } else {
       target.link = {target_linker};
+      const auto safety = safety_link_flags(p, toolchain);
+      target.link.insert(target.link.end(), safety.begin(), safety.end());
       if (!toolchain.msvc && toolchain.microsoft_abi) {
         const auto *const runtime = p.runtime == "dynamic" ? "dll" : "static";
         target.link.push_back(std::string("-fms-runtime-lib=") + runtime +
@@ -453,11 +486,24 @@ Graph make_build_graph(Project project,
         // Native backends decide when linking is needed. LINK's separate
         // timestamp cache can reuse stale archive members during rapid edits.
         target.link.emplace_back("/INCREMENTAL:NO");
-        if (!options.release)
+        if (p.debug_symbols)
           target.link.emplace_back("/DEBUG");
+        else
+          target.link.emplace_back("/DEBUG:NONE");
+
+        if (options.release && p.debug_symbols)
+          target.link.insert(target.link.end(), {"/OPT:REF", "/OPT:ICF"});
         if (!target.import_library.empty())
           target.link.push_back("/IMPLIB:" + target.import_library.u8string());
       } else {
+        if (p.debug_symbols && toolchain.microsoft_abi) {
+          target.link.insert(target.link.end(), {"-Xlinker", "/DEBUG"});
+          if (options.release)
+            target.link.insert(
+                target.link.end(),
+                {"-Xlinker", "/OPT:REF", "-Xlinker", "/OPT:ICF"});
+        }
+
         if (spec.type == TargetType::SharedLibrary) {
 #ifdef __APPLE__
           target.link.insert(target.link.end(),

@@ -15,8 +15,10 @@
 
 #include "backends/backend.hpp"
 #include "core/build_directory.hpp"
+#include "core/commands/commands.hpp"
 #include "core/compilation_database.hpp"
 #include "core/configuration_store.hpp"
+#include "core/configured_files/configured_files.hpp"
 #include "core/dependencies/foreign.hpp"
 #include "core/dependencies/resolve.hpp"
 #include "core/file_api/file_api.hpp"
@@ -24,7 +26,10 @@
 #include "core/options.hpp"
 #include "core/pch/pch.hpp"
 #include "core/project.hpp"
+#include "core/project_layout.hpp"
 #include "core/workspace/lock.hpp"
+#include "platform/files.hpp"
+#include "toolchains/safety.hpp"
 #include "toolchains/toolchain.hpp"
 
 #include <iostream>
@@ -43,9 +48,10 @@ void list_available_targets(const Options &options) {
   validate_build_directory(project.root, project.build, false);
   dependencies::resolve(project, options);
   prepare_build_directory(project);
-  const auto backend = resolve_backend(options, project);
+  prepare_configured_files(project);
+  const auto [backend, toolchain] = resolve_build_tools(options, project);
   project.generator = backend.name;
-  const auto toolchain = resolve_toolchain(options, project);
+  verify_safety(project, toolchain, options);
   dependencies::configure_foreign(project, toolchain, backend, options);
 
   std::cout << "Project targets:\n";
@@ -70,17 +76,21 @@ Graph configure(const Options &options, const fs::path &executable) {
     // files.
     auto project = load_project(options);
     validate_build_directory(project.root, project.build, false);
-    dependencies::resolve(project, options);
 
     // Claim only after validating source/include containment. API queries may
     // already exist in a fresh build directory; they are preserved for clients.
     prepare_build_directory(project);
     api.begin(project.build);
+    write_if_changed(project.build / layout::configuration_pending,
+                     "configuration has not completed\n");
+    run_command_hooks(project, options, "before-configure");
+    dependencies::resolve(project, options);
+    prepare_configured_files(project);
 
     // Normalize the generator before choosing its compatible compiler defaults.
-    const auto backend = resolve_backend(options, project);
+    auto [backend, toolchain] = resolve_build_tools(options, project);
     project.generator = backend.name;
-    auto toolchain = resolve_toolchain(options, project);
+    verify_safety(project, toolchain, options);
     dependencies::configure_foreign(project, toolchain, backend, options);
     resolve_pch_drivers(toolchain, project);
 
@@ -104,8 +114,17 @@ Graph configure(const Options &options, const fs::path &executable) {
     validate_inputs(graph.project.inputs);
     save_toolchain(toolchain, graph.project);
     save_backend(backend, graph.project);
+    run_command_hooks(graph.project, options, "after-configure");
+    validate_inputs(graph.project.inputs);
     save_configuration(graph, options);
     api.publish(graph, executable);
+    fs::remove(graph.project.build / layout::configuration_pending);
+
+    // A plain project with no API queries/probes needs no metadata directory.
+    // Preserve nonempty directories, including all client query/reply trees.
+    if (const auto metadata = graph.project.build / layout::environment;
+        fs::is_empty(metadata))
+      fs::remove(metadata);
 
     return graph;
   } catch (const std::exception &error) {

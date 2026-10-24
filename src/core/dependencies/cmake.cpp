@@ -11,8 +11,10 @@
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
+#include "platform/arguments.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "toolchains/safety.hpp"
 #include "toolchains/toolchain.hpp"
 #include <algorithm>
 #include <cctype>
@@ -266,6 +268,14 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
     script << "set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded"
            << (options.release ? "" : "Debug")
            << (project.runtime == "dynamic" ? "DLL" : "") << ")\n";
+
+  // Instrument source-built dependencies with the same runtime detectors.
+  // Explicit upstream target options remain under CMake's ownership.
+  const auto compile_flags = [&](const bool c) {
+    return command_line(safety_compile_flags(project, tools, c));
+  };
+  script << "set(CMAKE_C_FLAGS " << literal(compile_flags(true)) << ")\n"
+         << "set(CMAKE_CXX_FLAGS " << literal(compile_flags(false)) << ")\n";
 
   script << "project(ClutchDependencyProbe LANGUAGES C CXX)\n"
             "file(REMOVE \"${CMAKE_BINARY_DIR}/package-version.txt\")\n"

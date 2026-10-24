@@ -1,0 +1,33 @@
+# Copyright (c) 2026, Pranav Sanjeevi Kumari and contributors
+# SPDX-License-Identifier: BSD-3-Clause
+# Optional thread policy; configure probes the selected compiler/runtime.
+[project]
+name = "safety_thread"
+version = "0.1.0"
+language = "cpp"
+std = 17
+entry = "../main.cpp"
+
+[build]
+defines = ["SAFETY_EXAMPLE_THREADS"]
+
+[dependencies]
+threads = { system = "posix-threads", libraries = ["pthread"] }
+
+[profile.debug]
+build_dir = "Clutch-build-debug"
+debug_symbols = true
+
+[profile.debug.safety]
+sanitizers = ["thread"]
+lifetime = false
+strictness = "strict"
+
+[profile.release]
+build_dir = "Clutch-build-release"
+debug_symbols = true
+
+[profile.release.safety]
+sanitizers = ["thread"]
+lifetime = false
+strictness = "normal"

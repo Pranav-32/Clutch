@@ -25,6 +25,9 @@ add_custom_target(clutch_version
 add_executable(clutch
     src/main.cpp
     src/app/cli.cpp
+    src/app/tooling.cpp
+    src/app/watch/watch.cpp
+    src/app/watch/snapshot.cpp
     src/app/workflow.cpp
     src/backends/backend.cpp
     src/backends/foreign_actions.cpp
@@ -38,6 +41,11 @@ add_executable(clutch
     src/core/compilation_database.cpp
     src/core/configure.cpp
     src/core/configuration_store.cpp
+    src/core/commands/commands.cpp
+    src/core/commands/manifest.cpp
+    src/core/configured_files/configured_files.cpp
+    src/core/configured_files/manifest.cpp
+    src/core/configured_files/version.cpp
     src/core/dependencies/dependency.cpp
     src/core/dependencies/cmake.cpp
     src/core/dependencies/foreign.cpp
@@ -61,6 +69,7 @@ add_executable(clutch
     src/core/pch/pch.cpp
     src/core/project.cpp
     src/core/source_files.cpp
+    src/core/safety/manifest.cpp
     src/core/targets/archive.cpp
     src/core/targets/manifest.cpp
     src/core/targets/requirements.cpp
@@ -70,6 +79,7 @@ add_executable(clutch
     src/core/workspace/inputs.cpp
     src/core/workspace/lock.cpp
     src/core/workspace/workspace.cpp
+    src/core/warnings/policy.cpp
     src/platform/arguments.cpp
     src/platform/artifacts.cpp
     src/platform/capture.cpp
@@ -82,6 +92,7 @@ add_executable(clutch
     src/providers/cmake.cpp
     src/providers/cmake_model.cpp
     src/toolchains/toolchain.cpp
+    src/toolchains/safety.cpp
 )
 add_dependencies(clutch clutch_version)
 

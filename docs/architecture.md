@@ -5,7 +5,8 @@ for setup and a first PR.
 
 Clutch configures C/C++ projects from `clutch.toml`, resolves a target graph,
 and generates native build files and IDE metadata. CMake builds Clutch itself;
-it is not Clutch's configuration engine.
+it is not Clutch's configuration engine. The root native manifest also supports
+self-hosting after that bootstrap.
 
 ## Code layout
 
@@ -14,14 +15,19 @@ to `src/`. Each module documents its own functions and platform assumptions.
 
 | Directory | Responsibility |
 | --- | --- |
-| `src/app/` | CLI parsing, project creation and workflow dispatch |
+| `src/app/` | CLI parsing, project creation, workflow dispatch and optional formatter/analyzer/debugger adapters |
 | `src/core/` | Manifest validation, build-directory ownership, graph construction and saved configuration |
 | `src/core/targets/` | Target kinds, dependency resolution, archives and runtime library staging |
 | `src/core/workspace/` | Member composition, input fingerprints and portable locks |
 | `src/core/dependencies/` | Git identities, version constraints, backtracking and immutable checkout publication |
 | `src/core/pch/` | Prefix-header parsing, isolated creator commands and textual IDE prefixes |
+| `src/core/configured_files/` | Native template declarations, project-private outputs and optional Git version identity |
+| `src/core/commands/` | Named argv commands, strict declaration parsing and CLI lifecycle execution |
+| `src/app/watch/` | Bounded content snapshots, source/configuration change classification, debounce and serial child cycles |
 | `src/core/file_api/` | Queries, versioned code models and snapshot publication |
-| `src/toolchains/` | Compiler discovery, driver families and saved selections |
+| `src/core/safety/` | Lightweight profile safety records and manifest validation |
+| `src/core/warnings/` | Portable warning-category validation and explicit native flag mappings |
+| `src/toolchains/` | Compiler discovery, driver families, saved selections and safety capability probes |
 | `src/backends/` | Generator registry, native build-file generation and execution |
 | `src/providers/` | Whole-project delegation and evaluated metadata from existing build systems |
 | `src/platform/` | Child processes, file output, JSON escaping and terminal messages |
@@ -44,6 +50,16 @@ See [CMake projects](cmake-projects.md) for selection, presets and IDE boundarie
 constructs the graph, and writes native rules. It also writes
 `compile_commands.json`, `build-graph.dot` and saved configuration into the
 profile's build directory. Configuration does not compile project sources.
+
+Root-owned command hooks run after manifest validation and around configure/build
+operations, once per CLI invocation. They use native child processes and inherit
+the environment; no interpreter is embedded. Commands are persisted in schema 15
+with the saved graph. Native dependency manifests do not contribute hooks.
+Configure claims a pending marker before executing hooks and clears it only after
+successful saved-state/File API publication; failed hooks cannot expose an older
+graph as current. Post-build hooks complete before application/test/debugger
+execution. Direct generator execution does not schedule these CLI hooks; they
+are separate from dependency-aware custom-output rules.
 
 The graph holds compiler argument vectors, target artifacts, usage requirements
 and dependency edges. Public requirements propagate through declared library
@@ -78,6 +94,17 @@ preflights an explicit output list before removing anything; its caller establis
 profile ownership, and unlisted configuration and inputs remain intact.
 
 ## Persistent state
+
+Configured files are rendered after output ownership is established and before
+graph construction. Their inputs and optional version files are fingerprinted;
+generated include roots and noncompiled IDE files are scoped by physical project
+identity. The saved graph retains literal variables and output declarations.
+Native executor callbacks refresh Git identity without rerunning configuration,
+using one bounded writer and changed-content writes. Ninja uses restat outputs
+and a separate order-only aggregation node; MSVC header nodes use the relative
+spelling emitted by its dependency parser. Make dialects refresh before timestamp
+evaluation, MSBuild before preparation and Xcode through an aggregate dependency.
+No interpreter or nested CMake configuration participates in native self-hosting.
 
 | Location | Contract |
 | --- | --- |

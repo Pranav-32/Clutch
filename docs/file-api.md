@@ -3,6 +3,15 @@
 Audience: IDE integrators and contributors changing code-model output. This protocol
 reference is not required for general contributions.
 
+Native codemodel replies include `compilePolicy.debugSymbols`, `warnings` (the
+selected preset string or ordered array), and a `safety`
+record (`sanitizers`, `lifetime`, `strictness`). Executable target replies expose
+a `debug` action when symbols are enabled. It invokes the native `clutch debug`
+CLI, which builds before opening a supported interactive debugger. IDE plugins
+that provide their own debugger UI can instead use the target artifact and run
+working directory; they need not launch the CLI debugger. See the
+[developer commands](usage.md#format-analyze-and-debug).
+
 This protocol describes native `clutch.toml` projects. The
 [CMake project provider](cmake-projects.md#ide-metadata-and-failure-handling)
 retains CMake's original File API and reports its index through `clutch locate`.
@@ -215,6 +224,9 @@ Each target describes:
 - `directory`: compiler/linker working directory.
 - `sources`: source `path`, object path (`object`), `compileGroupIndex`, and the
   complete compiler `arguments` array, including its executable.
+  With Xcode, object paths describe logical editing commands; Xcode chooses its
+  physical intermediate layout separately. Do not treat those object paths as
+  guaranteed on-disk artifacts. Use `artifacts` for the target's products.
 - `additionalFiles` (optional): canonical header and other noncompiled paths
   selected by source declarations. These files have no object or compiler action.
 - `compileGroups`: `language` (`C`/`CXX`), `standard`, `includes` with `path` and
@@ -246,12 +258,16 @@ indices also carry `configurationInputs` so a reader can reject stale member/loc
 snapshots without separately requesting the inputs object. Fingerprints describe
 the parsed configuration, not merely the last filesystem timestamp. Check all
 entries when determining whether a reply is current.
-`sourceDiscovery` describes the conservative `src/` directory watch: recursive
-scan, supported extensions and `reconfigureOnAddRemove`. Clients may conservatively
+`sourceDiscovery` describes the conservative manifest-root directory watch: recursive
+scan, supported source/header extensions and `reconfigureOnAddRemove`. Clients may conservatively
 watch it even when a manifest explicitly lists sources. These are configuration
 inputs, not a compiler-discovered transitive header dependency database.
+Filter out Git/cache directories and recognized build trees, including the
+reported build directory, when watching for source membership changes. Nested
+Clutch projects have their own discovery boundaries; generated headers are not
+new application sources. This avoids configuration loops caused by build output.
 
-`sourceDiscoveries` adds per-project conservative `src/` watches with `project`,
+`sourceDiscoveries` adds per-project conservative manifest-root watches with `project`,
 `directory`, `recursive`, `extensions` and `reconfigureOnAddRemove`. The original
 singular `sourceDiscovery` remains available for compatibility. Compilation groups
 carry their owning member's standards and effective requirements. One workspace
@@ -282,6 +298,13 @@ references, superseding earlier success indices. Failures before a valid, owned
 build directory/API session exists cannot publish an index. API I/O failures
 may also prevent error publication. Always respect the configure exit status;
 absence of a new index does not imply the last attempt succeeded.
+
+Native configuration also records a profile-local pending marker while it is
+in progress. After a failed lifecycle hook, saved CLI builds remain blocked until
+configuration succeeds again, even if the manifest bytes did not change. An
+`after-configure` hook may inspect generated rules and the compilation database,
+but the new successful saved state and API snapshot are published only after it
+finishes. See [command phases](manifest.md#commands-and-lifecycle-hooks).
 
 The lock is released on normal return or exception. A terminated process can
 leave it behind: verify that no configure process is using the profile before
