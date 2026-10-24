@@ -272,13 +272,81 @@ class ConfiguredFileTests(unittest.TestCase):
         self.configure()
         before = self.header().read_bytes()
         with ThreadPoolExecutor(max_workers=4) as workers:
-            futures = [workers.submit(self.cli, '__configure-files') for _ in range(8)]
+            futures = [workers.submit(self.cli, '__configure-files') for _ in range(32)]
             for future in futures:
                 future.result()
         self.assertEqual(self.header().read_bytes(), before)
 
         self.write('build_info.in', 'x' * (1024 * 1024 + 1))
         self.assertIn('size limit', self.configure(success=False).stderr)
+        self.assertEqual(self.header().read_bytes(), before)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows delete-pending directory semantics')
+    def test_writer_waits_for_delete_pending_lock_directory(self):
+        """Keep an unlinked lock open until the callback reports contention."""
+        import ctypes
+        from ctypes import wintypes
+
+        self.configure()
+        before = self.header().read_bytes()
+        lock = self.build / '.clutch/configure-files.lock'
+        lock.mkdir(parents=True)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        kernel.SetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                     wintypes.LPVOID, wintypes.DWORD]
+        kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+        kernel.CreateDirectoryW.argtypes = [wintypes.LPCWSTR, wintypes.LPVOID]
+        kernel.CreateDirectoryW.restype = wintypes.BOOL
+        # Classic disposition keeps the name delete-pending; modern Windows
+        # RemoveDirectory may instead unlink it immediately using POSIX semantics.
+        delete_access = 0x00010000
+        share_all = 0x00000007
+        open_existing = 3
+        backup_semantics = 0x02000000
+        file_disposition_info = 4
+        access_denied = 5
+        handle = kernel.CreateFileW(str(lock), delete_access, share_all, None,
+                                    open_existing, backup_semantics, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value)
+        try:
+            delete = wintypes.BOOL(True)
+            self.assertTrue(kernel.SetFileInformationByHandle(handle, file_disposition_info,
+                                                             ctypes.byref(delete), ctypes.sizeof(delete)))
+            self.assertFalse(kernel.CreateDirectoryW(str(lock), None))
+            self.assertEqual(ctypes.get_last_error(), access_denied)
+            process = subprocess.Popen([OPTIONS.clutch, '__configure-files'], cwd=self.root,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                with ThreadPoolExecutor(max_workers=1) as reader:
+                    line = reader.submit(process.stdout.readline).result(timeout=15)
+                self.assertIn('Waiting', line, process.stderr.read() if not line else line)
+                self.assertIsNone(process.poll(), 'writer must wait while deletion is pending')
+            finally:
+                kernel.CloseHandle(handle)
+                handle = None
+                output, error = process.communicate(timeout=COMMAND_TIMEOUT)
+            self.assertEqual(process.returncode, 0, output + error)
+            self.assertEqual(self.header().read_bytes(), before)
+        finally:
+            if handle is not None:
+                kernel.CloseHandle(handle)
+
+    def test_writer_rejects_a_regular_file_without_removing_it(self):
+        """Only lock contention is retried; a conflicting user file is preserved."""
+        self.configure()
+        before = self.header().read_bytes()
+        lock = self.build / '.clutch/configure-files.lock'
+        lock.parent.mkdir(exist_ok=True)
+        lock.write_text('preserve this file', encoding='utf-8')
+        result = self.cli('__configure-files', success=False)
+        self.assertIn('cannot acquire configured-file writer', result.stderr)
+        self.assertNotIn('Waiting', result.stdout)
+        self.assertEqual(lock.read_text(encoding='utf-8'), 'preserve this file')
         self.assertEqual(self.header().read_bytes(), before)
 
     @unittest.skipUnless(shutil.which('git'), 'Git is optional')

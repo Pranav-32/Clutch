@@ -353,6 +353,34 @@ $resolvedCC = (Get-Command $CC -CommandType Application -ErrorAction Stop).Sourc
 $resolvedCXX = (Get-Command $CXX -CommandType Application -ErrorAction Stop).Source
 $discoveryRunner = Join-Path $work 'discovery runner'
 New-Item -ItemType Directory -Force $discoveryRunner | Out-Null
+# Installed Ninja can be a Chocolatey or Python launcher, not a relocatable
+# binary. This stage tests discovery/configuration only, so compile a standalone
+# version probe; earlier stages execute the real Ninja rules and real compilers.
+$discoveryNinjaVersion = ((& $Ninja --version) -join '').Trim()
+if ($LASTEXITCODE -ne 0 -or $discoveryNinjaVersion -notmatch '^[0-9]+\.[0-9]+[A-Za-z0-9_.+-]*$') {
+    throw 'Cannot obtain the installed Ninja version for the discovery fixture'
+}
+$probeSource = Join-Path $discoveryRunner 'ninja-probe.c'
+$discoveryNinja = Join-Path $discoveryRunner 'ninja.exe'
+Put $probeSource (@'
+#include <stdio.h>
+#include <string.h>
+
+/* Only version discovery is supported; this fixture must never execute builds. */
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        puts("@NINJA_VERSION@");
+        return 0;
+    }
+    return 2;
+}
+'@).Replace('@NINJA_VERSION@', $discoveryNinjaVersion)
+if ([IO.Path]::GetFileNameWithoutExtension($resolvedCC) -in @('cl', 'clang-cl')) {
+    & $resolvedCC /nologo /MT $probeSource "/Fe$discoveryNinja" "/Fo$discoveryRunner/ninja-probe.obj"
+} else {
+    & $resolvedCC $probeSource -o $discoveryNinja
+}
+if ($LASTEXITCODE -ne 0) { throw 'Cannot compile the standalone Ninja discovery probe' }
 $discoveryClutch = Join-Path $discoveryRunner 'clutch.exe'
 Copy-Item -LiteralPath $Clutch -Destination $discoveryClutch
 # Development MinGW binaries may need runtime DLLs. Place them beside the copy
@@ -388,7 +416,7 @@ try {
         $bundleRoot = Join-Path $work $bundle.Name
         $bundledExecutable = Join-Path $bundleRoot $bundle.Relative
         New-Item -ItemType Directory -Force (Split-Path -Parent $bundledExecutable) | Out-Null
-        Copy-Item -LiteralPath $Ninja -Destination $bundledExecutable
+        Copy-Item -LiteralPath $discoveryNinja -Destination $bundledExecutable
         [Environment]::SetEnvironmentVariable('ProgramFiles', $bundleRoot, 'Process')
         # Windows derives a 64-bit child's ProgramFiles from ProgramW6432.
         [Environment]::SetEnvironmentVariable('ProgramW6432', $bundleRoot, 'Process')

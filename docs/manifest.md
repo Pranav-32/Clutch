@@ -369,7 +369,10 @@ Configure again after changing a template or version file. Git commit/tag/dirty
 state is refreshed during both CLI and direct native builds. Files are written
 only when bytes change, preserving no-op builds; missing outputs are recreated.
 Competing callbacks serialize publication and report a persistent writer lock
-rather than waiting indefinitely.
+rather than waiting indefinitely. The lock wait is bounded to ten seconds;
+Windows handles still closing after lock deletion are retried within that bound.
+An inaccessible lock that persists reports an error rather than bypassing the
+lock or writing concurrently.
 
 Use configured files for simple text substitution, such as a version header or
 feature constants. No interpreter is needed. Use [commands](#commands-and-lifecycle-hooks)

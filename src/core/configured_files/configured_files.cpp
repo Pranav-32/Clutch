@@ -13,6 +13,7 @@
 #include "core/dependencies/dependency.hpp"
 #include "core/options.hpp"
 #include "platform/files.hpp"
+#include "platform/terminal.hpp"
 #include "version.hpp"
 
 #include <algorithm>
@@ -20,6 +21,7 @@
 #include <fstream>
 #include <map>
 #include <stdexcept>
+#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -34,18 +36,50 @@ class Writer {
   public:
   explicit Writer(fs::path path)
       : path_(std::move(path)) {
-    validate_generated_path(path_);
+    // The lock itself may be delete-pending on Windows. Validate its stable
+    // parent; an existing lock entry is never followed or treated as acquired.
+    validate_generated_path(path_.parent_path());
     fs::create_directories(path_.parent_path());
     constexpr auto timeout = std::chrono::seconds(10);
     constexpr auto poll_interval = std::chrono::milliseconds(50);
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-    while (!fs::create_directory(path_)) {
-      if (std::chrono::steady_clock::now() >= deadline)
+    bool waiting = false;
+    while (true) {
+      validate_generated_path(path_.parent_path());
+      std::error_code error;
+      if (fs::create_directory(path_, error))
+        break;
+
+      // An unlinked directory remains inaccessible until its last Windows
+      // handle closes. Retry that transient permission failure within the same
+      // bounded lock wait; permanent failures still surface at the deadline.
+#ifdef _WIN32
+      const bool transient = error == std::errc::permission_denied;
+#else
+      constexpr bool transient = false;
+#endif
+      if (error && !transient)
+        throw fs::filesystem_error("cannot acquire configured-file writer",
+                                   path_,
+                                   error);
+
+      if (std::chrono::steady_clock::now() >= deadline) {
+        if (error)
+          throw fs::filesystem_error(
+              "cannot acquire configured-file writer before timeout",
+              path_,
+              error);
+
         throw std::runtime_error("configured-file writer is active; inspect " +
                                  path_.u8string() + " if interrupted");
+      }
+
+      if (!waiting) {
+        status("Waiting", "configured-file writer");
+        waiting = true;
+      }
 
       std::this_thread::sleep_for(poll_interval);
-      validate_generated_path(path_);
     }
   }
 
