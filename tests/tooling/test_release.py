@@ -32,9 +32,12 @@ class ReleaseTests(unittest.TestCase):
         for target in release.TARGETS:
             archive = self.root / release.archive_name(self.version, target)
             archive.write_bytes(target.encode())
-            archive.with_name(archive.name + '.sha256').write_text(
-                f'{release.checksum(archive)}  {archive.name}\n', encoding='utf-8'
-            )
+            release.write_checksum(archive)
+        for target in release.INSTALLER_TARGETS:
+            installer = self.root / release.installer_name(self.version, target)
+            installer.write_bytes(b'installer ' + target.encode())
+            release.write_checksum(installer)
+        release.stage_install_script(self.root)
 
     def test_canonical_versions(self):
         for value in ('0.1.0', '12.34.56', '1.0.0-rc.1', '1.0.0-123abc', '1.0.0-0'):
@@ -120,7 +123,46 @@ class ReleaseTests(unittest.TestCase):
         self.assets()
         release.verify_assets(self.root, self.version)
         release.verify_assets(self.root, self.version)
-        self.assertEqual(len((self.root / 'SHA256SUMS').read_text().splitlines()), len(release.TARGETS))
+        summary = (self.root / 'SHA256SUMS').read_text().splitlines()
+        self.assertEqual(len(summary), len(release.TARGETS) + len(release.INSTALLER_TARGETS) + 1)
+        self.assertTrue(any(line.endswith('  install.sh') for line in summary))
+
+    def test_missing_installer_is_rejected(self):
+        self.assets()
+        (self.root / release.installer_name(self.version, release.INSTALLER_TARGETS[0])).unlink()
+        with self.assertRaisesRegex(ValueError, 'release assets differ'):
+            release.verify_assets(self.root, self.version)
+
+    def test_installer_targets_are_release_targets(self):
+        self.assertTrue(set(release.INSTALLER_TARGETS) <= set(release.TARGETS))
+        with self.assertRaises(ValueError):
+            release.installer_name(self.version, 'linux-x86_64-gcc')
+
+    def test_build_installer_invokes_iscc_and_writes_checksum(self):
+        stage = self.root / 'stage'
+        (stage / 'bin').mkdir(parents=True)
+        (stage / 'bin/clutch.exe').write_bytes(b'binary')
+        output = self.root / 'output'
+        target = release.INSTALLER_TARGETS[0]
+
+        def compile_installer(command, check):
+            self.assertTrue(check)
+            self.assertIn(f'/DAppVersion={self.version}', command)
+            self.assertIn(f'/DSourceDir={stage}', command)
+            self.assertEqual(command[-1], str(release.INSTALLER_SCRIPT))
+            (output / release.installer_name(self.version, target)).write_bytes(b'setup')
+
+        with patch.object(release.subprocess, 'run', side_effect=compile_installer):
+            installer = release.build_installer(stage, output, target, self.version, iscc='ISCC.exe')
+        self.assertEqual(installer.name, f'clutch-{self.version}-{target}-setup.exe')
+        self.assertEqual(installer.with_name(installer.name + '.sha256').read_text(encoding='utf-8'),
+                         f'{release.checksum(installer)}  {installer.name}\n')
+
+    def test_installer_script_defines_per_user_path_handling(self):
+        script = release.INSTALLER_SCRIPT.read_text(encoding='utf-8')
+        for required in ('PrivilegesRequired=lowest', 'ChangesEnvironment=yes',
+                         'RegWriteExpandStringValue', 'usPostUninstall', 'clutch.ico'):
+            self.assertIn(required, script)
 
     def test_matrix_matches_supported_assets(self):
         workflow = (release.ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8')

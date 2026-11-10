@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 import zipfile
@@ -25,6 +26,11 @@ TARGETS = (
     'macos-arm64-apple-clang',
     'macos-x86_64-apple-clang',
 )
+# Targets that also publish a native installer beside their archive.
+INSTALLER_TARGETS = ('windows-x86_64-msvc',)
+# Repository-maintained installers: the POSIX script is published as-is.
+INSTALL_SCRIPT = ROOT / 'packaging/install.sh'
+INSTALLER_SCRIPT = ROOT / 'packaging/windows/clutch.iss'
 NOTICES = ('LICENSE', 'CLI11.LICENSE', 'tomlplusplus.LICENSE', 'nlohmann.LICENSE')
 # One MiB balances streaming checksum throughput against temporary memory use.
 CHECKSUM_BLOCK_BYTES = 1024 * 1024
@@ -65,6 +71,20 @@ def archive_name(version, target):
     return f'clutch-{version}-{target}{suffix}'
 
 
+def installer_name(version, target):
+    """Name the per-user Windows installer consistently with its archive."""
+    if target not in INSTALLER_TARGETS:
+        raise ValueError(f'no installer for release target: {target}')
+    return f'clutch-{version}-{target}-setup.exe'
+
+
+def release_assets(version):
+    """Return (binary assets with .sha256 sidecars, assets without sidecars)."""
+    binaries = [archive_name(version, target) for target in TARGETS]
+    binaries += [installer_name(version, target) for target in INSTALLER_TARGETS]
+    return binaries, [INSTALL_SCRIPT.name]
+
+
 def checksum(path):
     """Stream archive bytes so packaging does not require archive-sized memory."""
     digest = hashlib.sha256()
@@ -95,16 +115,59 @@ def package(stage, output, target, version):
         with tarfile.open(archive, 'w:gz') as bundle:
             for path in files:
                 bundle.add(path, arcname=f'{prefix}/{path.relative_to(stage).as_posix()}', recursive=False)
-    archive.with_name(archive.name + '.sha256').write_text(
-        f'{checksum(archive)}  {archive.name}\n', encoding='utf-8'
-    )
+    write_checksum(archive)
     return archive
 
 
+def write_checksum(path):
+    """Write the sidecar format verified by publishing and install.sh."""
+    path.with_name(path.name + '.sha256').write_text(
+        f'{checksum(path)}  {path.name}\n', encoding='utf-8'
+    )
+
+
+def find_iscc():
+    """Locate Inno Setup's compiler: ISCC variable, PATH, then default installs."""
+    if explicit := os.environ.get('ISCC'):
+        return explicit
+    if found := shutil.which('iscc'):
+        return found
+    for variable in ('ProgramFiles(x86)', 'ProgramFiles', 'LOCALAPPDATA'):
+        if root := os.environ.get(variable):
+            for relative in ('Inno Setup 6/ISCC.exe', 'Programs/Inno Setup 6/ISCC.exe'):
+                if (candidate := Path(root) / relative).is_file():
+                    return str(candidate)
+    raise ValueError('Inno Setup 6 (ISCC.exe) is required; set ISCC or install it')
+
+
+def build_installer(stage, output, target, version, iscc=None):
+    """Compile the per-user installer from a verified install tree."""
+    name = installer_name(version, target)
+    if not (stage / 'bin/clutch.exe').is_file():
+        raise ValueError('install tree lacks bin/clutch.exe')
+    output.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        iscc or find_iscc(), '/Q', f'/DAppVersion={version}', f'/DSourceDir={stage}',
+        f'/DOutputBaseName={Path(name).stem}', f'/O{output}', str(INSTALLER_SCRIPT),
+    ], check=True)
+    installer = output / name
+    if not installer.is_file():
+        raise ValueError(f'Inno Setup did not produce {name}')
+    write_checksum(installer)
+    return installer
+
+
+def stage_install_script(directory):
+    """Copy the repository's POSIX installer into the release asset directory."""
+    shutil.copyfile(INSTALL_SCRIPT, directory / INSTALL_SCRIPT.name)
+
+
 def verify_assets(directory, version):
-    """Require every platform archive and verify its builder-produced digest."""
-    archives = [directory / archive_name(version, target) for target in TARGETS]
+    """Require every platform archive/installer and verify builder digests."""
+    binaries, plain = release_assets(version)
+    archives = [directory / name for name in binaries]
     expected = {path.name for archive in archives for path in (archive, archive.with_name(archive.name + '.sha256'))}
+    expected |= set(plain)
     # Recompute our own summary on retries; builder inputs must still match.
     actual = {path.name for path in directory.iterdir() if path.name != 'SHA256SUMS'}
     if actual != expected:
@@ -115,6 +178,7 @@ def verify_assets(directory, version):
         if archive.with_name(archive.name + '.sha256').read_text(encoding='utf-8') != line:
             raise ValueError(f'checksum mismatch: {archive.name}')
         lines.append(line)
+    lines.extend(f'{checksum(directory / name)}  {name}\n' for name in plain)
     (directory / 'SHA256SUMS').write_text(''.join(lines), encoding='utf-8')
 
 
@@ -126,6 +190,7 @@ def publish(directory, tag):
     """
     version = read_version()
     validate_tag(tag)
+    stage_install_script(directory)
     verify_assets(directory, version)
     view = subprocess.run(
         ['gh', 'release', 'view', tag, '--json', 'isDraft,assets'], text=True, capture_output=True

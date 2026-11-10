@@ -22,6 +22,36 @@ Installation includes Clutch's license and the vendored-library notices under
 `share/licenses/clutch/`. Keep these with binary redistributions; see
 [licensing](licensing.md) for the requirements.
 
+## Install a release
+
+Releases after 0.5.0 include installers beside the portable archives on
+[GitHub Releases](https://github.com/Pranav-32/Clutch/releases). Earlier
+releases provide archives only; extract one and add its `bin` directory to
+`PATH`, or build from source as described below.
+
+**Windows:** run `clutch-<version>-windows-x86_64-msvc-setup.exe`. It installs
+for the current user without administrator rights, into
+`%LOCALAPPDATA%\Programs\Clutch` by default, and adds that `bin` directory to
+your user `PATH` unless you clear the PATH option. Open a new terminal afterwards.
+Uninstalling from **Settings > Apps** removes exactly that `PATH` entry. For an
+unattended install, run the installer with `/VERYSILENT /CURRENTUSER`; add
+`/MERGETASKS="!addtopath"` to leave `PATH` unchanged. The installer is not
+code-signed yet, so Windows SmartScreen may ask for confirmation.
+
+**Linux x86_64 and macOS:** download and review `install.sh` from the release,
+then run it:
+
+```sh
+sh install.sh                      # latest release into ~/.local/bin
+sh install.sh --version 1.2.3 --prefix /opt/clutch
+sh install.sh --modify-path        # also add the bin directory to your shell profile
+```
+
+The script verifies each archive against its published SHA-256 before
+extracting it, and changes your shell profile only with `--modify-path`. To
+install offline, pass `--archive` with a downloaded `.tar.gz` that has its
+`.sha256` file beside it. Other platforms build from source.
+
 ## Linux and macOS
 
 Install CMake and a C++17 compiler such as GCC or Clang; on macOS, install Apple's
