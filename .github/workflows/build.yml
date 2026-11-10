@@ -62,7 +62,8 @@ jobs:
           packages=()
           command -v ninja >/dev/null || packages+=(ninja)
           command -v gmake >/dev/null || packages+=(make)
-          command -v dot >/dev/null || packages+=(graphviz)
+          # Graphviz (about 25 bottles) only enables optional DOT rendering in
+          # clutch.graph; its platform-independent output is checked on Linux.
           if (( ${#packages[@]} )); then brew install "${packages[@]}"; fi
           echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
       - name: MSVC developer environment
