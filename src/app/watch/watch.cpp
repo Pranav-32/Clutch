@@ -92,6 +92,11 @@ int watch_project(const Options &options,
 
   WatchSnapshot previous, current;
   snapshot_watch_inputs(options, settings, graph ? &*graph : nullptr, previous);
+  // Inputs as the last build cycle consumed them. Polls can observe an
+  // edit between its write and a later timestamp restore; comparing against
+  // the last build, not the last poll, still detects that the edited content
+  // has no newer timestamp than the objects built from the old content.
+  std::optional<WatchSnapshot> built;
   const auto cycle = [&] {
     int code = 0;
     try {
@@ -140,6 +145,12 @@ int watch_project(const Options &options,
       }
 
       if (code == 0 && !interrupted) {
+        WatchSnapshot consumed;
+        snapshot_watch_inputs(options,
+                              settings,
+                              graph ? &*graph : nullptr,
+                              consumed);
+        clean = clean || (built && watch_needs_clean(*built, consumed));
         std::vector<std::string> command{executable.u8string(),
                                          settings.test  ? "test"
                                          : settings.run ? "run"
@@ -172,7 +183,13 @@ int watch_project(const Options &options,
         }
 
         code = run(command, options.root);
+        // The exit code may belong to the program or tests, not the build. A
+        // requested clean already removed the selected outputs, so later
+        // timestamp checks rebuild anything this cycle left behind.
         clean = false;
+        if (!built)
+          built.emplace();
+        built->swap(consumed);
       }
     } catch (const std::exception &error) {
       // An editor may replace a configuration input between child completion
