@@ -69,7 +69,11 @@ before the example stage starts, keeping their concurrency budgets separate.
    the normal PR process. This workflow does not itself publish a tag or release.
 3. At the merged release commit, create and push the annotated `v<version>` tag
    matching `VERSION`. Confirm the worktree and commit before tagging. Do not
-   move published tags to repair a release.
+   move published tags to repair a release. Then relabel the merged release PR
+   from `autorelease: pending` to `autorelease: tagged`. Release Please does
+   this itself only when it creates GitHub releases, which this repository
+   skips; a merged release PR left pending makes the next version proposal
+   abort with "untagged, merged release PRs outstanding".
 4. The tag-driven release workflow validates identity and runs full verification
    from that exact commit. It does not promote binaries built for a PR.
 5. Verify the published release contains all five archives, the Windows
