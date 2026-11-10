@@ -12,8 +12,11 @@
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/source_files.hpp"
+#include "platform/capture.hpp"
+#include "platform/environment.hpp"
 #include "platform/process.hpp"
 #include "platform/terminal.hpp"
+#include "platform/tool_discovery.hpp"
 #include <algorithm>
 #include <cctype>
 #include <set>
@@ -21,15 +24,78 @@
 
 namespace clutch {
 namespace {
-/// Explicit paths never fall back to an unrelated installed tool.
+/// Probe automatic debugger candidates without loading user initialization
+/// files. Interactive-session failures are never retried with a different
+/// debugger.
+bool debugger_starts(const std::string &executable, const fs::path &directory) {
+  const auto name = fs::u8path(executable).stem().u8string();
+  std::vector command{executable};
+  if (name == "lldb" || name.rfind("lldb-", 0) == 0)
+    command.insert(command.end(), {"--no-lldbinit", "--batch", "-o", "quit"});
+  else if (name == "gdb" || name.rfind("gdb-", 0) == 0)
+    command.insert(command.end(), {"--nx", "--batch", "--version"});
+  else
+    // No verified noninteractive startup form (for example cdb): accept the
+    // discovered executable rather than skip it on an unproven probe.
+    return true;
+
+  // Optional tools must not hang discovery indefinitely during startup.
+  constexpr auto debugger_startup_timeout = std::chrono::seconds{10};
+  const auto result =
+      capture(command, directory, true, debugger_startup_timeout);
+  if (result.status == 0)
+    return true;
+
+  const auto end = result.text.find_first_of("\r\n");
+  status("Skipping",
+         executable + ": " +
+             (result.text.empty() ? "debugger startup failed (exit " +
+                                        std::to_string(result.status) + ")"
+                                  : result.text.substr(0, end)));
+  return false;
+}
+
+/// Explicit paths and environment choices never fall back to unrelated tools.
 std::string resolve_tool(const std::string &requested,
-                         const std::vector<std::string> &defaults) {
-  for (const auto &name :
-       requested.empty() ? defaults : std::vector{requested}) {
-    if (const auto found = find_program(name); !found.empty())
+                         const char *const variable,
+                         const std::vector<std::string> &defaults,
+                         const fs::path &directory,
+                         const bool probe_debugger = false) {
+  auto selection = requested;
+  if (const auto value = environment_value(variable);
+      selection.empty() && value)
+    selection = *value;
+
+  if (!selection.empty()) {
+    if (const auto found = find_tool(selection); !found.empty())
       return found;
+
+    throw std::runtime_error("developer tool not found: " + selection +
+                             "; check " + variable + " or --tool");
   }
-  throw std::runtime_error("developer tool not found; install " +
+
+  // Check all PATH tool families before falling back to any IDE installation.
+  std::vector<std::string> candidates;
+  for (const auto &name : defaults)
+    if (const auto found = find_program(name); !found.empty())
+      candidates.push_back(found);
+
+  for (const auto &name : defaults)
+    for (const auto &found : tool_candidates(name))
+      if (std::find(candidates.begin(), candidates.end(), found) ==
+          candidates.end())
+        candidates.push_back(found);
+
+  for (const auto &candidate : candidates) {
+    try {
+      if (!probe_debugger || debugger_starts(candidate, directory))
+        return candidate;
+    } catch (const std::runtime_error &error) {
+      status("Skipping", candidate + ": " + error.what());
+    }
+  }
+
+  throw std::runtime_error("usable developer tool not found; install " +
                            defaults.front() + " or pass --tool <executable>");
 }
 
@@ -50,7 +116,8 @@ int format_project(const Options &options,
                    const std::string &tool,
                    const bool check) {
   const auto project = load_project(options);
-  const auto formatter = resolve_tool(tool, {"clang-format"});
+  const auto formatter =
+      resolve_tool(tool, "CLUTCH_FORMATTER", {"clang-format"}, project.root);
   std::set<fs::path> files;
   const auto collect = [&](const auto &sources, const auto &headers) {
     files.insert(sources.begin(), sources.end());
@@ -110,7 +177,8 @@ int lint_project(const Options &options,
                  const std::string &tool,
                  const std::string &checks) {
   const auto graph = load_configuration(options);
-  const auto analyzer = resolve_tool(tool, {"clang-tidy"});
+  const auto analyzer =
+      resolve_tool(tool, "CLUTCH_ANALYZER", {"clang-tidy"}, graph.project.root);
   std::set<fs::path> sources;
   for (const auto &target : graph.targets)
     if (owns(graph.project, target.source_root))
@@ -148,7 +216,11 @@ int debug_target(const Graph &graph,
   if (target.type != TargetType::Executable)
     throw std::runtime_error("debug requires an executable target");
 
-  const auto debugger = resolve_tool(tool, {"lldb", "gdb", "cdb"});
+  const auto debugger = resolve_tool(tool,
+                                     "CLUTCH_DEBUGGER",
+                                     {"lldb", "gdb", "cdb"},
+                                     target.source_root,
+                                     true);
   auto name = fs::u8path(debugger).stem().u8string();
   std::transform(name.begin(),
                  name.end(),

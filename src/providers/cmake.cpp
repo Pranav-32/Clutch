@@ -10,6 +10,7 @@
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 #include "platform/terminal.hpp"
+#include "platform/tool_discovery.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -142,9 +143,9 @@ int execute_preset(const Options &options, const CMakeRequest &request) {
     throw std::runtime_error("execution presets own configuration, targets, "
                              "filters and jobs; set these in the preset");
 
-  const auto program = find_program(request.operation == "build"  ? "cmake"
-                                    : request.operation == "test" ? "ctest"
-                                                                  : "cpack");
+  const auto program = find_tool(request.operation == "build"  ? "cmake"
+                                 : request.operation == "test" ? "ctest"
+                                                               : "cpack");
   if (program.empty())
     throw std::runtime_error("CMake workflow executable is unavailable");
 
@@ -209,7 +210,7 @@ int run_cmake(const Options &options, const CMakeRequest &request) {
     return execute_preset(options, request);
 
   if (request.operation.empty()) {
-    const auto cmake = find_program("cmake");
+    const auto cmake = find_tool("cmake");
     if (cmake.empty())
       throw std::runtime_error("CMake project provider requires CMake 3.21+");
 

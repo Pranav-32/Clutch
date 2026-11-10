@@ -113,11 +113,40 @@ fail if unusable rather than silently changing formats. Without a generator,
 (for example `ninja`, `gmake`, `nmake`, `MSBuild.exe`); custom wrapper names require
 `--generator` too. A stale missing cached executable is rediscovered.
 
-On Windows, Ninja discovery also checks the active Visual Studio installation,
-bundles beside CMake on `PATH`, and standard Visual Studio/CLion installation
-directories under Program Files. The resolved executable is saved in the
-selected profile's build directory. A fresh build directory runs discovery
-again; use `--build-tool` for a custom installation that is not discoverable.
+When a tool is absent from `PATH`, Clutch also checks known IDE bundle layouts.
+This applies to compilers, archivers, native build executors, CMake/CTest/CPack,
+formatters, analyzers and debuggers. It uses only tools that actually exist in an
+installation; an IDE does not necessarily bundle every tool.
+
+| Host | IDE installation locations | Then standalone toolchain directories |
+| --- | --- | --- |
+| Windows | Visual Studio and CLion under Program Files; CLion Toolbox installations under Local AppData | LLVM under Program Files; MSYS2 `ucrt64`, `clang64` and `mingw64` (under `MSYS2_ROOT` or the system drive's `msys64`); Scoop shims; Chocolatey and WinGet links |
+| Linux | CLion under `/opt`, `/opt/jetbrains` and the user's JetBrains Toolbox applications directory | Versioned `/usr/lib/llvm-*/bin` (newest first), `/usr/local/bin` and Linuxbrew |
+| macOS | CLion applications under `/Applications` or `~/Applications`, Toolbox applications, and the default Xcode developer directory | Homebrew's keg-only LLVM and `bin` under `/opt/homebrew` and `/usr/local` |
+
+When several versions of an IDE or toolset are installed, newer versions are
+tried first (for example Visual Studio 2026 before 2022, MSVC 14.51 before 14.9).
+
+Set `CLION_HOME` to a CLion installation root for a custom location, or
+`VSINSTALLDIR` to a Visual Studio installation root. On macOS, `CLION_HOME` can
+name the `.app` bundle or its `Contents` directory; `DEVELOPER_DIR` selects an
+additional Xcode developer directory. These roots affect discovery, not the
+selection of an IDE's private toolchain configuration. Searches inspect known
+directory levels rather than recursively scanning disks or project sources.
+Ninja also retains discovery beside CMake on `PATH`.
+
+Explicit CLI choices, tool-specific environment choices and saved compiler/build
+tool selections keep priority. Automatic selection tries the supported names on
+`PATH`, then IDE bundles, then the standalone toolchain directories above.
+Clutch looks up `PATH` itself rather than starting `where` or `which`. A missing explicit executable path is an error rather
+than a request to silently select another installation. Compiler and executor
+paths are saved in the selected profile; reconfigure to change them.
+
+Keep bundled executables with their runtime files. Clutch neither copies them nor
+changes the global `PATH`. Visual Studio compiler discovery does not initialize
+the Windows SDK, `INCLUDE` or `LIB`: use a developer terminal for that toolchain.
+Builds still require mutually compatible compiler, library ABI and debugger
+symbol formats; discovering an executable does not establish all of those.
 
 Resolved settings and the complete graph are saved inside the profile build
 directory. Build execution accepts `--project`, `--release`, `--jobs` and `--clean`; change
@@ -160,10 +189,31 @@ and preserves that exit status. It does not apply automatic source fixes.
 Build dependency-generated headers first if the project needs them for analysis.
 
 `debug` builds the selected executable using the same target selection, `--jobs`
-and `--clean` options as `run`, then opens an interactive LLDB, GDB or CDB session
-in that order of availability. Use `--tool <executable>` to select a debugger,
+and `--clean` options as `run`, then opens an interactive LLDB, GDB or CDB session.
+Automatic selection tries those names on `PATH`, followed by supported IDE
+bundles. Each automatic LLDB/GDB candidate receives a noninteractive startup
+probe with a ten-second timeout that does not load user initialization files;
+CDB has no verified probe form and is selected once its executable is found. A failed probe produces a concise `Skipping` diagnostic before trying
+another candidate. Clutch never retries an interactive session with another
+debugger after that session has started.
+
+Use `--tool <executable>` to select a debugger,
 formatter or analyzer explicitly. Debuggers must retain their supported executable
 name (`lldb`, `gdb`, versioned variants or `cdb`), even when given by absolute path.
+The environment overrides are `CLUTCH_DEBUGGER`, `CLUTCH_FORMATTER` and
+`CLUTCH_ANALYZER`; `--tool` takes priority. An explicit CLI/environment debugger
+choice is launched directly, preserving its exit status and preventing silent
+fallback. For example, in PowerShell:
+
+```powershell
+$env:CLION_HOME = "C:\path\to\CLion"
+clutch debug
+
+# Pin an exact debugger instead of automatic discovery:
+$env:CLUTCH_DEBUGGER = "$env:CLION_HOME\bin\lldb\win\x64\bin\lldb.exe"
+clutch debug
+```
+
 Program arguments go after `--`. The selected profile must have
 `debug_symbols = true`; release profiles can enable this without changing
 optimization. The native debugger owns stepping, breakpoints and startup behavior.

@@ -42,9 +42,9 @@ class ToolingSafetyTests(unittest.TestCase):
                    '[profile.debug]\nbuild_dir="out-debug"\n' + debug +
                    '\n[profile.release]\nbuild_dir="out-release"\n' + release + '\n' + extra)
 
-    def cli(self, *arguments, success=True):
+    def cli(self, *arguments, success=True, env=None):
         result = subprocess.run([OPTIONS.clutch, *arguments], cwd=self.root,
-                                capture_output=True, text=True, timeout=TIMEOUT)
+                                capture_output=True, text=True, timeout=TIMEOUT, env=env)
         if success is not None:
             self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
@@ -245,9 +245,13 @@ class ToolingSafetyTests(unittest.TestCase):
         self.assertEqual((self.root / 'header.hpp').read_text(), '#pragma once\nint helper();\n')
         self.assertFalse((self.root / 'out-debug').exists())
 
-    def tool(self, name, code=0):
+    def tool(self, name, code=0, probe_code=None):
         """Compile a native argv recorder; never fake an interactive debugger UI."""
-        source = self.write('tool.c', '#include <stdio.h>\nint main(int argc, char **argv) { '
+        probe = (f'if (argc > 1 && !strcmp(argv[1], "--no-lldbinit")) '
+                 f'{{ fputs("fixture startup diagnostic\\n", stderr); return {probe_code}; }} '
+                 if probe_code is not None else '')
+        source = self.write('tool.c', '#include <stdio.h>\n#include <string.h>\n'
+                            'int main(int argc, char **argv) { ' + probe +
                             'for (int i=1;i<argc;++i) puts(argv[i]); return ' + str(code) + '; }\n')
         output = self.root / (name + ('.exe' if os.name == 'nt' else ''))
         if Path(OPTIONS.cc).stem.lower() in ('cl', 'clang-cl'):
@@ -287,6 +291,46 @@ class ToolingSafetyTests(unittest.TestCase):
         self.configure()
         result = self.cli('debug', '--tool', debugger, success=False)
         self.assertIn('debug_symbols = true', result.stderr)
+
+    def test_automatic_debugger_skips_broken_path_and_uses_bundle(self):
+        """A found but unusable LLDB must not hide a working IDE installation."""
+        self.configure()
+        self.cli('build')
+        suffix = '.exe' if os.name == 'nt' else ''
+        broken = Path(self.tool('lldb', code=7, probe_code=23))
+        path_tool = self.root / 'path tools' / broken.name
+        path_tool.parent.mkdir()
+        shutil.copy2(broken, path_tool)
+        healthy = Path(self.tool('lldb', code=7, probe_code=0))
+        machine = os.uname().machine.lower() if os.name != 'nt' else os.environ.get('PROCESSOR_ARCHITECTURE', '').lower()
+        architecture = 'aarch64' if machine in ('arm64', 'aarch64') else 'x64'
+        platform = 'win' if os.name == 'nt' else ('mac' if sys.platform == 'darwin' else 'linux')
+        bundle = self.root / 'CLion fixture'
+        bundled = bundle / f'bin/lldb/{platform}/{architecture}/bin/lldb{suffix}'
+        bundled.parent.mkdir(parents=True)
+        shutil.copy2(healthy, bundled)
+        empty = self.root / 'empty installations'
+        empty.mkdir()
+        env = os.environ.copy()
+        env.update(PATH=str(path_tool.parent), CLION_HOME=str(bundle),
+                   VSINSTALLDIR=str(empty), LOCALAPPDATA=str(empty), HOME=str(empty),
+                   PROGRAMFILES=str(empty), PROGRAMW6432=str(empty),
+                   CLUTCH_DEBUGGER='', **{'PROGRAMFILES(X86)': str(empty)})
+        result = self.cli('debug', '--', 'two words', success=False, env=env)
+        self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
+        self.assertIn('Skipping', result.stdout)
+        self.assertIn('fixture startup diagnostic', result.stdout)
+        self.assertIn('--\n', result.stdout)
+        self.assertIn('two words', result.stdout)
+        self.assertNotIn('fixture startup diagnostic', result.stderr)
+
+        # An explicit environment choice is authoritative, including its failure.
+        env['CLUTCH_DEBUGGER'] = str(self.root / 'missing/lldb')
+        failure = self.cli('debug', success=False, env=env)
+        self.assertIn('developer tool not found', failure.stderr)
+        override = self.cli('debug', '--tool', str(bundled), success=False, env=env)
+        self.assertEqual(override.returncode, 7, override.stdout + override.stderr)
+        self.assertNotIn('Skipping', override.stdout)
 
 
 if __name__ == '__main__':

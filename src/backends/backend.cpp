@@ -25,11 +25,13 @@
 #include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "platform/tool_discovery.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -107,7 +109,6 @@ struct BackendDriver {
   std::vector<std::string> (*build)(const Graph &,
                                     const Options &,
                                     const std::vector<size_t> &);
-  std::string (*discover)() = nullptr;
   int (*clean)(const Graph &, const std::vector<size_t> &) = nullptr;
 };
 
@@ -123,7 +124,6 @@ const std::vector<BackendDriver> &drivers() {
        {"ninja", "ninja-build"},
        generate_ninja,
        ninja_build_command,
-       discover_ninja,
        ninja_clean_artifacts},
       {"make",
        "GNU Make (Unix, MinGW and MSYS)",
@@ -160,7 +160,6 @@ const std::vector<BackendDriver> &drivers() {
        {"xcodebuild"},
        generate_xcode,
        xcode_build_command,
-       nullptr,
        xcode_clean_artifacts}};
   return registered;
 }
@@ -300,7 +299,7 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
   }
 
   if (!requested.empty()) {
-    if (const auto executable = find_program(requested); !executable.empty()) {
+    if (const auto executable = find_tool(requested); !executable.empty()) {
       validate_executor(driver.name, executable, project.root);
       return {driver.name, executable};
     }
@@ -311,8 +310,10 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
 
   // Search ordinary executable names before optional IDE-bundled installations.
   std::string failures;
+  std::set<std::string> probed;
   for (const auto *const candidate : driver.executable_names) {
     if (const auto executable = find_program(candidate); !executable.empty()) {
+      probed.insert(executable);
       try {
         validate_executor(driver.name, executable, project.root);
         return {driver.name, executable};
@@ -322,10 +323,17 @@ BuildBackend resolve_backend(const Options &options, const Project &project) {
     }
   }
 
-  if (driver.discover) {
-    if (const auto executable = driver.discover(); !executable.empty()) {
-      validate_executor(driver.name, executable, project.root);
-      return {driver.name, executable};
+  for (const auto *const candidate : driver.executable_names) {
+    for (const auto &executable : tool_candidates(candidate)) {
+      if (!probed.insert(executable).second)
+        continue;
+
+      try {
+        validate_executor(driver.name, executable, project.root);
+        return {driver.name, executable};
+      } catch (const std::runtime_error &error) {
+        failures += "\n  " + executable + ": " + error.what();
+      }
     }
   }
 

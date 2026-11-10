@@ -30,3 +30,17 @@ clutch debug --release --target tooling_example
 Install clang-format for `fmt`, clang-tidy for `lint`, and LLDB/GDB/CDB for `debug`.
 Each command accepts `--tool <path>`. See the [tooling commands](../../docs/usage.md#format-analyze-and-debug)
 and [profile fields](../../docs/manifest.md#safety) for exact scope and limitations.
+
+Tools can also come from a supported IDE installation. For a custom CLion
+location, set its root in the current terminal before trying discovery:
+
+```powershell
+$env:CLION_HOME = "C:\path\to\CLion"
+clutch debug --target tooling_example
+```
+
+Automatic debugger selection checks startup and skips unusable candidates.
+`--tool` or `CLUTCH_DEBUGGER` pins an exact choice; `CLUTCH_FORMATTER` and
+`CLUTCH_ANALYZER` select the other optional tools. See
+[tool discovery](../../docs/usage.md#configure-then-build) for platform locations,
+precedence and SDK requirements.

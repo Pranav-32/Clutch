@@ -88,6 +88,7 @@ add_executable(clutch
     src/platform/json.cpp
     src/platform/process.cpp
     src/platform/terminal.cpp
+    src/platform/tool_discovery.cpp
     src/platform/zip.cpp
     src/providers/cmake.cpp
     src/providers/cmake_model.cpp

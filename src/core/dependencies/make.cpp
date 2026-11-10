@@ -10,6 +10,7 @@
 #include "core/project_layout.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "platform/tool_discovery.hpp"
 #include "toolchains/toolchain.hpp"
 #include <stdexcept>
 
@@ -39,11 +40,11 @@ NativeInterface inspect_make(const ForeignRequest &request,
   const auto makefile = request.source / "Makefile";
   if (!fs::is_regular_file(makefile))
     throw std::runtime_error("Makefile dependency has no Makefile: " + r.alias);
-  auto make = find_program("gmake");
+  auto make = find_tool("gmake");
   if (make.empty())
-    make = find_program("make");
+    make = find_tool("make");
   if (make.empty())
-    make = find_program("mingw32-make");
+    make = find_tool("mingw32-make");
   if (make.empty())
     throw std::runtime_error("Makefile dependencies require GNU Make");
   std::string selection = request.identity + ":make:" + r.target;

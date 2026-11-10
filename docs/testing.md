@@ -64,6 +64,20 @@ runs MSVC/Clang integration checks with an initialized environment.
 
 ## Select checks
 
+`clutch.tool-discovery` uses native filesystem fixtures to check IDE layouts,
+newest-first version ordering, PATH and `CLION_HOME` precedence, missing paths,
+executable aliases and POSIX execute permissions without needing an IDE
+installation. `clutch.tooling-safety` also exercises a failing `PATH`
+debugger followed by a healthy bundle, environment overrides and explicit-choice
+precedence. `clutch.capture` checks merged diagnostics, startup timeouts, termination of
+the direct child and completion while a grandchild still holds the output pipe,
+alongside its existing output/argument checks. Run these checks after
+changing tool resolution:
+
+```sh
+ctest --test-dir build-native --output-on-failure -R 'clutch\.(tool-discovery|tooling-safety|capture)$'
+```
+
 ### Self-hosting verification
 
 The root native manifest can build Clutch after the initial CMake bootstrap.
@@ -143,7 +157,8 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.configured-files` | Template/schema/path limits, Git identity parity, direct native refresh and no-op builds, missing outputs, workspace/dependency namespaces, version constraints, source bundles, concurrent callbacks and Windows delete-pending lock recovery |
 | `clutch.tooling-safety` | Independent symbols/optimization, warning-array diagnostics and workspace persistence, policy validation, optional real sanitizer runtimes and lifetime support, formatter scope, analyzer database forwarding and debugger argument/exit handling |
 | `clutch.self-hosting` | Optional complete native release/debug generations, source-archive version identity, no-op object preservation and final executable smoke check without CMake |
-| `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary and oversized-output rejection |
+| `clutch.tool-discovery` | IDE-bundle layouts (CLion, Visual Studio, MSVC toolsets, MinGW), newest-first version ordering, PATH/`CLION_HOME` precedence and changed-root refresh, package-manager directories after IDE bundles, explicit missing paths and executable aliases |
+| `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary, oversized-output rejection, merged stderr, timeout termination of the direct child and lingering-grandchild completion |
 | `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
 | `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |
 | `clutch.stress-integration` | Shared/deep package graphs, cycle recovery, conflict rollback, package limits, serial/parallel C/C++ PCH builds, shared-header invalidation and compile-failure recovery |

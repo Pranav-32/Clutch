@@ -30,7 +30,7 @@ to `src/`. Each module documents its own functions and platform assumptions.
 | `src/toolchains/` | Compiler discovery, driver families, saved selections and safety capability probes |
 | `src/backends/` | Generator registry, native build-file generation and execution |
 | `src/providers/` | Whole-project delegation and evaluated metadata from existing build systems |
-| `src/platform/` | Child processes, file output, JSON escaping and terminal messages |
+| `src/platform/` | Child processes, shared IDE-bundle discovery, file output, JSON escaping and terminal messages |
 | `third_party/` | Vendored headers, version notes and upstream licenses |
 | `tests/` | Unit, integration and development-tooling checks |
 | `.github/` | CI, version proposals and release packaging |
@@ -92,6 +92,25 @@ alongside their ordinary actions in the private saved graph.
 The generator registry owns optional cleanup hooks. `platform/artifacts.*`
 preflights an explicit output list before removing anything; its caller establishes
 profile ownership, and unlisted configuration and inputs remain intact.
+
+## Tool resolution
+
+`platform/process.*` keeps explicit-path and `PATH` executable lookup separate
+from `platform/tool_discovery.*`, which enumerates known IDE layouts. Callers
+retain their CLI/environment/cache precedence and use bundle candidates only
+for fallback. Candidate order is deterministic, driver names are not canonicalized
+through symlinks, and explicit missing paths do not turn into implicit discovery.
+The same resolver serves native compilers/backends, foreign CMake/Make adapters,
+the CMake project provider and optional developer tools.
+
+Debugger discovery probes startup before launching a session. Optional merged
+stderr keeps failed runtime initialization in a concise candidate diagnostic;
+bounded capture terminates and reaps its direct child on timeout, and completes
+once that child exits even if a grandchild still holds the output pipe. It does
+not terminate grandchildren. Ordinary capture
+retains inherited stderr and its existing behavior. Discovery does not import
+IDE settings, activate an SDK environment or guarantee ABI compatibility. See
+[tool selection](usage.md#configure-then-build) for supported locations and overrides.
 
 ## Persistent state
 

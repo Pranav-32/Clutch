@@ -7,6 +7,16 @@ option(CLUTCH_TEST_SELF_HOSTING "Build two additional native Clutch generations"
 
 add_test(NAME clutch.help COMMAND clutch --help)
 add_test(NAME clutch.version COMMAND clutch --version)
+# Bundle discovery fixtures contain no real compiler/debugger and need no SDK.
+add_executable(clutch_tool_discovery_tests unit/tool_discovery_tests.cpp
+        "${PROJECT_SOURCE_DIR}/src/platform/tool_discovery.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/process.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/environment.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/arguments.cpp")
+clutch_target_defaults(clutch_tool_discovery_tests)
+add_test(NAME clutch.tool-discovery COMMAND clutch_tool_discovery_tests
+        "${CMAKE_CURRENT_BINARY_DIR}/tool-discovery-tests")
+set_tests_properties(clutch.tool-discovery PROPERTIES LABELS "unit" TIMEOUT 30)
 add_executable(clutch_version_tests unit/version_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/core/dependencies/version.cpp")
 clutch_target_defaults(clutch_version_tests)
@@ -75,6 +85,7 @@ add_executable(clutch_graph_tests
         "${PROJECT_SOURCE_DIR}/src/core/targets/target.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/targets/runtime.cpp"
         "${PROJECT_SOURCE_DIR}/src/core/graph_visualization.cpp"
+        "${PROJECT_SOURCE_DIR}/src/platform/tool_discovery.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/files.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/arguments.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/environment.cpp"

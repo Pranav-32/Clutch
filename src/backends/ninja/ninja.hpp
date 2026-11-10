@@ -21,10 +21,6 @@ namespace clutch {
 struct Graph;
 struct Options;
 
-/// Find Ninja bundled with CMake, Visual Studio or CLion on Windows after
-/// explicit selections, saved selections and PATH discovery have been tried.
-std::string discover_ninja();
-
 /// Serialize the resolved build graph as Ninja rules and regeneration commands.
 void generate_ninja(const Graph &graph,
                     const Options &options,

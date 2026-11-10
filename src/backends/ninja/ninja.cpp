@@ -7,8 +7,8 @@
 
 /**
  * @file
- * @brief Discover bundled Ninja tools and generate rules from the resolved
- * graph, including response files and regeneration.
+ * @brief Generate Ninja rules from the resolved graph, including response files
+ * and regeneration.
  */
 
 #include "ninja.hpp"
@@ -23,49 +23,16 @@
 #include "core/project_layout.hpp"
 #include "core/targets/archive.hpp"
 #include "core/targets/runtime.hpp"
-#include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
 
 #include <algorithm>
-#include <array>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 
 namespace clutch {
 namespace {
-#ifdef _WIN32
-// Enumerate only known installation levels. Missing or unreadable optional
-// installation folders must not prevent discovery of another installed tool.
-std::vector<fs::path> installation_directories(const fs::path &root) {
-  std::vector<fs::path> result;
-  std::error_code error;
-  fs::directory_iterator current(root,
-                                 fs::directory_options::skip_permission_denied,
-                                 error);
-  const fs::directory_iterator end;
-  for (; !error && current != end; current.increment(error)) {
-    if (std::error_code entry_error; current->is_directory(entry_error))
-      result.push_back(current->path());
-  }
-
-  // A stable order avoids changing tools between identical configure runs.
-  std::sort(result.begin(), result.end());
-  return result;
-}
-
-/// Return a Ninja executable from one known bundle location, or an empty
-/// string.
-std::string bundled_ninja(const fs::path &directory) {
-  const auto executable = directory / "ninja.exe";
-  if (std::error_code error; fs::is_regular_file(executable, error))
-    return fs::absolute(executable).u8string();
-
-  return {};
-}
-#endif
-
 /// Escape Ninja variable expansion separately from shell/response-file quoting.
 std::string ninja_value(const std::string &value) {
   std::string result;
@@ -100,62 +67,6 @@ std::string path(const fs::path &p) {
 }
 
 }  // namespace
-
-/// Probe Windows IDE bundles only after normal executor resolution has failed.
-std::string discover_ninja() {
-#ifdef _WIN32
-  // Visual Studio installs CMake and Ninja in adjacent package directories.
-  const fs::path visual_studio_ninja =
-      "Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja";
-  if (const auto installation = environment_value("VSINSTALLDIR")) {
-    if (const auto executable =
-            bundled_ninja(fs::u8path(*installation) / visual_studio_ninja);
-        !executable.empty())
-      return executable;
-  }
-
-  if (const auto cmake = find_program("cmake"); !cmake.empty()) {
-    const auto directory = fs::u8path(cmake).parent_path();
-    for (const auto &candidate :
-         {directory, directory.parent_path().parent_path() / "Ninja"}) {
-      if (const auto executable = bundled_ninja(candidate); !executable.empty())
-        return executable;
-    }
-  }
-
-  // Default Windows installation roots cover standalone Build Tools and IDE
-  // packages without pinning a product version, edition or installation drive.
-  constexpr std::array installation_roots{"ProgramFiles", "ProgramFiles(x86)"};
-  constexpr std::array clion_ninja_paths{"bin/ninja/win/x64",
-                                         "bin/ninja/win/aarch64"};
-  for (const auto *const variable : installation_roots) {
-    if (const auto root = environment_value(variable)) {
-      for (const auto &version : installation_directories(
-               fs::u8path(*root) / "Microsoft Visual Studio")) {
-        for (const auto &edition : installation_directories(version)) {
-          if (const auto executable =
-                  bundled_ninja(edition / visual_studio_ninja);
-              !executable.empty())
-            return executable;
-        }
-      }
-
-      for (const auto &installation :
-           installation_directories(fs::u8path(*root) / "JetBrains")) {
-        if (installation.filename().u8string().rfind("CLion", 0) != 0)
-          continue;
-
-        for (const auto *const relative : clion_ninja_paths) {
-          if (const auto executable = bundled_ninja(installation / relative);
-              !executable.empty())
-            return executable;
-        }
-      }
-    }
-  }
-#endif
-  return {};
-}
 
 /// Write compile/link rules, dependency tracking and manifest regeneration
 /// edges.

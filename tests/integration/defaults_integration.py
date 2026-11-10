@@ -83,12 +83,13 @@ class DefaultTests(unittest.TestCase):
         # Windows initializes the native ProgramFiles value from ProgramW6432
         # when creating a 64-bit child, so both must describe the fixture.
         hidden = (*TOOL_VARIABLES, 'PATH', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
-                  'PROGRAMW6432', 'VSINSTALLDIR')
+                  'PROGRAMW6432', 'VSINSTALLDIR', 'CLION_HOME', 'LOCALAPPDATA', 'HOME')
         env = {key: value for key, value in self.env.items()
                if key.upper() not in hidden}
         empty = self.root / 'empty tools'
         empty.mkdir(exist_ok=True)
         env.update(PATH=str(empty), PROGRAMFILES=str(empty), PROGRAMW6432=str(empty),
+                   LOCALAPPDATA=str(empty), HOME=str(empty), CLION_HOME=str(empty),
                    **{'PROGRAMFILES(X86)': str(empty), 'VSINSTALLDIR': str(empty)})
         return env
 
