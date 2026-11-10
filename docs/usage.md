@@ -120,9 +120,13 @@ installation; an IDE does not necessarily bundle every tool.
 
 | Host | IDE installation locations | Then standalone toolchain directories |
 | --- | --- | --- |
-| Windows | Visual Studio and CLion under Program Files; CLion Toolbox installations under Local AppData | LLVM under Program Files; MSYS2 `ucrt64`, `clang64` and `mingw64` (under `MSYS2_ROOT` or the system drive's `msys64`); Scoop shims; Chocolatey and WinGet links |
-| Linux | CLion under `/opt`, `/opt/jetbrains` and the user's JetBrains Toolbox applications directory | Versioned `/usr/lib/llvm-*/bin` (newest first), `/usr/local/bin` and Linuxbrew |
-| macOS | CLion applications under `/Applications` or `~/Applications`, Toolbox applications, and the default Xcode developer directory | Homebrew's keg-only LLVM and `bin` under `/opt/homebrew` and `/usr/local` |
+| Windows | Visual Studio and CLion under Program Files; CLion Toolbox installations under Local AppData | LLVM under Program Files; MSYS2 `ucrt64`, `clang64` and `mingw64` (under `MSYS2_ROOT` or the system drive's `msys64`) |
+| Linux | CLion under `/opt`, `/opt/jetbrains` and the user's JetBrains Toolbox applications directory | Versioned `/usr/lib/llvm-*/bin` (newest first) |
+| macOS | CLion applications under `/Applications` or `~/Applications`, Toolbox applications, and the default Xcode developer directory | Homebrew's keg-only LLVM under `/opt/homebrew` and `/usr/local` |
+
+Directories meant to be on `PATH`, such as `/usr/local/bin`, Homebrew's `bin`,
+Scoop shims, Chocolatey's `bin` and WinGet links, are found only through `PATH`.
+Removing one from `PATH` therefore hides its tools from Clutch.
 
 When several versions of an IDE or toolset are installed, newer versions are
 tried first (for example Visual Studio 2026 before 2022, MSVC 14.51 before 14.9).

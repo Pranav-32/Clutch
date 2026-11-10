@@ -275,6 +275,11 @@ std::vector<fs::path> installations() {
 }  // namespace
 
 std::vector<fs::path> common_tool_directories() {
+  // Only toolchains that normally stay off PATH even when installed.
+  // Directories that exist to be on PATH (/usr/local/bin, Homebrew bin, Scoop
+  // shims, Chocolatey bin, WinGet links) are excluded: when absent from PATH,
+  // the user or sandbox removed them deliberately, and searching them would
+  // override it.
   std::vector<fs::path> result;
 #ifdef _WIN32
   for (const auto *const variable : {"ProgramFiles", "ProgramW6432"})
@@ -291,30 +296,11 @@ std::vector<fs::path> common_tool_directories() {
       for (const auto *const environment : {"ucrt64", "clang64", "mingw64"})
         append_unique(result, root / environment / "bin");
     }
-
-  if (const auto scoop = environment_value("SCOOP"); scoop && !scoop->empty())
-    append_unique(result, fs::u8path(*scoop) / "shims");
-  else if (const auto profile = environment_value("USERPROFILE");
-           profile && !profile->empty())
-    append_unique(result, fs::u8path(*profile) / "scoop/shims");
-
-  if (const auto chocolatey = environment_value("ChocolateyInstall");
-      chocolatey && !chocolatey->empty())
-    append_unique(result, fs::u8path(*chocolatey) / "bin");
-  else if (const auto data = environment_value("ProgramData");
-           data && !data->empty())
-    append_unique(result, fs::u8path(*data) / "chocolatey/bin");
-
-  if (const auto local = environment_value("LOCALAPPDATA");
-      local && !local->empty())
-    append_unique(result, fs::u8path(*local) / "Microsoft/WinGet/Links");
 #else
 #ifdef __APPLE__
   // Homebrew's LLVM is keg-only, so its tools are often absent from PATH.
-  for (const auto *const prefix : {"/opt/homebrew", "/usr/local"}) {
+  for (const auto *const prefix : {"/opt/homebrew", "/usr/local"})
     append_unique(result, fs::path(prefix) / "opt/llvm/bin");
-    append_unique(result, fs::path(prefix) / "bin");
-  }
 #else
   // Distribution LLVM packages install versioned trees beside /usr/bin.
   for (const auto &version : directories("/usr/lib")) {
@@ -322,8 +308,6 @@ std::vector<fs::path> common_tool_directories() {
     if (name.rfind("llvm-", 0) == 0)
       append_unique(result, version / "bin");
   }
-  append_unique(result, fs::path("/usr/local/bin"));
-  append_unique(result, fs::path("/home/linuxbrew/.linuxbrew/bin"));
 #endif
 #endif
   return result;
