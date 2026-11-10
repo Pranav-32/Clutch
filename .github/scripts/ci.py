@@ -52,6 +52,28 @@ def require_tool(name):
     raise RuntimeError(f'required tool not found: {name}')
 
 
+def compiler_launcher():
+    """Return the configured compiler cache, or '' when its server cannot start.
+
+    sccache checks its storage when the server starts; a storage outage (for
+    example GitHub cache egress limits) then fails every wrapped compile.
+    Starting the server first turns that outage into an uncached build.
+    """
+    launcher = os.environ.get('CLUTCH_COMPILER_LAUNCHER')
+    if not launcher:
+        return ''
+    executable = require_tool(launcher)
+    if Path(executable).stem.lower() != 'sccache':
+        return executable
+    started = subprocess.run([executable, '--start-server'], capture_output=True, text=True)
+    if started.returncode != 0:
+        reason = (started.stderr or started.stdout).strip().splitlines()
+        print(f'::warning::compiler cache unavailable, building without it: '
+              f'{reason[0] if reason else f"exit {started.returncode}"}', flush=True)
+        return ''
+    return executable
+
+
 def job_count(variable):
     """Reject unbounded/invalid parallelism before starting any build work."""
     value = os.environ.get(variable, str(default_job_count()))
@@ -155,8 +177,7 @@ def build(target, build_dir, output, stage='all'):
                f'-DCMAKE_CXX_COMPILER={cxx}', f'-DCMAKE_MAKE_PROGRAM={ninja}']
     # Cache only compilation, never a saved CMake tree, test result or package.
     # The actual compiler paths remain unchanged for Clutch integration tests.
-    launcher = os.environ.get('CLUTCH_COMPILER_LAUNCHER')
-    command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={require_tool(launcher) if launcher else ""}')
+    command.append(f'-DCMAKE_CXX_COMPILER_LAUNCHER={compiler_launcher()}')
     required = {'clutch.help', 'clutch.version', 'clutch.files', 'clutch.graph', 'clutch.file-api', 'clutch.targets',
                 'clutch.workspace', 'clutch.dependencies', 'clutch.foreign-dependencies', 'clutch.cmake-projects', 'clutch.git-submodules',
                 'clutch.package-examples', 'clutch.version-ranges', 'clutch.bundle', 'clutch.zip',
