@@ -7,12 +7,17 @@
  */
 #include "platform/artifacts.hpp"
 #include "platform/files.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <thread>
+#include <vector>
 
 namespace {
 /// Keep invariant checks active in optimized native test executables.
@@ -116,6 +121,58 @@ void check_artifact_cleanup(const clutch::fs::path &root) {
               read(outside) == "source",
           "cleanup removed unlisted metadata or inputs");
 }
+
+/// Competing writers repeatedly take and release one lock directory. Every
+/// attempt must either acquire it or see it held: a holder removing the
+/// directory mid-check (EEXIST without a directory on POSIX) is not an error.
+void check_lock_contention(const clutch::fs::path &root) {
+  const auto lock = root / "contended.lock";
+  constexpr auto writers = 4;
+  constexpr auto acquisitions = 400;
+  std::atomic<int> inside{0};
+  std::atomic<bool> failed{false};
+  std::string failure;
+  std::mutex failure_mutex;
+  std::vector<std::thread> threads;
+  threads.reserve(writers);
+  for (auto writer = 0; writer < writers; ++writer)
+    threads.emplace_back([&] {
+      for (auto count = 0; count < acquisitions && !failed; ++count) {
+        std::error_code error;
+        while (!clutch::try_create_lock_directory(lock, error)) {
+          if (error) {
+            const std::lock_guard guard(failure_mutex);
+            failure = error.message();
+            failed = true;
+            return;
+          }
+          std::this_thread::yield();
+        }
+        if (++inside != 1)
+          failed = true;
+        --inside;
+        clutch::fs::remove(lock, error);
+      }
+    });
+  for (auto &thread : threads)
+    thread.join();
+  if (failed)
+    throw std::runtime_error(
+        failure.empty() ? "two writers held one lock directory"
+                        : "lock contention reported an error: " + failure);
+  require(!clutch::fs::exists(lock), "contended lock directory remained");
+
+  // A regular file where the lock belongs is an obstruction, not a holder.
+  std::ofstream(lock) << "not a lock directory\n";
+  std::error_code error;
+  require(!clutch::try_create_lock_directory(lock, error) && error,
+          "a non-directory lock path was treated as a lock holder");
+  clutch::fs::remove(lock);
+  require(
+      !clutch::try_create_lock_directory(root / "missing" / "x.lock", error) &&
+          error,
+      "a lock below a missing parent was treated as held");
+}
 }  // namespace
 
 /// Keep all fixtures inside CTest's uniquely named build-artifact directory.
@@ -157,6 +214,8 @@ int main(const int argc, char **const argv) {
     require(rejected && read(output) == "changed content\n",
             "a directory output damaged existing files");
     check_artifact_cleanup(root);
+
+    check_lock_contention(root);
 
     // Generators create shared object directories once per pass.
     clutch::DirectoryCreator directories;

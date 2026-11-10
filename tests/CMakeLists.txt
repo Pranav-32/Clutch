@@ -25,6 +25,9 @@ add_executable(clutch_files_tests unit/files_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/platform/artifacts.cpp"
         "${PROJECT_SOURCE_DIR}/src/platform/files.cpp")
 clutch_target_defaults(clutch_files_tests)
+# The lock-contention check starts real threads.
+find_package(Threads REQUIRED)
+target_link_libraries(clutch_files_tests PRIVATE Threads::Threads)
 add_test(NAME clutch.files COMMAND clutch_files_tests "${CMAKE_CURRENT_BINARY_DIR}/file-tests")
 add_executable(clutch_git_submodules_tests unit/git_submodules_tests.cpp
         "${PROJECT_SOURCE_DIR}/src/core/dependencies/git_submodules.cpp"

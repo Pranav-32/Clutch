@@ -17,6 +17,7 @@
 
 #include <set>
 #include <string>
+#include <system_error>
 
 namespace clutch {
 /// Refuse a generated destination that redirects through a link or junction.
@@ -28,6 +29,14 @@ void validate_generated_path(const fs::path &path);
 /// the writer rejects redirected paths, creates missing parent directories and
 /// reports write/close failures. It does not provide a multi-file transaction.
 void write_if_changed(const fs::path &path, const std::string &content);
+
+/// Atomically create a lock directory. Returns true when this call created it
+/// and false when another holder owns it, or is just releasing it: the holder
+/// removing it between creation and the library's directory check (EEXIST on
+/// POSIX, "not found" on Windows) and a delete-pending directory on Windows
+/// (access denied). A missing parent, a non-directory entry at `path` and any
+/// other failure are returned in `error`.
+bool try_create_lock_directory(const fs::path &path, std::error_code &error);
 
 /// Create output directories once per generation pass. Generators visit one
 /// object per source unit, often thousands sharing a directory; repeating

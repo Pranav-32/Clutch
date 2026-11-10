@@ -46,33 +46,20 @@ class Writer {
     bool waiting = false;
     while (true) {
       validate_generated_path(path_.parent_path());
+      // A held, just-released or (on Windows) delete-pending lock is retried
+      // within this bounded wait; any other obstruction fails immediately.
       std::error_code error;
-      if (fs::create_directory(path_, error))
+      if (try_create_lock_directory(path_, error))
         break;
 
-      // An unlinked directory remains inaccessible until its last Windows
-      // handle closes. Retry that transient permission failure within the same
-      // bounded lock wait; permanent failures still surface at the deadline.
-#ifdef _WIN32
-      const bool transient = error == std::errc::permission_denied;
-#else
-      constexpr bool transient = false;
-#endif
-      if (error && !transient)
+      if (error)
         throw fs::filesystem_error("cannot acquire configured-file writer",
                                    path_,
                                    error);
 
-      if (std::chrono::steady_clock::now() >= deadline) {
-        if (error)
-          throw fs::filesystem_error(
-              "cannot acquire configured-file writer before timeout",
-              path_,
-              error);
-
+      if (std::chrono::steady_clock::now() >= deadline)
         throw std::runtime_error("configured-file writer is active; inspect " +
                                  path_.u8string() + " if interrupted");
-      }
 
       if (!waiting) {
         status("Waiting", "configured-file writer");

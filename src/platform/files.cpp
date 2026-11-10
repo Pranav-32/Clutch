@@ -75,6 +75,38 @@ void write_if_changed(const fs::path &path, const std::string &content) {
     throw std::runtime_error("cannot write " + destination.u8string());
 }
 
+bool try_create_lock_directory(const fs::path &path, std::error_code &error) {
+  error.clear();
+  if (fs::create_directory(path, error))
+    return true;
+
+#ifdef _WIN32
+  // A removed directory stays delete-pending, and inaccessible, until its
+  // last handle closes: the previous holder is still releasing it.
+  if (error == std::errc::permission_denied) {
+    error.clear();
+    return false;
+  }
+#endif
+  // The library creates the directory, sees an existing entry and then checks
+  // that it is a directory. When the holder removes it in between, libstdc++
+  // reports EEXIST and the MSVC STL reports "not found". Both mean "just
+  // released"; a missing parent or a present non-directory are real errors.
+  if (error != std::errc::file_exists &&
+      error != std::errc::no_such_file_or_directory)
+    return false;
+
+  std::error_code parent_error;
+  if (!fs::is_directory(path.parent_path(), parent_error))
+    return false;
+
+  std::error_code status_error;
+  const auto status = fs::symlink_status(path, status_error);
+  if (status_error || !fs::exists(status) || fs::is_directory(status))
+    error.clear();
+  return false;
+}
+
 void DirectoryCreator::create(const fs::path &directory) {
   if (directory.empty() || created_.count(directory))
     return;
