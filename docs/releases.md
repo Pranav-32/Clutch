@@ -68,7 +68,8 @@ CC=gcc CXX=g++ python .github/scripts/ci.py --target linux-x86_64-gcc
 ```
 
 Python 3.12+ is required for this CI driver. `CLUTCH_BUILD_JOBS` and
-`CLUTCH_TEST_JOBS` default to `2`; `CLUTCH_COMPILER_LAUNCHER` optionally selects
+`CLUTCH_TEST_JOBS` default to the host's processor count, at most `4`;
+`CLUTCH_COMPILER_LAUNCHER` optionally selects
 an installed compiler cache. These settings concern Clutch development, not
 user-project manifests. See [testing](testing.md) for native test commands.
 

@@ -15,6 +15,7 @@ import unittest
 import zipfile
 
 import watch_integration as watch_harness
+import sharding
 
 ROOT = Path(__file__).resolve().parents[2]
 TIMEOUT = 120
@@ -211,4 +212,4 @@ if __name__ == '__main__':
         setattr(OPTIONS, field, os.path.abspath(shutil.which(getattr(OPTIONS, field)) or
                                                getattr(OPTIONS, field)))
     watch_harness.OPTIONS = OPTIONS
-    unittest.main(argv=[sys.argv[0], *remaining])
+    sharding.main([sys.argv[0], *remaining])

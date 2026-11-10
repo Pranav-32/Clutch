@@ -15,6 +15,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import sharding
+
 
 # Fixture policy: each side of the diamond returns the base value.
 BASE_API_VALUE = 7
@@ -764,4 +766,4 @@ if __name__ == '__main__':
     for option in ('clutch', 'cc', 'cxx', 'ninja'):
         parser.add_argument('--' + option, required=True)
     OPTIONS, arguments = parser.parse_known_args()
-    unittest.main(argv=[sys.argv[0], *arguments])
+    sharding.main([sys.argv[0], *arguments])
