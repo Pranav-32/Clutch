@@ -11,8 +11,10 @@ readonly expected_fingerprint="${2:?LLVM key fingerprint is required}"
 # Read package names as data rather than evaluating a shell command from a file.
 mapfile -t packages < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /tmp/packages.txt)
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y --no-install-recommends "${packages[@]}"
+# Ride out brief mirror and apt.llvm.org outages instead of failing the image.
+readonly apt_retries=(-o Acquire::Retries=5)
+apt-get "${apt_retries[@]}" update
+apt-get "${apt_retries[@]}" install -y --no-install-recommends "${packages[@]}"
 
 # Bind the repository to its checked key, never to the global APT trust store.
 . /etc/os-release
@@ -21,6 +23,7 @@ readonly key_file=/tmp/llvm-snapshot.gpg.key
 readonly keyring=/usr/share/keyrings/llvm-archive-keyring.gpg
 trap 'rm -f "$key_file"' EXIT
 curl --fail --silent --show-error --location \
+    --retry 6 --retry-all-errors --retry-delay 10 --connect-timeout 20 \
     https://apt.llvm.org/llvm-snapshot.gpg.key --output "$key_file"
 fingerprint="$(gpg --batch --show-keys --with-colons "$key_file" \
     | awk -F: '$1 == "fpr" { print $10; exit }')"
@@ -29,8 +32,8 @@ gpg --batch --dearmor --output "$keyring" "$key_file"
 printf '%s\n' \
     "deb [signed-by=${keyring}] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-${llvm_version} main" \
     > /etc/apt/sources.list.d/llvm.list
-apt-get update
-apt-get install -y --no-install-recommends \
+apt-get "${apt_retries[@]}" update
+apt-get "${apt_retries[@]}" install -y --no-install-recommends \
     "clang-${llvm_version}" "clang-format-${llvm_version}" \
     "clang-tidy-${llvm_version}" "clangd-${llvm_version}" "lld-${llvm_version}" \
     "libclang-rt-${llvm_version}-dev"
