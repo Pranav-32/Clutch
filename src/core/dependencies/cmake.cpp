@@ -7,13 +7,13 @@
  */
 #include "cmake.hpp"
 #include "backends/backend.hpp"
-#include "backends/ninja/ninja.hpp"
 #include "core/options.hpp"
 #include "core/project.hpp"
 #include "core/project_layout.hpp"
 #include "platform/arguments.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "platform/tool_discovery.hpp"
 #include "toolchains/safety.hpp"
 #include "toolchains/toolchain.hpp"
 #include <algorithm>
@@ -231,7 +231,7 @@ NativeInterface inspect_cmake(const ForeignRequest &request,
                               const BuildBackend &backend,
                               const Options &options) {
   const auto &r = request.requirement;
-  const auto cmake = find_program("cmake");
+  const auto cmake = find_tool("cmake");
   if (cmake.empty())
     throw std::runtime_error("dependency '" + r.alias +
                              "' requires CMake 3.21 or newer");
@@ -428,10 +428,8 @@ endforeach()
     command.push_back("-D" +
                       (r.cmake_package.empty() ? r.system : r.cmake_package) +
                       "_ROOT=" + r.root);
-  auto ninja =
-      backend.name == "ninja" ? backend.executable : find_program("ninja");
-  if (ninja.empty())
-    ninja = discover_ninja();
+  const auto ninja =
+      backend.name == "ninja" ? backend.executable : find_tool("ninja");
   if (!ninja.empty())
     command.insert(command.end(),
                    {"-G", "Ninja", "-DCMAKE_MAKE_PROGRAM=" + ninja});

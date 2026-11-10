@@ -22,6 +22,7 @@
 #include "core/targets/runtime.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "platform/tool_discovery.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -412,6 +413,13 @@ Graph make_build_graph(Project project,
           break;
         }
       }
+      if (archiver.empty())
+        for (const auto &candidate : candidates)
+          if (const auto program = find_tool(candidate); !program.empty()) {
+            archiver = program;
+            break;
+          }
+
       if (archiver.empty())
         throw std::runtime_error("static target requires an installed "
                                  "ar/llvm-ar or lib/llvm-lib archiver");

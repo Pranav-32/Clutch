@@ -14,6 +14,7 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX 1
@@ -21,6 +22,8 @@
 #include <windows.h>
 #else
 #include <cerrno>
+#include <csignal>
+#include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -33,7 +36,9 @@ constexpr auto read_buffer_bytes = size_t{16} * 1024U;
 }  // namespace
 
 ProcessOutput capture(const std::vector<std::string> &arguments,
-                      const fs::path &directory) {
+                      const fs::path &directory,
+                      const bool merge_stderr,
+                      const std::chrono::milliseconds timeout) {
   if (arguments.empty())
     throw std::runtime_error("empty capture command");
 
@@ -41,6 +46,16 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
     if (argument.find('\0') != std::string::npos)
       throw std::runtime_error("NUL in process argument");
 
+  if (timeout.count() < 0)
+    throw std::runtime_error("negative native tool timeout");
+
+  const auto started_at = std::chrono::steady_clock::now();
+  const bool bounded = timeout.count() != 0;
+  const auto expired = [&] {
+    return bounded && std::chrono::steady_clock::now() - started_at >= timeout;
+  };
+  constexpr auto poll_interval = std::chrono::milliseconds{5};
+  bool timed_out = false;
   ProcessOutput result{1, {}};
   std::array<char, read_buffer_bytes> buffer{};
   bool overflow = false, read_error = false;
@@ -96,7 +111,7 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   startup.cb = sizeof(startup);
   startup.dwFlags = STARTF_USESTDHANDLES;
   startup.hStdOutput = writer;
-  startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  startup.hStdError = merge_stderr ? writer : GetStdHandle(STD_ERROR_HANDLE);
   startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
   PROCESS_INFORMATION process{};
   const auto started = CreateProcessW(nullptr,
@@ -119,6 +134,32 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   CloseHandle(process.hThread);
   DWORD count = 0;
   while (true) {
+    if (expired()) {
+      timed_out = true;
+      break;
+    }
+
+    if (bounded) {
+      // Sample exit before peeking: output written before exit is then
+      // visible, and an inherited pipe held by a grandchild cannot turn a
+      // completed direct child into a false timeout.
+      const bool exited =
+          WaitForSingleObject(process.hProcess, 0) == WAIT_OBJECT_0;
+      DWORD available = 0;
+      if (!PeekNamedPipe(reader, nullptr, 0, nullptr, &available, nullptr)) {
+        read_error = GetLastError() != ERROR_BROKEN_PIPE;
+        break;
+      }
+
+      if (!available) {
+        if (exited)
+          break;
+
+        std::this_thread::sleep_for(poll_interval);
+        continue;
+      }
+    }
+
     if (!ReadFile(reader,
                   buffer.data(),
                   static_cast<DWORD>(buffer.size()),
@@ -135,6 +176,19 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   }
 
   CloseHandle(reader);
+  if (bounded && !timed_out) {
+    while (WaitForSingleObject(process.hProcess, 0) == WAIT_TIMEOUT) {
+      if (expired()) {
+        timed_out = true;
+        break;
+      }
+      std::this_thread::sleep_for(poll_interval);
+    }
+  }
+
+  if (timed_out)
+    TerminateProcess(process.hProcess, 1);
+
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD status = 1;
   GetExitCodeProcess(process.hProcess, &status);
@@ -162,6 +216,7 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
     close(descriptors[0]);
     constexpr auto setup_failure = 126, execution_failure = 127;
     if (dup2(descriptors[1], STDOUT_FILENO) < 0 ||
+        (merge_stderr && dup2(descriptors[1], STDERR_FILENO) < 0) ||
         chdir(directory.c_str()) != 0)
       _exit(setup_failure);
     close(descriptors[1]);
@@ -170,7 +225,41 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   }
 
   close(descriptors[1]);
+  int status = 0;
+  bool reaped = false;
   while (true) {
+    if (expired()) {
+      timed_out = true;
+      break;
+    }
+
+    if (bounded) {
+      // Reap before polling so output written before exit remains readable,
+      // while a grandchild holding the pipe cannot cause a false timeout.
+      if (!reaped && waitpid(child, &status, WNOHANG) == child)
+        reaped = true;
+
+      pollfd descriptor{descriptors[0], POLLIN, 0};
+      const auto ready =
+          poll(&descriptor,
+               1,
+               reaped ? 0 : static_cast<int>(poll_interval.count()));
+      if (ready < 0 && errno == EINTR)
+        continue;
+
+      if (!ready) {
+        if (reaped)
+          break;
+
+        continue;
+      }
+
+      if (ready < 0) {
+        read_error = true;
+        break;
+      }
+    }
+
     const auto count = read(descriptors[0], buffer.data(), buffer.size());
     if (count > 0)
       append(static_cast<size_t>(count));
@@ -183,15 +272,32 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   }
 
   close(descriptors[0]);
-  int status = 0;
-  while (waitpid(child, &status, 0) < 0)
-    if (errno != EINTR)
+  // A reaped PID may be reused: never signal or wait for it again.
+  while (!reaped) {
+    if (expired())
+      timed_out = true;
+
+    if (timed_out)
+      kill(child, SIGKILL);
+
+    if (const auto waited = waitpid(child, &status, bounded ? WNOHANG : 0);
+        waited == child)
+      break;
+    else if (waited < 0 && errno != EINTR)
       throw std::runtime_error("cannot wait for captured process");
+
+    if (bounded)
+      std::this_thread::sleep_for(poll_interval);
+  }
 
   constexpr auto signal_status_base = 128;
   result.status = WIFEXITED(status) ? WEXITSTATUS(status)
                                     : signal_status_base + WTERMSIG(status);
 #endif
+  if (timed_out)
+    throw std::runtime_error("native tool timed out after " +
+                             std::to_string(timeout.count()) + " ms");
+
   if (allocation_error)
     std::rethrow_exception(allocation_error);
 

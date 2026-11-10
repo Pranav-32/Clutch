@@ -8,6 +8,7 @@
 #pragma once
 
 #include "core/paths.hpp"
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,11 @@ struct ProcessOutput {
 };
 
 /// Capture stdout and inherit stderr; drain the pipe before waiting so large
-/// output cannot deadlock. Throws on setup/read errors or oversized output.
+/// output cannot deadlock. Optionally merge stderr for private health probes.
+/// A nonzero timeout terminates and reaps the direct child before throwing.
+/// Throws on setup/read errors or oversized output.
 ProcessOutput capture(const std::vector<std::string> &arguments,
-                      const fs::path &directory);
+                      const fs::path &directory,
+                      bool merge_stderr = false,
+                      std::chrono::milliseconds timeout = {});
 }  // namespace clutch

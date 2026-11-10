@@ -21,6 +21,7 @@
 #include "platform/environment.hpp"
 #include "platform/files.hpp"
 #include "platform/process.hpp"
+#include "platform/tool_discovery.hpp"
 #include <toml.hpp>
 
 #include <algorithm>
@@ -45,7 +46,7 @@ std::string choose(const std::string &explicit_name,
     requested = cached;
 
   if (!requested.empty()) {
-    if (const auto resolved = find_program(requested); !resolved.empty())
+    if (const auto resolved = find_tool(requested); !resolved.empty())
       return resolved;
 
     throw std::runtime_error("cannot find " + requested + "; override " + env +
@@ -54,6 +55,12 @@ std::string choose(const std::string &explicit_name,
 
   for (const auto &candidate : defaults) {
     if (const auto resolved = find_program(candidate); !resolved.empty())
+      return resolved;
+  }
+
+  // Any PATH compiler takes precedence over a different IDE-bundled family.
+  for (const auto &candidate : defaults) {
+    if (const auto resolved = find_tool(candidate); !resolved.empty())
       return resolved;
   }
 

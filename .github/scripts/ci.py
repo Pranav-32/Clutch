@@ -143,7 +143,7 @@ def build(target, build_dir, output):
                 'clutch.package-examples', 'clutch.version-ranges', 'clutch.bundle', 'clutch.zip',
                 'clutch.configured-files', 'clutch.tooling-safety', 'clutch.commands',
                 'clutch.watch', 'clutch.feature-examples', 'clutch.defaults',
-                'clutch.source-files', 'clutch.capture', 'clutch.stress-source-files',
+                'clutch.source-files', 'clutch.capture', 'clutch.tool-discovery', 'clutch.stress-source-files',
                 'clutch.stress-capture', 'clutch.stress-integration'}
     if windows:
         command.append(f'-DCLUTCH_TEST_NINJA={ninja}')

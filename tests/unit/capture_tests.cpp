@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -22,6 +23,7 @@
 #else
 #include <cerrno>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -39,6 +41,55 @@ void require(const bool condition, const char *const message) {
 /// A self-contained child avoids shells, external runtimes and platform echo
 /// differences.
 int child(const int argc, char **const argv) {
+  if (std::string(argv[1]) == "--sleep") {
+    std::this_thread::sleep_for(std::chrono::seconds{5});
+    return 0;
+  }
+
+  if (std::string(argv[1]) == "--orphan") {
+    // Leave a sleeping grandchild holding the inherited output pipe, then
+    // exit immediately: capture must report this child's completion.
+#ifdef _WIN32
+    auto command = std::wstring(L"\"") +
+                   clutch::fs::absolute(argv[0]).wstring() + L"\" --sleep";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION process{};
+    require(CreateProcessW(nullptr,
+                           command.data(),
+                           nullptr,
+                           nullptr,
+                           TRUE,
+                           0,
+                           nullptr,
+                           nullptr,
+                           &startup,
+                           &process) != 0,
+            "cannot start lingering grandchild");
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+#else
+    if (const auto grandchild = fork(); grandchild == 0) {
+      std::this_thread::sleep_for(std::chrono::seconds{5});
+      _exit(0);
+    } else {
+      require(grandchild > 0, "cannot start lingering grandchild");
+    }
+#endif
+    std::fputs("parent done", stdout);
+    std::fflush(stdout);
+    return 0;
+  }
+
+  if (std::string(argv[1]) == "--stderr") {
+    std::fputs("probe diagnostic", stderr);
+    return child_failure;
+  }
+
   if (std::string(argv[1]) == "--echo") {
     for (auto index = 2; index < argc; ++index) {
       const std::string argument = argv[index];
@@ -117,6 +168,47 @@ void unit_cases(const std::string &executable,
           "child argument boundaries changed");
   overflow(executable, directory);
 
+  const auto diagnostic =
+      clutch::capture({executable, "--stderr"}, directory, true);
+  require(diagnostic.status == child_failure &&
+              diagnostic.text == "probe diagnostic",
+          "merged stderr lost its diagnostic or exit status");
+  bool timed_out = false;
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    (void)clutch::capture({executable, "--sleep"},
+                          directory,
+                          true,
+                          std::chrono::milliseconds{100});
+  } catch (const std::runtime_error &error) {
+    timed_out =
+        std::string(error.what()).find("timed out") != std::string::npos;
+  }
+  require(timed_out && std::chrono::steady_clock::now() - started <
+                           std::chrono::seconds{4},
+          "a stalled child was not terminated within the capture deadline");
+#ifndef _WIN32
+  int reaped_status = 0;
+  require(waitpid(-1, &reaped_status, WNOHANG) == -1 && errno == ECHILD,
+          "timed capture left an unreaped child");
+#endif
+
+  // A grandchild inheriting the pipe must not delay or fail a bounded capture
+  // whose direct child has already exited.
+  const auto orphan_started = std::chrono::steady_clock::now();
+  const auto orphan = clutch::capture({executable, "--orphan"},
+                                      directory,
+                                      true,
+                                      std::chrono::milliseconds{3000});
+  require(orphan.status == 0 && orphan.text == "parent done" &&
+              std::chrono::steady_clock::now() - orphan_started <
+                  std::chrono::seconds{2},
+          "a lingering grandchild caused a delayed or false capture timeout");
+#ifndef _WIN32
+  require(waitpid(-1, &reaped_status, WNOHANG) == -1 && errno == ECHILD,
+          "bounded capture left its exited direct child unreaped");
+#endif
+
   for (const auto &invalid : std::vector<std::vector<std::string>>{
            {},
            {executable, std::string("a\0b", 3)}}) {
@@ -167,7 +259,10 @@ void stress_cases(const std::string &executable,
 int main(const int argc, char **const argv) {
   try {
     if (argc > 1 &&
-        (std::string(argv[1]) == "--emit" || std::string(argv[1]) == "--echo"))
+        (std::string(argv[1]) == "--emit" || std::string(argv[1]) == "--echo" ||
+         std::string(argv[1]) == "--sleep" ||
+         std::string(argv[1]) == "--orphan" ||
+         std::string(argv[1]) == "--stderr"))
       return child(argc, argv);
 
     const auto executable =
