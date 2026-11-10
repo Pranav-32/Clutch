@@ -15,6 +15,7 @@
 
 #include "core/paths.hpp"
 
+#include <set>
 #include <string>
 
 namespace clutch {
@@ -27,6 +28,19 @@ void validate_generated_path(const fs::path &path);
 /// the writer rejects redirected paths, creates missing parent directories and
 /// reports write/close failures. It does not provide a multi-file transaction.
 void write_if_changed(const fs::path &path, const std::string &content);
+
+/// Create output directories once per generation pass. Generators visit one
+/// object per source unit, often thousands sharing a directory; repeating
+/// fs::create_directories costs a filesystem round trip for each of them.
+/// The cache assumes no other process removes these directories meanwhile.
+class DirectoryCreator {
+  public:
+  /// Create `directory` and missing parents unless already done in this pass.
+  void create(const fs::path &directory);
+
+  private:
+  std::set<fs::path> created_;
+};
 
 /// Encode native filesystem ticks without narrowing wide clock representations.
 /// This preserves precision and the complete signed range for local stamps.

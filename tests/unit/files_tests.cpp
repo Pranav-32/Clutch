@@ -157,6 +157,22 @@ int main(const int argc, char **const argv) {
     require(rejected && read(output) == "changed content\n",
             "a directory output damaged existing files");
     check_artifact_cleanup(root);
+
+    // Generators create shared object directories once per pass.
+    clutch::DirectoryCreator directories;
+    const auto objects = root / "objects" / "deep" / "target";
+    directories.create(objects);
+    require(fs::is_directory(objects), "nested output directory missing");
+    fs::remove(objects);
+    directories.create(objects);
+    require(!fs::exists(objects),
+            "a directory already created in this pass was created again");
+    directories.create(objects / "sibling");
+    require(fs::is_directory(objects / "sibling"),
+            "a new directory below a cached one was not created");
+    clutch::DirectoryCreator next_pass;
+    next_pass.create(objects);
+    require(fs::is_directory(objects), "a new pass reused another pass' cache");
     fs::remove_all(root);
   } catch (const std::exception &error) {
     std::fprintf(stderr, "%s\n", error.what());

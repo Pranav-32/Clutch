@@ -74,4 +74,12 @@ void write_if_changed(const fs::path &path, const std::string &content) {
   if (!out)
     throw std::runtime_error("cannot write " + destination.u8string());
 }
+
+void DirectoryCreator::create(const fs::path &directory) {
+  if (directory.empty() || created_.count(directory))
+    return;
+
+  fs::create_directories(directory);
+  created_.insert(directory);
+}
 }  // namespace clutch
