@@ -371,10 +371,11 @@ void write_project(const Graph &graph,
   const auto compiler = fs::u8path(target.units.front().arguments.front());
   const auto intermediate =
       graph.project.build / "msbuild" / project_name(index);
-  fs::create_directories(intermediate);
-  fs::create_directories(target.output.parent_path());
+  DirectoryCreator directories;
+  directories.create(intermediate);
+  directories.create(target.output.parent_path());
   for (const auto &unit : target.units)
-    fs::create_directories(unit.object.parent_path());
+    directories.create(unit.object.parent_path());
 
   std::ostringstream project;
   project << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"

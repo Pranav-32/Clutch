@@ -102,6 +102,7 @@ void generate_ninja(const Graph &graph,
   ninja << "rule runtime_copy\n  command = $copy_command\n  description = "
            "Staging $out\n";
   std::set<fs::path> staged;
+  DirectoryCreator directories;
 
   if (!p.configured_files.empty()) {
     ninja << "rule configure_files\n  command = "
@@ -161,7 +162,7 @@ void generate_ninja(const Graph &graph,
   for (size_t target_index = 0; target_index < graph.targets.size();
        ++target_index) {
     const auto &target = graph.targets[target_index];
-    fs::create_directories(target.output.parent_path());
+    directories.create(target.output.parent_path());
 
     // Imported headers can be generated only by an upstream build action.
     // A restat stamp changes for public-header membership/timestamps as well as
@@ -187,7 +188,7 @@ void generate_ninja(const Graph &graph,
     }
 
     for (const auto &prefix : target.precompiled_headers) {
-      fs::create_directories(prefix.creator.object.parent_path());
+      directories.create(prefix.creator.object.parent_path());
       ninja << "build " << path(prefix.creator.object);
       if (!prefix.companion_object.empty())
         ninja << " | " << path(prefix.companion_object);
@@ -214,7 +215,7 @@ void generate_ninja(const Graph &graph,
       const auto &[source, object, ide_arguments] = unit;
       (void)ide_arguments;
       const auto arguments = pch::build_arguments(target, unit);
-      fs::create_directories(object.parent_path());
+      directories.create(object.parent_path());
       ninja << "build " << path(object) << ": compile " << path(source);
       if (const auto *const prefix = pch::for_unit(target, unit))
         ninja << " | " << path(prefix->creator.object);

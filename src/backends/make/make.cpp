@@ -381,6 +381,7 @@ void generate_make(const Graph &graph,
   }
 
   std::set<fs::path> staged;
+  DirectoryCreator directories;
   for (size_t index = 0; index < graph.targets.size(); ++index) {
     const auto &target = graph.targets[index];
     const auto &name = target.name;
@@ -392,7 +393,7 @@ void generate_make(const Graph &graph,
              << make_path(dependencies::foreign_stamp(graph, id), build, gnu);
     };
     const auto &link = target.link;
-    fs::create_directories(output.parent_path());
+    directories.create(output.parent_path());
     const auto copies = runtime_copies(graph, index);
     make << "clutch_target_" << index << ": " << make_path(output, build, gnu);
     for (const auto &[library, destination] : copies) {
@@ -428,7 +429,7 @@ void generate_make(const Graph &graph,
 
     for (const auto &prefix : target.precompiled_headers) {
       const auto &creator = prefix.creator;
-      fs::create_directories(creator.object.parent_path());
+      directories.create(creator.object.parent_path());
       // A changed prefix list can be written within the old PCH's timestamp
       // tick. Track its bytes explicitly and remove affected products before
       // Make parses prerequisites; unchanged configuration retains every
@@ -480,7 +481,7 @@ void generate_make(const Graph &graph,
       if (unit.arguments.empty())
         throw std::runtime_error("Make compile unit has no compiler command");
 
-      fs::create_directories(unit.object.parent_path());
+      directories.create(unit.object.parent_path());
       const auto response_path =
           fs::u8path(unit.object.u8string() + ".make.rsp");
 
