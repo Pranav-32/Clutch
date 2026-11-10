@@ -5,7 +5,7 @@
 # Install a Clutch release on Linux or macOS.
 #
 #   curl -fsSL https://github.com/Pranav-32/Clutch/releases/latest/download/install.sh | sh
-#   sh install.sh [--version X.Y.Z] [--prefix DIR] [--modify-path]
+#   sh install.sh [--version X.Y.Z] [--prefix DIR] [--target TARGET] [--modify-path]
 #   sh install.sh --archive clutch-X.Y.Z-<target>.tar.gz   # offline; needs .sha256 beside it
 #
 # Installs <prefix>/bin/clutch and its license notices (default prefix:
@@ -18,6 +18,7 @@ prefix="${HOME}/.local"
 version=""
 archive=""
 modify_path=0
+target=""
 
 fail() {
   printf 'clutch install: %s\n' "$1" >&2
@@ -26,10 +27,13 @@ fail() {
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--modify-path]
+Usage: install.sh [--version X.Y.Z] [--prefix DIR] [--target TARGET] [--modify-path]
        install.sh --archive clutch-X.Y.Z-<target>.tar.gz [--prefix DIR]
 
   --version      Release to install (default: latest)
+  --target       Release build to install (default: detected for this host):
+                 linux-x86_64-gcc, linux-x86_64-clang,
+                 macos-arm64-apple-clang or macos-x86_64-apple-clang
   --prefix       Installation prefix (default: ~/.local); installs <prefix>/bin/clutch
   --archive      Install a downloaded archive; its .sha256 file must be beside it
   --modify-path  Append <prefix>/bin to PATH in your shell profile if missing
@@ -41,18 +45,26 @@ while [ "$#" -gt 0 ]; do
     --version) [ "$#" -ge 2 ] || fail "--version needs a value"; version="${2#v}"; shift 2 ;;
     --prefix) [ "$#" -ge 2 ] || fail "--prefix needs a value"; prefix="$2"; shift 2 ;;
     --archive) [ "$#" -ge 2 ] || fail "--archive needs a value"; archive="$2"; shift 2 ;;
+    --target) [ "$#" -ge 2 ] || fail "--target needs a value"; target="$2"; shift 2 ;;
     --modify-path) modify_path=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "unknown option: $1 (see --help)" ;;
   esac
 done
 
-case "$(uname -s)/$(uname -m)" in
-  Linux/x86_64|Linux/amd64) target="linux-x86_64-gcc" ;;
-  Darwin/arm64|Darwin/aarch64) target="macos-arm64-apple-clang" ;;
-  Darwin/x86_64) target="macos-x86_64-apple-clang" ;;
-  *) fail "no prebuilt Clutch for $(uname -s) $(uname -m); build from source instead" ;;
-esac
+if [ -n "$target" ]; then
+  case "$target" in
+    linux-x86_64-gcc|linux-x86_64-clang|macos-arm64-apple-clang|macos-x86_64-apple-clang) ;;
+    *) fail "unsupported target: $target (see --help)" ;;
+  esac
+else
+  case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64|Linux/amd64) target="linux-x86_64-gcc" ;;
+    Darwin/arm64|Darwin/aarch64) target="macos-arm64-apple-clang" ;;
+    Darwin/x86_64) target="macos-x86_64-apple-clang" ;;
+    *) fail "no prebuilt Clutch for $(uname -s) $(uname -m); build from source instead" ;;
+  esac
+fi
 
 download() {
   if command -v curl >/dev/null 2>&1; then

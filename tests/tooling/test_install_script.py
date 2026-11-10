@@ -23,7 +23,7 @@ TARGET = 'linux-x86_64-gcc'
 
 @unittest.skipUnless(SHELL, 'a POSIX sh is required to test install.sh')
 class InstallScriptTests(unittest.TestCase):
-    """Never download; a fake uname pins the Linux x86_64 target."""
+    """Never download; --target pins the Linux x86_64 build on every host."""
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -31,13 +31,7 @@ class InstallScriptTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.home = self.root / 'home'
         self.home.mkdir()
-        fake = self.root / 'fake-bin'
-        fake.mkdir()
-        uname = fake / 'uname'
-        uname.write_bytes(b'#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; *) echo Linux ;; esac\n')
-        uname.chmod(0o755)
-        self.environment = dict(os.environ, HOME=self.home.as_posix(), SHELL='/bin/bash',
-                                PATH=str(fake) + os.pathsep + os.environ.get('PATH', ''))
+        self.environment = dict(os.environ, HOME=self.home.as_posix(), SHELL='/bin/bash')
         self.archive = self.root / release.archive_name(VERSION, TARGET)
         with tarfile.open(self.archive, 'w:gz') as bundle:
             self.add(bundle, f'clutch-{VERSION}/bin/clutch',
@@ -53,10 +47,16 @@ class InstallScriptTests(unittest.TestCase):
         info.mode = mode
         bundle.addfile(info, io.BytesIO(content))
 
-    def install(self, *arguments):
+    def install(self, *arguments, target=TARGET):
         script = (release.ROOT / 'packaging/install.sh').as_posix()
-        return subprocess.run([SHELL, script, '--archive', self.archive.as_posix(), *arguments],
+        return subprocess.run([SHELL, script, '--archive', self.archive.as_posix(),
+                               '--target', target, *arguments],
                               env=self.environment, capture_output=True, text=True)
+
+    def test_unsupported_target_is_rejected(self):
+        result = self.install(target='windows-x86_64-msvc')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unsupported target', result.stderr)
 
     def test_installs_verified_archive_without_touching_profiles(self):
         prefix = self.root / 'prefix'
