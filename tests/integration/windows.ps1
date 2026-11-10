@@ -327,6 +327,10 @@ $localExecutable = Join-Path $work 'local executable with spaces'
 Put "$localExecutable/clutch.toml" "[project]`nname = 'local'`nversion = '0.1.0'`nstd = 17"
 Put "$localExecutable/src/main.cpp" 'int main() { return 0; }'
 Copy-Item -LiteralPath $Clutch -Destination "$localExecutable/clutch.exe"
+# Hardened environments disable cmd.exe's current-directory search; this stage
+# tests exactly that lookup, so enable it only for the stage's own commands.
+$savedNoCurrentDirectory = $env:NoDefaultCurrentDirectoryInExePath
+Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
 Push-Location -LiteralPath $localExecutable
 try {
     foreach ($invocation in @('clutch', 'clutch.exe', '.\clutch.exe')) {
@@ -344,6 +348,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'local executable run failed' }
 } finally {
     Pop-Location
+    if ($null -ne $savedNoCurrentDirectory) { $env:NoDefaultCurrentDirectoryInExePath = $savedNoCurrentDirectory }
 }
 Write-Host 'PASS: bare, extension-qualified and relative local invocations, regeneration and execution'
 
