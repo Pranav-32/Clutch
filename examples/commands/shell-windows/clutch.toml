@@ -10,4 +10,6 @@ entry = "../main.cpp"
 
 [[command]]
 name = "hello"
-argv = ["cmd", "/d", "/c", "hello.cmd"]
+# The explicit .\ prefix also works where cmd.exe's current-directory search is
+# disabled (NoDefaultCurrentDirectoryInExePath).
+argv = ["cmd", "/d", "/c", '.\hello.cmd']
