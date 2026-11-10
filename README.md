@@ -26,6 +26,12 @@ editing, optionally running an application or tests after each build.
 **Status: early development.** This README describes the checkout. See
 [feature status](#feature-status) for the tagged baseline and newer capabilities.
 
+## Install a release
+
+Releases after 0.5.0 include a per-user Windows installer that adds Clutch to
+`PATH`, and an `install.sh` for Linux x86_64 and macOS. Portable archives remain
+available. See [installing a release](docs/installation.md#install-a-release).
+
 ## Install from source
 
 You need CMake 3.20+ and a C++17 compiler. Clutch's parser libraries are vendored,

@@ -17,7 +17,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from release import ROOT, TARGETS, package
+from release import INSTALLER_TARGETS, ROOT, TARGETS, build_installer, package
 
 # Allow slow hosted runners five minutes for each compiler-backed CTest suite.
 TEST_TIMEOUT_SECONDS = 300
@@ -175,6 +175,13 @@ def build(target, build_dir, output):
         run('cmake', '--install', build_dir, '--prefix', stage)
         version = (build_dir / 'generated/version.txt').read_text(encoding='utf-8').strip()
         package(stage, output, target, version)
+        if target in INSTALLER_TARGETS:
+            # Build the per-user installer from the same verified install tree,
+            # then install, check PATH registration and uninstall it.
+            installer = build_installer(stage, output, target, version)
+            run('powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                ROOT / 'tests/integration/windows-installer.ps1',
+                '-Installer', installer, '-Version', version)
 
 
 if __name__ == '__main__':

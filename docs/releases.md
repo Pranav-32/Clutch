@@ -80,7 +80,13 @@ only after the complete asset set is uploaded. Failed uploads leave a resumable
 draft. Published tags and releases are not overwritten.
 
 Archives contain the executable and Clutch's required license notices, with
-SHA-256 sidecars and `SHA256SUMS`. Prerelease versions become GitHub prereleases.
+SHA-256 sidecars and `SHA256SUMS`. The Windows job also compiles a per-user
+Inno Setup installer (`packaging/windows/clutch.iss`) from the same install tree
+and exercises it with `tests/integration/windows-installer.ps1`: silent install,
+version check, single user-`PATH` entry across reinstalls, opt-out and uninstall
+restoring the original `PATH`. Publishing adds `packaging/install.sh` for Linux
+and macOS; `SHA256SUMS` covers every asset. Installers are kept beside the
+archives, which remain the portable and package-manager format. Prerelease versions become GitHub prereleases.
 Linux binaries require compatible Ubuntu 22.04 system/C++ runtimes; macOS
 binaries target macOS 14 or newer. Windows packages use the static MSVC runtime.
-Archives are currently unsigned; macOS binaries are not notarized.
+Archives and installers are currently unsigned; macOS binaries are not notarized.
