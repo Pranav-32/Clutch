@@ -44,7 +44,13 @@ class Writer {
     constexpr auto lock_timeout = std::chrono::minutes(5);
     constexpr auto poll_interval = std::chrono::milliseconds(100);
     const auto deadline = std::chrono::steady_clock::now() + lock_timeout;
-    while (!fs::create_directory(path_)) {
+    std::error_code error;
+    while (!try_create_lock_directory(path_, error)) {
+      if (error)
+        throw fs::filesystem_error("cannot acquire native dependency writer",
+                                   path_,
+                                   error);
+
       if (!wait || std::chrono::steady_clock::now() >= deadline)
         throw std::runtime_error(
             "native dependency operation is already active; inspect " +
