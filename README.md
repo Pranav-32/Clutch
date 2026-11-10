@@ -131,6 +131,7 @@ The build directory contains `compile_commands.json`; see
 | Integrate an IDE or developer tool | [File API](docs/file-api.md) |
 | Share sources and resolved source dependencies | [Source bundles](docs/usage.md#source-bundles) |
 | Build Clutch using Clutch | [Native self-hosting](docs/installation.md#build-clutch-with-clutch) |
+| See what is planned next | [Roadmap](docs/roadmap.md) |
 
 ## Feature status
 
