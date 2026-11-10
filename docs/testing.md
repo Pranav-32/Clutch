@@ -70,7 +70,7 @@ executable aliases and POSIX execute permissions without needing an IDE
 installation. `clutch.tooling-safety` also exercises a failing `PATH`
 debugger followed by a healthy bundle, environment overrides and explicit-choice
 precedence. `clutch.capture` checks merged diagnostics, startup timeouts, termination of
-the direct child and completion while a grandchild still holds the output pipe,
+the whole process tree and completion while a grandchild still holds the output pipe,
 alongside its existing output/argument checks. Run these checks after
 changing tool resolution:
 
@@ -158,7 +158,7 @@ python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 | `clutch.tooling-safety` | Independent symbols/optimization, warning-array diagnostics and workspace persistence, policy validation, optional real sanitizer runtimes and lifetime support, formatter scope, analyzer database forwarding and debugger argument/exit handling |
 | `clutch.self-hosting` | Optional complete native release/debug generations, source-archive version identity, no-op object preservation and final executable smoke check without CMake |
 | `clutch.tool-discovery` | IDE-bundle layouts (CLion, Visual Studio, MSVC toolsets, MinGW), newest-first version ordering, PATH/`CLION_HOME` precedence and changed-root refresh, package-manager directories after IDE bundles, explicit missing paths and executable aliases |
-| `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary, oversized-output rejection, merged stderr, timeout termination of the direct child and lingering-grandchild completion |
+| `clutch.capture` | Native argv boundaries, exit status, exact four-MiB output boundary, oversized-output rejection, merged stderr, whole-tree timeout termination, and completion that leaves a finished child's helpers running |
 | `clutch.stress-source-files` | 2,048 source files with 64 alternatives/repeated patterns; expansion bounds and directory-scan reuse |
 | `clutch.stress-capture` | Repeated pipe overflow/recovery, native Windows handle counts and POSIX child reaping |
 | `clutch.stress-integration` | Shared/deep package graphs, cycle recovery, conflict rollback, package limits, serial/parallel C/C++ PCH builds, shared-header invalidation and compile-failure recovery |
