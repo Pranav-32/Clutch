@@ -127,9 +127,7 @@ def write_checksum(path):
 
 
 def find_iscc():
-    """Locate Inno Setup's compiler: ISCC variable, PATH, then default installs."""
-    if explicit := os.environ.get('ISCC'):
-        return explicit
+    """Locate Inno Setup's compiler on PATH, then in its default installs."""
     if found := shutil.which('iscc'):
         return found
     for variable in ('ProgramFiles(x86)', 'ProgramFiles', 'LOCALAPPDATA'):
@@ -137,7 +135,7 @@ def find_iscc():
             for relative in ('Inno Setup 6/ISCC.exe', 'Programs/Inno Setup 6/ISCC.exe'):
                 if (candidate := Path(root) / relative).is_file():
                     return str(candidate)
-    raise ValueError('Inno Setup 6 (ISCC.exe) is required; set ISCC or install it')
+    raise ValueError('Inno Setup 6 (ISCC.exe) is required; install it or add it to PATH')
 
 
 def build_installer(stage, output, target, version, iscc=None):
