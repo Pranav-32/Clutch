@@ -7,6 +7,7 @@ from contextlib import redirect_stdout
 import io
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import threading
@@ -54,6 +55,30 @@ class WorkflowExecutionTests(unittest.TestCase):
 
     def test_parallelism_follows_runner_cores_up_to_the_cap(self):
         self.assertEqual(ci.MAXIMUM_DEFAULT_JOBS, 4)
+
+    def test_unavailable_compiler_cache_falls_back_to_uncached_builds(self):
+        failed = subprocess.CompletedProcess([], 2, '', 'sccache: error: Server startup failed: egress limit\n')
+        started = subprocess.CompletedProcess([], 0, '', '')
+        cases = ((failed, ''), (started, '/tools/sccache'))
+        for result, expected in cases:
+            with self.subTest(code=result.returncode), \
+                    patch.dict(os.environ, {'CLUTCH_COMPILER_LAUNCHER': 'sccache'}), \
+                    patch.object(ci, 'require_tool', return_value='/tools/sccache'), \
+                    patch.object(ci.subprocess, 'run', return_value=result) as run, \
+                    redirect_stdout(io.StringIO()) as printed:
+                self.assertEqual(ci.compiler_launcher(), expected)
+                run.assert_called_once_with(['/tools/sccache', '--start-server'],
+                                            capture_output=True, text=True)
+                if expected == '':
+                    self.assertIn('::warning::compiler cache unavailable', printed.getvalue())
+                    self.assertIn('Server startup failed', printed.getvalue())
+        with patch.dict(os.environ, {'CLUTCH_COMPILER_LAUNCHER': 'ccache'}), \
+                patch.object(ci, 'require_tool', return_value='/tools/ccache'), \
+                patch.object(ci.subprocess, 'run') as run:
+            self.assertEqual(ci.compiler_launcher(), '/tools/ccache')
+            run.assert_not_called()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ci.compiler_launcher(), '')
 
     def test_stages_split_tests_from_examples(self):
         self.assertEqual(ci.STAGES, ('all', 'tests', 'examples'))
