@@ -55,6 +55,11 @@ class WorkflowExecutionTests(unittest.TestCase):
     def test_parallelism_follows_runner_cores_up_to_the_cap(self):
         self.assertEqual(ci.MAXIMUM_DEFAULT_JOBS, 4)
 
+    def test_stages_split_tests_from_examples(self):
+        self.assertEqual(ci.STAGES, ('all', 'tests', 'examples'))
+        with self.assertRaisesRegex(ValueError, 'unknown CI stage'):
+            ci.build('linux-x86_64-gcc', Path('unused'), Path('unused'), 'package-only')
+
     def test_parallelism_is_bounded_and_validated(self):
         for cores, expected in ((None, '1'), (1, '1'), (3, '3'), (4, '4'), (64, '4')):
             with self.subTest(cores=cores), patch.dict(os.environ, {}, clear=True), \

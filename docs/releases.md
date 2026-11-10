@@ -53,8 +53,11 @@ the PR matrix.
 | macOS Apple Clang, ARM64 and x86_64 | Ninja, GNU Make and Xcode |
 
 Source changes build Clutch, run registered tests and shipped examples in both
-profiles, verify installation and package binaries with license notices. A
-separate job checks the development image. JOM and Windows GNU Make are checked
+profiles, verify installation and package binaries with license notices. Each
+native target runs as two concurrent jobs: `<target>` runs CTest and produces
+the package, and `<target> examples` builds only the executable and runs the
+shipped examples and native generators (`ci.py --stage tests|examples`; local
+runs default to `all`). A separate job checks the development image. JOM and Windows GNU Make are checked
 when available. See the workflow files for runner versions and tool settings.
 
 Implementation details, metadata-only selection and release operations are
