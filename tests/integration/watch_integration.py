@@ -25,11 +25,11 @@ QUIET = 0.45
 class Session:
     """Read native child output continuously and bound every wait/cleanup."""
 
-    def __init__(self, root, arguments):
+    def __init__(self, root, arguments, debounce=120):
         self.lines = []
         self.condition = threading.Condition()
         self.process = subprocess.Popen(
-            [OPTIONS.clutch, 'watch', '--interval', '40', '--debounce', '120', *arguments],
+            [OPTIONS.clutch, 'watch', '--interval', '40', '--debounce', str(debounce), *arguments],
             cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding='utf-8', errors='replace', bufsize=1,
             start_new_session=os.name != 'nt',
@@ -132,10 +132,10 @@ class WatchTests(unittest.TestCase):
                                 cwd=self.root, capture_output=True, text=True, timeout=TIMEOUT)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def watch(self, *arguments, configured=True):
+    def watch(self, *arguments, configured=True, debounce=120):
         if configured:
             self.configure(release='--release' in arguments)
-        session = Session(self.root, arguments)
+        session = Session(self.root, arguments, debounce)
         self.addCleanup(session.stop)
         session.cycle(1)
         session.quiet()
@@ -149,6 +149,25 @@ class WatchTests(unittest.TestCase):
         header = self.root / 'value.hpp'
         before = header.stat()
         self.write('value.hpp', '#define VALUE 2\n')
+        os.utime(header, ns=(before.st_atime_ns, before.st_mtime_ns))
+        watcher.cycle(2)
+        self.assertIn('VALUE:2', watcher.output())
+        watcher.quiet()
+
+    def test_edit_observed_before_its_timestamp_is_restored(self):
+        """A poll seeing the write before a timestamp restore must not hide it.
+
+        Tools may write new content (advancing the timestamp) and then restore
+        the old timestamp. A long debounce makes several polls observe the
+        intermediate state before the build starts; the build must still
+        compile the new content although its timestamp did not advance.
+        """
+        watcher = self.watch('--run', '--', 'two words', debounce=1000)
+        self.assertIn('VALUE:1', watcher.output())
+        header = self.root / 'value.hpp'
+        before = header.stat()
+        self.write('value.hpp', '#define VALUE 2\n')
+        time.sleep(0.3)
         os.utime(header, ns=(before.st_atime_ns, before.st_mtime_ns))
         watcher.cycle(2)
         self.assertIn('VALUE:2', watcher.output())
