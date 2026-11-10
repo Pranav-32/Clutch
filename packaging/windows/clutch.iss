@@ -121,9 +121,14 @@ begin
     Exit;
   end;
 
-  if (Path <> '') and (Path[Length(Path)] <> ';') then
-    Path := Path + ';';
-  Path := Path + Entry;
+  { Keep the value's separator style: after "A;B;" append "X;" so removing X
+    restores "A;B;" exactly; after "A;B" append ";X". }
+  if Path = '' then
+    Path := Entry
+  else if Path[Length(Path)] = ';' then
+    Path := Path + Entry + ';'
+  else
+    Path := Path + ';' + Entry;
   { Preserve REG_EXPAND_SZ so existing %VARIABLE% entries keep expanding. }
   if RegWriteExpandStringValue(HKEY_CURRENT_USER, EnvironmentKey, 'Path', Path) then
     Log('Added to user PATH: ' + Entry)

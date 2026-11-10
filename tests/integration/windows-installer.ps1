@@ -81,6 +81,18 @@ try {
     if ((Get-EntryCount $bin) -ne 0) { throw 'PATH changed although the task was deselected' }
     Invoke-Uninstaller
     Write-Host 'PASS: install without PATH registration'
+
+    # Exercise the other separator style too: a value with (or without) a
+    # trailing ';' must come back byte-for-byte after install and uninstall.
+    if ($hadPath) {
+        $variant = if ($originalPath.EndsWith(';')) { $originalPath.TrimEnd(';') } else { "$originalPath;" }
+        Set-ItemProperty -LiteralPath $environmentKey -Name 'Path' -Value $variant -Type $originalKind
+        Invoke-Installer @()
+        if ((Get-EntryCount $bin) -ne 1) { throw 'install did not add exactly one PATH entry (separator variant)' }
+        Invoke-Uninstaller
+        if ((Get-UserPath) -ne $variant) { throw 'uninstall changed the PATH separator style' }
+        Write-Host 'PASS: PATH with and without a trailing separator is restored exactly'
+    }
 } finally {
     $uninstaller = Join-Path $target 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
