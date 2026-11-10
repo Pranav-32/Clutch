@@ -18,23 +18,27 @@ permissions:
 
 jobs:
   native:
-    name: ${{ matrix.target }}
+    # Each target runs as two concurrent jobs: '<target>' (CTest, install and
+    # package) keeps its check name for branch protection; '<target> examples'
+    # builds only the executable and runs shipped examples and generators.
+    name: ${{ matrix.platform.target }}${{ matrix.stage == 'examples' && ' examples' || '' }}
     # Metadata validation needs no host compiler or scarce macOS runner. Keep
     # check names stable so existing branch-protection rules still resolve.
-    runs-on: ${{ inputs.metadata-only && 'ubuntu-24.04' || matrix.os }}
+    runs-on: ${{ inputs.metadata-only && 'ubuntu-24.04' || matrix.platform.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
+        stage: ${{ inputs.metadata-only && fromJSON('["tests"]') || fromJSON('["tests", "examples"]') }}
+        platform:
           - { os: ubuntu-22.04, target: linux-x86_64-gcc, cc: gcc, cxx: g++ }
           - { os: ubuntu-22.04, target: linux-x86_64-clang, cc: clang, cxx: clang++ }
           - { os: windows-2022, target: windows-x86_64-msvc, cc: cl, cxx: cl }
           - { os: macos-15, target: macos-arm64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++ }
           - { os: macos-15-intel, target: macos-x86_64-apple-clang, cc: /usr/bin/clang, cxx: /usr/bin/clang++ }
     env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+      CC: ${{ matrix.platform.cc }}
+      CXX: ${{ matrix.platform.cxx }}
       # CLUTCH_BUILD_JOBS/CLUTCH_TEST_JOBS default to the runner's cores (max 4).
       CLUTCH_COMPILER_LAUNCHER: sccache
       SCCACHE_GHA_ENABLED: 'true'
@@ -79,7 +83,8 @@ jobs:
             choco install ninja --no-progress -y
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          # The release installer is compiled by Inno Setup 6 (ISCC.exe).
+          # The release installer (tests stage only) is compiled by Inno Setup 6.
+          if ('${{ matrix.stage }}' -ne 'tests') { exit 0 }
           $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
             Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if (-not $iscc) {
@@ -92,6 +97,7 @@ jobs:
         with:
           version: v0.18.0
       - name: Test release tooling
+        if: ${{ matrix.stage == 'tests' }}
         run: python -m unittest discover -s tests/tooling -p "test_*.py" -v
       - name: Validate release metadata
         if: inputs.metadata-only
@@ -99,12 +105,12 @@ jobs:
       - name: Build, test, install and package
         if: ${{ !inputs.metadata-only }}
         # Use the platform's default shell: Git Bash would shadow MSVC link.exe.
-        run: python .github/scripts/ci.py --target ${{ matrix.target }}
+        run: python .github/scripts/ci.py --target ${{ matrix.platform.target }} --stage ${{ matrix.stage }}
       - name: Preserve verified native package
-        if: ${{ !inputs.metadata-only }}
+        if: ${{ !inputs.metadata-only && matrix.stage == 'tests' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: package-${{ matrix.target }}
+          name: package-${{ matrix.platform.target }}
           path: dist/*
           if-no-files-found: error
           compression-level: 0
