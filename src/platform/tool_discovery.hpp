@@ -28,10 +28,10 @@ int visual_studio_major(const std::string &folder);
 std::vector<std::string> bundle_programs(const fs::path &installation,
                                          const std::string &name);
 
-/// Standalone toolchain and package-manager bin directories searched after IDE
-/// bundles: LLVM, MSYS2, Scoop, Chocolatey and WinGet links on Windows;
-/// Homebrew on macOS; versioned /usr/lib/llvm-*, /usr/local and Linuxbrew on
-/// Linux. Order is deterministic; missing directories are harmless.
+/// Standalone toolchain directories searched after IDE bundles, limited to
+/// installations that normally stay off PATH: LLVM and MSYS2 on Windows,
+/// Homebrew's keg-only LLVM on macOS and versioned /usr/lib/llvm-* on Linux.
+/// PATH-managed directories are never searched behind the user's back.
 std::vector<fs::path> common_tool_directories();
 
 /// Return PATH followed by known IDE installations, then common toolchain

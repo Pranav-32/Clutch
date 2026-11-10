@@ -177,17 +177,24 @@ int main(const int argc, char **const argv) {
     }
 #ifdef _WIN32
     {
-      // Package-manager directories follow PATH and IDE bundles.
-      const auto scoop = root / "scoop root";
-      const auto shim = scoop / "shims/gdb.exe";
+      // Standalone toolchains follow PATH and IDE bundles.
+      const auto msys = root / "msys root";
+      const auto shim = msys / "ucrt64/bin/gdb.exe";
       executable(shim);
-      set_environment("SCOOP", scoop);
+      set_environment("MSYS2_ROOT", msys);
       set_environment("CLION_HOME", installation);
       const auto directories = clutch::common_tool_directories();
       require(std::find(directories.begin(),
                         directories.end(),
-                        scoop / "shims") != directories.end(),
-              "SCOOP shims were not a common tool directory");
+                        msys / "ucrt64/bin") != directories.end(),
+              "MSYS2_ROOT toolchain was not a common tool directory");
+      // PATH-managed package-manager directories are never searched.
+      set_environment("SCOOP", root / "scoop root");
+      const auto with_scoop = clutch::common_tool_directories();
+      require(std::find(with_scoop.begin(),
+                        with_scoop.end(),
+                        root / "scoop root/shims") == with_scoop.end(),
+              "a PATH-managed package directory was searched");
       const auto candidates = clutch::tool_candidates("gdb");
       const auto bundled = installation / "bin/gdb" / host / "bin/gdb.exe";
       const auto bundle_index =
@@ -203,21 +210,28 @@ int main(const int argc, char **const argv) {
                          return clutch::fs::u8path(candidate) == shim;
                        });
       require(shim_index != candidates.end(),
-              "a package-manager executable was not discovered");
+              "a standalone toolchain executable was not discovered");
       require(bundle_index != candidates.end() && bundle_index < shim_index,
-              "a package-manager directory preceded an IDE bundle");
+              "a standalone toolchain directory preceded an IDE bundle");
     }
 #else
     {
+      // PATH-managed directories are never searched behind the user's back.
       const auto directories = clutch::common_tool_directories();
+      for (const auto *const managed : {"/usr/local/bin",
+                                        "/opt/homebrew/bin",
+                                        "/home/linuxbrew/.linuxbrew/bin"})
+        require(std::find(directories.begin(),
+                          directories.end(),
+                          clutch::fs::path(managed)) == directories.end(),
+                "a PATH-managed directory was searched");
 #ifdef __APPLE__
-      const auto expected = clutch::fs::path("/opt/homebrew/opt/llvm/bin");
-#else
-      const auto expected = clutch::fs::path("/usr/local/bin");
-#endif
-      require(std::find(directories.begin(), directories.end(), expected) !=
+      require(std::find(directories.begin(),
+                        directories.end(),
+                        clutch::fs::path("/opt/homebrew/opt/llvm/bin")) !=
                   directories.end(),
-              "a standard toolchain directory was not searched");
+              "Homebrew's keg-only LLVM was not searched");
+#endif
     }
 #endif
     require(clutch::tool_candidates((root / "missing/lldb").u8string()).empty(),
