@@ -71,8 +71,9 @@ before the example stage starts, keeping their concurrency budgets separate.
    move published tags to repair a release.
 4. The tag-driven release workflow validates identity and runs full verification
    from that exact commit. It does not promote binaries built for a PR.
-5. Verify the published release contains all five archives, their SHA-256 sidecars,
-   the combined `SHA256SUMS`, and license notices. A failed upload leaves a draft
+5. Verify the published release contains all five archives, the Windows
+   installer, their SHA-256 sidecars, `install.sh`, the combined `SHA256SUMS`,
+   and license notices. A failed upload leaves a draft
    that the workflow can resume. Published releases are not overwritten.
 
 For a prerelease, maintainers can put a `Release-As` footer with the desired
