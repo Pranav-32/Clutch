@@ -20,7 +20,10 @@ struct ProcessOutput {
 
 /// Capture stdout and inherit stderr; drain the pipe before waiting so large
 /// output cannot deadlock. Optionally merge stderr for private health probes.
-/// A nonzero timeout terminates and reaps the direct child before throwing.
+/// A nonzero timeout runs the child in its own job (Windows) or process group
+/// (POSIX, with stdin from /dev/null); on expiry it terminates that whole tree,
+/// reaps the direct child and throws. A child that exits in time returns even
+/// if helpers it started still hold the pipe; those helpers are left running.
 /// Throws on setup/read errors or oversized output.
 ProcessOutput capture(const std::vector<std::string> &arguments,
                       const fs::path &directory,

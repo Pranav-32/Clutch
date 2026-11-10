@@ -23,6 +23,7 @@
 #else
 #include <cerrno>
 #include <csignal>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -113,13 +114,29 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   startup.hStdOutput = writer;
   startup.hStdError = merge_stderr ? writer : GetStdHandle(STD_ERROR_HANDLE);
   startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  // A bounded child runs in a kill-on-close job so a timeout also ends the
+  // helpers it started. Without job support, fall back to the direct child.
+  HANDLE job = bounded ? CreateJobObjectW(nullptr, nullptr) : nullptr;
+  if (job) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(job,
+                                 JobObjectExtendedLimitInformation,
+                                 &limits,
+                                 sizeof(limits))) {
+      CloseHandle(job);
+      job = nullptr;
+    }
+  }
+
   PROCESS_INFORMATION process{};
   const auto started = CreateProcessW(nullptr,
                                       wide.data(),
                                       nullptr,
                                       nullptr,
                                       TRUE,
-                                      0,
+                                      job ? CREATE_SUSPENDED : 0,
                                       nullptr,
                                       directory.c_str(),
                                       &startup,
@@ -127,8 +144,19 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   CloseHandle(writer);
   if (!started) {
     CloseHandle(reader);
+    if (job)
+      CloseHandle(job);
     throw std::runtime_error("cannot launch captured process: " +
                              arguments.front());
+  }
+
+  if (job) {
+    // Assign before the first instruction runs so no grandchild escapes.
+    if (!AssignProcessToJobObject(job, process.hProcess)) {
+      CloseHandle(job);
+      job = nullptr;
+    }
+    ResumeThread(process.hThread);
   }
 
   CloseHandle(process.hThread);
@@ -186,13 +214,28 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
     }
   }
 
-  if (timed_out)
+  if (timed_out) {
+    if (job)
+      TerminateJobObject(job, 1);
     TerminateProcess(process.hProcess, 1);
+  }
 
   WaitForSingleObject(process.hProcess, INFINITE);
   DWORD status = 1;
   GetExitCodeProcess(process.hProcess, &status);
   CloseHandle(process.hProcess);
+  if (job) {
+    // A completed child's remaining helpers are not ours to end: clear
+    // kill-on-close before releasing the job.
+    if (!timed_out) {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+      SetInformationJobObject(job,
+                              JobObjectExtendedLimitInformation,
+                              &limits,
+                              sizeof(limits));
+    }
+    CloseHandle(job);
+  }
   result.status = static_cast<int>(status);
 #else
   // Allocate before fork: the child performs only native descriptor/exec work.
@@ -205,23 +248,45 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   if (pipe(descriptors) != 0)
     throw std::runtime_error("cannot create child output pipe");
 
+  // A bounded child leads its own process group so a timeout can end the
+  // helpers it started. Outside the terminal's foreground group it must not
+  // read the terminal (SIGTTIN would stop it), so stdin is /dev/null.
+  const int null_input = bounded ? open("/dev/null", O_RDONLY) : -1;
+  if (bounded && null_input < 0) {
+    close(descriptors[0]);
+    close(descriptors[1]);
+    throw std::runtime_error("cannot open /dev/null for captured process");
+  }
+
   const auto child = fork();
   if (child < 0) {
     close(descriptors[0]);
     close(descriptors[1]);
+    if (null_input >= 0)
+      close(null_input);
     throw std::runtime_error("cannot fork captured process");
   }
 
   if (child == 0) {
     close(descriptors[0]);
     constexpr auto setup_failure = 126, execution_failure = 127;
-    if (dup2(descriptors[1], STDOUT_FILENO) < 0 ||
+    if ((bounded &&
+         (setpgid(0, 0) != 0 || dup2(null_input, STDIN_FILENO) < 0)) ||
+        dup2(descriptors[1], STDOUT_FILENO) < 0 ||
         (merge_stderr && dup2(descriptors[1], STDERR_FILENO) < 0) ||
         chdir(directory.c_str()) != 0)
       _exit(setup_failure);
     close(descriptors[1]);
+    if (null_input >= 0)
+      close(null_input);
     execvp(argv.front(), argv.data());
     _exit(execution_failure);
+  }
+
+  if (null_input >= 0) {
+    close(null_input);
+    // Also set the group from the parent: either call may run first.
+    (void)setpgid(child, child);
   }
 
   close(descriptors[1]);
@@ -272,13 +337,21 @@ ProcessOutput capture(const std::vector<std::string> &arguments,
   }
 
   close(descriptors[0]);
+  // The group outlives its reaped leader while helpers remain; its ID cannot
+  // be reused until they exit, so signalling it after a timeout stays safe.
+  if (timed_out && reaped)
+    kill(-child, SIGKILL);
+
   // A reaped PID may be reused: never signal or wait for it again.
   while (!reaped) {
     if (expired())
       timed_out = true;
 
-    if (timed_out)
+    if (timed_out) {
+      if (bounded)
+        kill(-child, SIGKILL);
       kill(child, SIGKILL);
+    }
 
     if (const auto waited = waitpid(child, &status, bounded ? WNOHANG : 0);
         waited == child)

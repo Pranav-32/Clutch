@@ -105,9 +105,10 @@ the CMake project provider and optional developer tools.
 
 Debugger discovery probes startup before launching a session. Optional merged
 stderr keeps failed runtime initialization in a concise candidate diagnostic;
-bounded capture terminates and reaps its direct child on timeout, and completes
-once that child exits even if a grandchild still holds the output pipe. It does
-not terminate grandchildren. Ordinary capture
+bounded capture runs its child in a Windows job object or POSIX process group
+(with stdin from the null device) and terminates that whole tree on timeout. It
+completes once the direct child exits even if a helper still holds the output
+pipe, and leaves such helpers of a finished child running. Ordinary capture
 retains inherited stderr and its existing behavior. Discovery does not import
 IDE settings, activate an SDK environment or guarantee ABI compatibility. See
 [tool selection](usage.md#configure-then-build) for supported locations and overrides.
