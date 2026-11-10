@@ -52,9 +52,14 @@ class ToolDiscoveryTests(unittest.TestCase):
 class WorkflowExecutionTests(unittest.TestCase):
     """Bound concurrency and keep examples exercising their public workflows."""
 
+    def test_parallelism_follows_runner_cores_up_to_the_cap(self):
+        self.assertEqual(ci.MAXIMUM_DEFAULT_JOBS, 4)
+
     def test_parallelism_is_bounded_and_validated(self):
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(ci.job_count('CLUTCH_TEST_JOBS'), str(ci.DEFAULT_JOB_COUNT))
+        for cores, expected in ((None, '1'), (1, '1'), (3, '3'), (4, '4'), (64, '4')):
+            with self.subTest(cores=cores), patch.dict(os.environ, {}, clear=True), \
+                    patch.object(ci.os, 'cpu_count', return_value=cores):
+                self.assertEqual(ci.job_count('CLUTCH_TEST_JOBS'), expected)
         for value in ('0', '-1', 'unlimited', '', '2 --extra', '\u0662'):
             with self.subTest(value=value), patch.dict(os.environ, {'CLUTCH_TEST_JOBS': value}):
                 with self.assertRaisesRegex(ValueError, 'positive integer'):

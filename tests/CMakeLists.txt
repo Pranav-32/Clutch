@@ -166,6 +166,23 @@ if (CLUTCH_TEST_SELF_HOSTING AND NOT (Python3_Interpreter_FOUND AND CLUTCH_API_N
     message(FATAL_ERROR "Self-hosting verification requires Python 3.9+, Ninja and a C compiler")
 endif ()
 if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
+    # Long compiler-backed suites run as SHARDS CTest entries named <name>.<n>;
+    # together they run every test exactly once (tests/integration/sharding.py).
+    # The suite name is also a label, so `ctest -L <name>` selects all shards.
+    # COST is the measured slowest-host seconds per shard: without saved cost
+    # data, CTest then starts the longest work first instead of last.
+    function(clutch_sharded_suite name script shards cost)
+        set(command "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/${script}"
+                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
+                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+        math(EXPR last "${shards} - 1")
+        foreach (index RANGE ${last})
+            add_test(NAME ${name}.${index} COMMAND ${command})
+            set_tests_properties(${name}.${index} PROPERTIES
+                    ENVIRONMENT "CLUTCH_TEST_SHARD=${index}/${shards}"
+                    LABELS "${name}" COST ${cost} TIMEOUT 240)
+        endforeach ()
+    endfunction ()
     # Opt in explicitly: this compiles the complete tool twice, independently of
     # the short functional suites used in ordinary edit/test cycles.
     if (CLUTCH_TEST_SELF_HOSTING)
@@ -194,11 +211,7 @@ if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
             --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
     set_tests_properties(clutch.watch PROPERTIES TIMEOUT 240)
     # Compile shipped feature examples unchanged, including relocated source bundles.
-    add_test(NAME clutch.feature-examples
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/feature_examples_integration.py"
-            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
-    set_tests_properties(clutch.feature-examples PROPERTIES TIMEOUT 240)
+    clutch_sharded_suite(clutch.feature-examples feature_examples_integration.py 2 36)
     add_test(NAME clutch.configured-files
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/configured_files_integration.py"
             --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
@@ -223,28 +236,15 @@ if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
     set_tests_properties(clutch.stress-integration PROPERTIES LABELS "stress" TIMEOUT 240)
     find_program(CLUTCH_TEST_CMAKE NAMES cmake)
     if (CLUTCH_TEST_CMAKE)
-        add_test(NAME clutch.cmake-projects
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/cmake_project_integration.py"
-                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
-        set_tests_properties(clutch.cmake-projects PROPERTIES TIMEOUT 240)
-        add_test(NAME clutch.foreign-dependencies
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/foreign_dependencies_integration.py"
-                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+        clutch_sharded_suite(clutch.cmake-projects cmake_project_integration.py 2 38)
+        clutch_sharded_suite(clutch.foreign-dependencies foreign_dependencies_integration.py 4 42)
     endif ()
     add_test(NAME clutch.file-api
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/file_api_integration.py"
             --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
             --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
-    add_test(NAME clutch.targets
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/targets_integration.py"
-            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
-    add_test(NAME clutch.workspace
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/workspace_integration.py"
-            --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-            --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+    clutch_sharded_suite(clutch.targets targets_integration.py 3 44)
+    clutch_sharded_suite(clutch.workspace workspace_integration.py 2 28)
     find_program(CLUTCH_TEST_GIT NAMES git)
     if (CLUTCH_TEST_GIT)
         # Shipped package examples run offline by default. Real GitHub/CUDA
@@ -255,9 +255,6 @@ if (Python3_Interpreter_FOUND AND CLUTCH_API_NINJA AND CLUTCH_API_CC)
                     --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
                     --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
         endif ()
-        add_test(NAME clutch.dependencies
-                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/integration/dependencies_integration.py"
-                --clutch "$<TARGET_FILE:clutch>" --cc "${CLUTCH_API_CC}"
-                --cxx "${CMAKE_CXX_COMPILER}" --ninja "${CLUTCH_API_NINJA}" -v)
+        clutch_sharded_suite(clutch.dependencies dependencies_integration.py 3 25)
     endif ()
 endif ()

@@ -138,9 +138,17 @@ List registered tests before relying on a run; missing tools can omit optional
 suites. CI and the POSIX verification runner require the relevant integration
 registrations.
 
+Long compiler-backed suites (`foreign-dependencies`, `targets`, `dependencies`,
+`cmake-projects`, `feature-examples` and `workspace`) are registered as shards
+named `<suite>.<n>`, so they run in parallel; together the shards run every test
+of the suite exactly once. The suite name is also a label: `ctest -L
+clutch.targets` runs all of its shards. Running a suite's script directly still
+runs all of its tests.
+
 ```sh
 ctest --test-dir build-native -N
 ctest --test-dir build-native -R 'targets|workspace|file-api' --output-on-failure
+ctest --test-dir build-native -L clutch.foreign-dependencies --parallel 4
 python -m unittest discover -s tests/tooling -p 'test_*.py' -v
 ```
 

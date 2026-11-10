@@ -17,6 +17,8 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+import sharding
+
 # Bound the test-only Git-hook handshake independently of compiler timestamps.
 CHECKOUT_HANDSHAKE_TIMEOUT_SECONDS = 30
 CHECKOUT_HOOK_POLL_SECONDS = 0.05
@@ -795,4 +797,4 @@ if __name__ == '__main__':
     for name in ('clutch', 'cc', 'cxx', 'ninja'):
         parser.add_argument('--' + name, required=True)
     OPTIONS, remaining = parser.parse_known_args()
-    unittest.main(argv=[sys.argv[0], *remaining])
+    sharding.main([sys.argv[0], *remaining])

@@ -12,6 +12,8 @@ import sys
 import tempfile
 import unittest
 
+import sharding
+
 
 class CMakeProjectTests(unittest.TestCase):
     """Fixtures are top-level projects; no network or framework download is needed."""
@@ -291,4 +293,4 @@ if __name__ == '__main__':
     parser.add_argument('--ninja', required=True)
     OPTIONS, remaining = parser.parse_known_args()
     OPTIONS.clutch = str(Path(OPTIONS.clutch).resolve())
-    unittest.main(argv=[sys.argv[0], *remaining])
+    sharding.main([sys.argv[0], *remaining])

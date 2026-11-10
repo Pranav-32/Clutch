@@ -12,6 +12,8 @@ import sys
 import tempfile
 import unittest
 
+import sharding
+
 
 # Leave a full clock tick between a manifest edit and native timestamp rules,
 # including filesystems/tools that compare modification times in whole seconds.
@@ -419,4 +421,4 @@ if __name__ == '__main__':
     for option in ('clutch', 'cc', 'cxx', 'ninja'):
         parser.add_argument('--' + option, required=True)
     OPTIONS, arguments = parser.parse_known_args()
-    unittest.main(argv=[sys.argv[0], *arguments])
+    sharding.main([sys.argv[0], *arguments])

@@ -12,6 +12,7 @@ import sys
 import unittest
 
 import dependencies_integration as fixtures
+import sharding
 
 
 class ForeignTests(unittest.TestCase):
@@ -705,4 +706,4 @@ if __name__ == '__main__':
         parser.add_argument('--' + field, required=True)
     OPTIONS, remaining = parser.parse_known_args()
     fixtures.OPTIONS = OPTIONS
-    unittest.main(argv=[sys.argv[0], *remaining])
+    sharding.main([sys.argv[0], *remaining])

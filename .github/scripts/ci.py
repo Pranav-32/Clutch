@@ -21,8 +21,15 @@ from release import INSTALLER_TARGETS, ROOT, TARGETS, build_installer, package
 
 # Allow slow hosted runners five minutes for each compiler-backed CTest suite.
 TEST_TIMEOUT_SECONDS = 300
-# Limit nested compiler-backed suites rather than starting one per CPU core.
-DEFAULT_JOB_COUNT = 2
+# Default to the runner's cores, capped: compiler-backed suites start their own
+# processes, so more workers than cores mostly adds contention. Hosted Linux,
+# Windows and Intel macOS runners have 4 cores; Apple silicon runners have 3.
+MAXIMUM_DEFAULT_JOBS = 4
+
+
+def default_job_count():
+    """Use every runner core up to the cap; at least one job."""
+    return max(1, min(os.cpu_count() or 1, MAXIMUM_DEFAULT_JOBS))
 
 
 def run(*command, cwd=ROOT, output=None):
@@ -47,7 +54,7 @@ def require_tool(name):
 
 def job_count(variable):
     """Reject unbounded/invalid parallelism before starting any build work."""
-    value = os.environ.get(variable, str(DEFAULT_JOB_COUNT))
+    value = os.environ.get(variable, str(default_job_count()))
     if not value.isascii() or not value.isdecimal() or int(value) < 1:
         raise ValueError(f'{variable} must be a positive integer')
     return value
@@ -157,7 +164,13 @@ def build(target, build_dir, output):
     registered = json.loads(subprocess.check_output(
         ['ctest', '--test-dir', str(build_dir), '--show-only=json-v1'], text=True
     ))
-    missing = required - {test['name'] for test in registered['tests']}
+    names = {test['name'] for test in registered['tests']}
+    # Long suites register as shards <suite>.<index>; any shard proves the
+    # suite's registration, and CTest runs all of them.
+    missing = {suite for suite in required
+               if suite not in names
+               and not any(name.startswith(suite + '.') and name[len(suite) + 1:].isdecimal()
+                           for name in names)}
     if missing:
         raise RuntimeError(f'required CTest suites were not registered: {missing}')
     run('ctest', '--test-dir', build_dir, '--output-on-failure',
