@@ -45,6 +45,7 @@ then run it:
 sh install.sh                      # latest release into ~/.local/bin
 sh install.sh --version 1.2.3 --prefix /opt/clutch
 sh install.sh --modify-path        # also add the bin directory to your shell profile
+sh install.sh --target linux-x86_64-clang   # choose the Clang-built Linux binary
 ```
 
 The script verifies each archive against its published SHA-256 before
