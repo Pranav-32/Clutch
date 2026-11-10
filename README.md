@@ -134,13 +134,13 @@ The build directory contains `compile_commands.json`; see
 
 ## Feature status
 
-This table compares the checkout with the repository's `v0.4.0` release.
+This table compares the checkout with the repository's `v0.5.0` release.
 See the [changelog](docs/CHANGELOG.md) for release-specific changes.
 
 | Availability | Features |
 | --- | --- |
-| In `v0.4.0` and this checkout | C/C++ executable/library/test targets; native generators and `--jobs`; separate profiles; flexible application/member manifests; workspaces and locks; compilation databases, DOT graphs and the native file API; Git resolution, recursive submodules and update reports; local/installed imports; CMake/Make library adapters; complete CMake project delegation with presets, tests, install and packaging; limited named source catalogs; PCH; `--clean`; relocatable source bundles |
-| In this checkout, beyond `v0.4.0` | Language-aware automatic source discovery and flat/recursive patterns; automatic generator selection; configured metadata files and native self-hosting; `fmt`/`lint`/`debug`; independent debug symbols, warning arrays and opt-in profile safety; named commands and CLI lifecycle hooks; debounced native watch |
+| In `v0.5.0` and this checkout | C/C++ executable/library/test targets; native generators and `--jobs`; separate profiles; flexible application/member manifests; workspaces and locks; compilation databases, DOT graphs and the native file API; Git resolution, recursive submodules and update reports; local/installed imports; CMake/Make library adapters; complete CMake project delegation with presets, tests, install and packaging; limited named source catalogs; PCH; `--clean`; relocatable source bundles; language-aware automatic source discovery and flat/recursive patterns; automatic generator selection; configured metadata files and native self-hosting; `fmt`/`lint`/`debug`; independent debug symbols, warning arrays and opt-in profile safety; named commands and CLI lifecycle hooks; debounced native watch |
+| In this checkout, beyond `v0.5.0` | Tool discovery in IDE bundles (CLion, Visual Studio, Xcode) and standalone toolchain/package-manager directories, newest versions first; debugger startup probes and `CLUTCH_DEBUGGER`/`CLUTCH_FORMATTER`/`CLUTCH_ANALYZER` overrides; per-user Windows installer and `install.sh`; faster configuration of large projects |
 | Not implemented | Translating arbitrary CMake functions into native manifests, arbitrary foreign build systems/vcpkg recipes, CUDA device compilation and GUI telemetry |
 
 ## Contribute
