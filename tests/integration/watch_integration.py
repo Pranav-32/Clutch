@@ -26,6 +26,7 @@ class Session:
     """Read native child output continuously and bound every wait/cleanup."""
 
     def __init__(self, root, arguments, debounce=120):
+        self.debounce = debounce
         self.lines = []
         self.condition = threading.Condition()
         self.process = subprocess.Popen(
@@ -73,7 +74,9 @@ class Session:
     def quiet(self):
         """Observe several full poll/debounce windows without another cycle."""
         previous = self.cycles()
-        time.sleep(QUIET)
+        # Cover at least two debounce windows, so a longer debounce cannot
+        # hide a pending cycle; the default 120 ms keeps the 0.45 s window.
+        time.sleep(max(QUIET, 2 * self.debounce / 1000 + 0.2))
         assert self.process.poll() is None, self.output()
         assert self.cycles() == previous, self.output()
 
@@ -224,9 +227,15 @@ class WatchTests(unittest.TestCase):
         watcher.quiet()
 
     def test_bursts_outputs_and_ignored_paths(self):
-        """Coalesce edits and prevent generated trees from feeding back."""
+        """Coalesce edits and prevent generated trees from feeding back.
+
+        The burst writes six edits 20 ms apart. A heavily loaded runner can
+        stall this writer for longer than a short debounce, which correctly
+        splits the burst into two builds; an 800 ms debounce keeps the
+        intended single build unless the writer stalls that long.
+        """
         (self.root / 'assets/ignored').mkdir(parents=True)
-        watcher = self.watch('--path', 'assets', '--ignore', 'assets/ignored')
+        watcher = self.watch('--path', 'assets', '--ignore', 'assets/ignored', debounce=800)
         self.write('out-debug/noise.cpp', '#error generated output\n')
         self.write('.clutch/deps/noise.hpp', 'cache\n')
         self.write('.git/noise.cpp', 'metadata\n')
