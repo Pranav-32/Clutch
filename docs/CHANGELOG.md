@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.6.0-beta.1](https://github.com/Pranav-32/Clutch/compare/v0.5.0...v0.6.0-beta.1) (2026-11-12)
+
+
+### Features
+
+* choose the install.sh release build with --target ([eabcb0e](https://github.com/Pranav-32/Clutch/commit/eabcb0ebd262c67d18fc3e180362280510969c18))
+* discover native tools in IDE bundles and toolchain directories ([9b7e55a](https://github.com/Pranav-32/Clutch/commit/9b7e55a382c911b063e0d8bbc61220413a456805))
+* publish per-user installers beside release archives ([4071c2b](https://github.com/Pranav-32/Clutch/commit/4071c2be667880b0ed799492db97a5b62466c59e))
+
+
+### Bug Fixes
+
+* locate the installer compiler without an environment override ([b6b76f5](https://github.com/Pranav-32/Clutch/commit/b6b76f5df0dc23e9553fe798d74815a857a77d0d))
+* rebuild watch edits whose timestamps are restored after a poll ([21afa60](https://github.com/Pranav-32/Clutch/commit/21afa602e8659e3a2bf433773e3c081c9ccc67d9))
+* restore the user PATH separator style on uninstall ([2a553da](https://github.com/Pranav-32/Clutch/commit/2a553da253ef9676db1396c8cb21719286be668d))
+* retry lock directories released during acquisition ([b50d6ca](https://github.com/Pranav-32/Clutch/commit/b50d6cac9025b0248534b6aab67d3e39220c05a0))
+* search only off-PATH toolchain directories ([d20c06c](https://github.com/Pranav-32/Clutch/commit/d20c06c4f268d3cecb67a57c987ba1f143f9c87a))
+* terminate the whole process tree when a bounded capture times out ([a730e48](https://github.com/Pranav-32/Clutch/commit/a730e48bc1773945c0a1ea39963337ac11f4c48c))
+
+
+### Performance Improvements
+
+* create generator output directories once per pass ([4318e9c](https://github.com/Pranav-32/Clutch/commit/4318e9cf59515762b575f85a982d30fa5ec835e0))
+
+
+### Tests
+
+* tolerate writer stalls when coalescing watch bursts ([2c2d7b5](https://github.com/Pranav-32/Clutch/commit/2c2d7b5669bf56daf503e84031302606ee9ea795))
+
 ## [0.5.0](https://github.com/Pranav-32/Clutch/compare/v0.4.0...v0.5.0) (2026-10-24)
 
 
